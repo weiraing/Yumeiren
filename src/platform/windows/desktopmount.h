@@ -18,6 +18,10 @@ namespace fbswin {
 // sits behind the desktop icons. Returns false only when explorer is gone.
 bool ensureWorker();
 bool isWorkerValid();
+// False while mounted to the Progman fallback (which some Win11 builds refuse
+// to composite for cross-process children); the health tick keeps re-searching
+// until a real WorkerW shows up.
+bool hasRealWorker();
 
 // Parent the window to the WorkerW and place it at logicalTarget (Qt logical
 // coordinates, e.g. a QScreen::geometry()) converted to the WorkerW's physical

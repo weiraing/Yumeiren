@@ -476,8 +476,11 @@ void VideoWallpaper::evaluateSuspend()
         reasons |= SuspendBattery;
     m_suspendReasons = reasons;
 
-    // 挂载健康检查放在同一条 1s 心跳里，开销为几次窗口句柄查询
-    if (mountIsStale())
+    // 挂载健康检查放在同一条 1s 心跳里，开销为几次窗口句柄查询。
+    // Progman 兜底挂载在部分 Win11 构建上不被 DWM 合成(壁纸永不显示)，
+    // 因此兜底状态下由 scheduleMountFix 的 10s 节流持续重查，
+    // 真正的 WorkerW 一出现就自动迁入。
+    if (mountIsStale() || !fbswin::hasRealWorker())
         scheduleMountFix();
 
     const bool shouldPlay = !m_manualPaused && reasons == 0;

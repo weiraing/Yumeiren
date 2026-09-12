@@ -17,19 +17,52 @@ namespace {
 
 HWND g_workerW = nullptr;
 
+HWND findDefViewHost()
+{
+    // SHELLDLL_DefView(桌面图标层)通常在 Progman 里，个别系统在某个 WorkerW 里
+    const HWND progman = FindWindowW(L"Progman", nullptr);
+    if (progman && FindWindowExW(progman, nullptr, L"SHELLDLL_DefView", nullptr))
+        return progman;
+    for (HWND w = FindWindowExW(nullptr, nullptr, L"WorkerW", nullptr); w;
+         w = FindWindowExW(nullptr, w, L"WorkerW", nullptr))
+        if (FindWindowExW(w, nullptr, L"SHELLDLL_DefView", nullptr))
+            return w;
+    return nullptr;
+}
+
 HWND findWorkerW()
 {
-    HWND worker = nullptr;
-    EnumWindows([](HWND top, LPARAM lp) -> BOOL {
-        HWND defView = FindWindowExW(top, nullptr, L"SHELLDLL_DefView", nullptr);
-        if (defView) {
-            *reinterpret_cast<HWND *>(lp) =
-                FindWindowExW(nullptr, top, L"WorkerW", nullptr);
-            return FALSE;
-        }
-        return TRUE;
-    }, reinterpret_cast<LPARAM>(&worker));
-    return worker;
+    // 挂载点优先级：
+    //   (1) DefView 宿主之后的全屏顶层 WorkerW —— 经典布局；
+    //   (2) Progman 的全屏 WorkerW 子窗口 —— 部分 Win11 构建把 0x052C 生成的
+    //       WorkerW 挂在 Progman 下面，顶层枚举根本看不到它；
+    //   (3) 找不到就由调用方回落到 Progman 本体。
+    // 尺寸校验会拒绝 explorer 顺手的 202x56 迷你 WorkerW：窗口挂进去会被
+    // 裁剪到什么都看不见，而各项状态检查还都显示"健康"。
+    RECT full = {GetSystemMetrics(SM_XVIRTUALSCREEN),
+                 GetSystemMetrics(SM_YVIRTUALSCREEN), 0, 0};
+    full.right = full.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    full.bottom = full.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    const auto coversDesktop = [&](HWND h) {
+        RECT r;
+        return h && GetWindowRect(h, &r) && r.left <= full.left && r.top <= full.top
+               && r.right >= full.right && r.bottom >= full.bottom;
+    };
+
+    const HWND host = findDefViewHost();
+    if (host) {
+        for (HWND w = FindWindowExW(nullptr, host, L"WorkerW", nullptr); w;
+             w = FindWindowExW(nullptr, w, L"WorkerW", nullptr))
+            if (coversDesktop(w))
+                return w;
+    }
+    const HWND progman = FindWindowW(L"Progman", nullptr);
+    for (HWND w = progman ? FindWindowExW(progman, nullptr, L"WorkerW", nullptr)
+                          : nullptr;
+         w; w = FindWindowExW(progman, w, L"WorkerW", nullptr))
+        if (coversDesktop(w))
+            return w;
+    return nullptr;
 }
 
 } // namespace
@@ -39,19 +72,34 @@ bool isWorkerValid()
     return g_workerW && IsWindow(g_workerW);
 }
 
+bool isProgmanFallback()
+{
+    // FindWindowW 的标题参数传 nullptr 才能匹配无标题窗口
+    return g_workerW && g_workerW == FindWindowW(L"Progman", nullptr);
+}
+
+bool hasRealWorker()
+{
+    return isWorkerValid() && !isProgmanFallback();
+}
+
 bool ensureWorker()
 {
-    // explorer 重启后旧 WorkerW 句柄失效，需要重新查找
-    if (isWorkerValid())
+    // explorer 重启后旧 WorkerW 句柄失效，需要重新查找；Progman 兜底 mount
+    // 在部分 Win11 构建上 DWM 不合成(壁纸永不显示)，所以兜底状态下每次都
+    // 重新尝试找到真正的 WorkerW，找到即迁移。
+    if (hasRealWorker())
         return true;
+    const bool firstTry = g_workerW == nullptr;
     g_workerW = nullptr;
     HWND progman = FindWindowW(L"Progman", nullptr);
     if (!progman)
         return false;
     // The shell spawns the WorkerW asynchronously - poll for it. Bounds are
     // kept tight because this can run on the GUI thread during a health fix;
-    // worst case ~3s instead of freezing the UI for half a minute.
-    for (int attempt = 0; attempt < 10 && !g_workerW; ++attempt) {
+    // worst case ~3s on the first call, ~0.7s on the throttled re-evaluations.
+    const int attempts = firstTry ? 10 : 2;
+    for (int attempt = 0; attempt < attempts && !g_workerW; ++attempt) {
         SendMessageTimeoutW(progman, 0x052C, 0, 0, SMTO_NORMAL, 300, nullptr);
         g_workerW = findWorkerW();
         if (!g_workerW)
@@ -74,6 +122,12 @@ void mountBehindIcons(QWidget *window, const QRect &logicalTarget)
                  int(logicalTarget.x() * dpr), int(logicalTarget.y() * dpr),
                  int(logicalTarget.width() * dpr), int(logicalTarget.height() * dpr),
                  SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    // 关键：去掉 WS_EX_LAYERED。Qt 的 WindowTransparentForInput 会附带
+    // layered 样式，而 Win11 的 DWM 不合成跨进程挂载的分层子窗口——窗口
+    // 状态一切正常(IsWindowVisible/alpha=255/在播)却永远不出现在桌面上。
+    // 点击穿透只依赖 WS_EX_TRANSPARENT，剥离 layered 对透明度无影响。
+    const LONG ex = GetWindowLongW(hwnd, GWL_EXSTYLE);
+    SetWindowLongW(hwnd, GWL_EXSTYLE, ex & ~LONG(WS_EX_LAYERED));
 }
 
 void unmountWindow(QWidget *window)
