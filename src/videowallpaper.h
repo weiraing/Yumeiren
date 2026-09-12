@@ -33,8 +33,8 @@ public:
     bool isManualPaused() const { return m_manualPaused; }
     int currentIndex() const { return m_index; }
 
-    void setAutoLoop(bool on) { m_autoLoop = on; }
-    void setRandom(bool on) { m_random = on; }
+    void setAutoLoop(bool on);
+    void setRandom(bool on);
     void setPauseOnFullscreen(bool on);
     void setPauseOnBattery(bool on);
     void setReclaimMemory(bool on);
@@ -85,6 +85,7 @@ private:
     void trimMemory();
     void applyPlaybackRate(QMediaPlayer *player);
     void applyAudioPolicy(const VideoOutput &out, bool carriesAudio);
+    void applyLoopPolicy(QMediaPlayer *player);
     void emitTrackState();
 
     QStringList m_playlist;

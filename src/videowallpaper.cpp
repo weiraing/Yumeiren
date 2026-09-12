@@ -291,10 +291,12 @@ void VideoWallpaper::playIndex(int index)
     for (const VideoOutput &out : std::as_const(m_outputs)) {
         if (sameSource)
             out.player->setPosition(0); // 解码器复用，原地重播
-        else
+        else {
             out.player->setSource(url);
+            applyAudioPolicy(out, first);
+            applyLoopPolicy(out.player);
+        }
         applyPlaybackRate(out.player);
-        applyAudioPolicy(out, first);
         out.audio->setVolume(first ? qBound(0, m_volume, 100) / 100.0 : 0);
         out.audio->setMuted(!first);
         out.player->play();
@@ -473,6 +475,31 @@ void VideoWallpaper::applyAudioPolicy(const VideoOutput &out, bool carriesAudio)
     if (!out.player)
         return;
     out.player->setActiveAudioTrack(carriesAudio && m_volume > 0 ? 0 : -1);
+}
+
+// 单视频循环走后端原生 setLoops(Infinite)：EndOfMedia→setPosition(0) 的手工
+// 循环在换头瞬间解码器 seek 会清空呈现面，壁纸闪黑帧；后端循环无此间隙。
+// 多曲目列表仍走 EndOfMedia→nextTrack 手动推进(需要切源)。
+void VideoWallpaper::applyLoopPolicy(QMediaPlayer *player)
+{
+    if (!player)
+        return;
+    const bool seamlessLoop = m_autoLoop && !m_random && m_playlist.size() == 1;
+    player->setLoops(seamlessLoop ? QMediaPlayer::Infinite : QMediaPlayer::Once);
+}
+
+void VideoWallpaper::setAutoLoop(bool on)
+{
+    m_autoLoop = on;
+    for (const VideoOutput &out : std::as_const(m_outputs))
+        applyLoopPolicy(out.player);
+}
+
+void VideoWallpaper::setRandom(bool on)
+{
+    m_random = on;
+    for (const VideoOutput &out : std::as_const(m_outputs))
+        applyLoopPolicy(out.player);
 }
 
 // FrameScheduler 状态机：汇总全部挂起原因(全屏/锁屏/显示器关闭/电池)，
