@@ -1,8 +1,10 @@
 #include "videowallpaper.h"
 
 #include "appinfo.h"
+#include "platform/windows/desktopmount.h"
 
 #include <QAudioOutput>
+#include <QElapsedTimer>
 #include <QGuiApplication>
 #include <QMediaMetaData>
 #include <QMediaPlayer>
@@ -11,102 +13,6 @@
 #include <QTimer>
 #include <QUrl>
 #include <QVideoWidget>
-
-#include <windows.h>
-#include <psapi.h>
-
-// 桌面 hosts icons inside SHELLDLL_DefView on a WorkerW window. After
-// sending 0x052C to Progman, an extra WorkerW is spawned BEHIND that one; our
-// windows are parented to it, so video renders behind the icons but above the
-// plain wallpaper.
-namespace {
-
-HWND g_workerW = nullptr;
-
-// FrameScheduler 状态检测(均为一次性系统调用，1s 轮询开销可忽略)
-bool isForegroundFullscreen()
-{
-    const HWND fg = GetForegroundWindow();
-    if (!fg)
-        return false;
-    RECT r;
-    if (!GetWindowRect(fg, &r))
-        return false;
-    const QRect wr(r.left, r.top, r.right - r.left + 1, r.bottom - r.top + 1);
-    for (QScreen *s : QGuiApplication::screens())
-        if (wr == s->geometry())
-            return true;
-    return false;
-}
-
-bool isWorkstationLocked()
-{
-    // 锁屏时输入桌面切换到 Winlogon，OpenInputDesktop 会失败
-    HDESK desk = OpenInputDesktop(0, FALSE, GENERIC_READ);
-    if (!desk)
-        return true;
-    CloseDesktop(desk);
-    return false;
-}
-
-bool isOnBattery()
-{
-    SYSTEM_POWER_STATUS s;
-    if (!GetSystemPowerStatus(&s))
-        return false;
-    if (s.BatteryFlag & 128)
-        return false; // 无电池(台式机)
-    return s.ACLineStatus == 0;
-}
-
-HWND findWorkerW()
-{
-    HWND worker = nullptr;
-    EnumWindows([](HWND top, LPARAM lp) -> BOOL {
-        HWND defView = FindWindowExW(top, nullptr, L"SHELLDLL_DefView", nullptr);
-        if (defView) {
-            *reinterpret_cast<HWND *>(lp) =
-                FindWindowExW(nullptr, top, L"WorkerW", nullptr);
-            return FALSE;
-        }
-        return TRUE;
-    }, reinterpret_cast<LPARAM>(&worker));
-    return worker;
-}
-
-bool ensureWorker()
-{
-    // explorer 重启后旧 WorkerW 句柄失效，需要重新查找
-    if (g_workerW && IsWindow(g_workerW))
-        return true;
-    g_workerW = nullptr;
-    HWND progman = FindWindowW(L"Progman", nullptr);
-    if (!progman)
-        return false;
-    // The shell spawns the WorkerW asynchronously - poll for it.
-    for (int attempt = 0; attempt < 30 && !g_workerW; ++attempt) {
-        SendMessageTimeoutW(progman, 0x052C, 0, 0, SMTO_NORMAL, 1000, nullptr);
-        g_workerW = findWorkerW();
-        if (!g_workerW)
-            Sleep(100);
-    }
-    if (!g_workerW)
-        g_workerW = progman; // fallback: still renders behind the icons
-    return true;
-}
-
-void mountBehindIcons(QWidget *window)
-{
-    HWND hwnd = reinterpret_cast<HWND>(window->winId());
-    // 挂到 WorkerW 后坐标为物理像素，需按设备像素比换算(忽略会导致高 DPI 下不满屏)
-    const qreal dpr = window->devicePixelRatioF();
-    SetParent(hwnd, g_workerW);
-    SetWindowPos(hwnd, HWND_BOTTOM, 0, 0,
-                 int(window->width() * dpr), int(window->height() * dpr),
-                 SWP_NOACTIVATE | SWP_FRAMECHANGED);
-}
-
-} // namespace
 
 VideoWallpaper &VideoWallpaper::instance()
 {
@@ -123,10 +29,14 @@ VideoWallpaper::~VideoWallpaper()
 // 资源所有权说明：VideoOutput 中的 widget/player/audio 均由 m_outputs 独占持有，
 // 统一通过 teardownOutputs() 的 deleteLater 销毁。这里必须用异步删除——teardown
 // 可能被播放器的信号链(EndOfMedia → nextTrack)间接触发，同步 delete 会析构正在
-// 发信号的 sender 造成 use-after-free。
+// 发信号的 sender 造成 use-after-free。WorkerW 挂载与系统探测在
+// platform/windows/desktopmount.cpp，本类只保留播放控制与状态机。
 
 VideoWallpaper::VideoWallpaper(QObject *parent) : QObject(parent)
 {
+    m_mountFixClock = new QElapsedTimer();
+    m_mountFixClock->start();
+
     m_fullscreenTimer = new QTimer(this);
     m_fullscreenTimer->setInterval(1000);
     connect(m_fullscreenTimer, &QTimer::timeout, this, &VideoWallpaper::evaluateSuspend);
@@ -135,18 +45,33 @@ VideoWallpaper::VideoWallpaper(QObject *parent) : QObject(parent)
     m_reclaimTimer = new QTimer(this);
     m_reclaimTimer->setInterval(30000);
     connect(m_reclaimTimer, &QTimer::timeout, this, [this] {
-        // 播放中裁剪工作集会把活跃的视频缓冲换出，引起卡顿与页面错误；
-        // 只在暂停/停止的空闲期回收，内存收益相同且零播放开销。
-        if (m_reclaimMemory && !isPlaying())
+        // 仅在“故意空闲”(已完全停止/手动暂停/被挂起原因暂停)时裁剪工作集。
+        // 播放中曲目切换的 EndOfMedia 边界 isPlaying() 会短暂为 false，此时
+        // 裁剪会把活跃的视频缓冲换出，引起卡顿与页面错误。
+        const bool deliberateIdle =
+            m_outputs.isEmpty() || m_manualPaused || m_suspendReasons != 0;
+        if (m_reclaimMemory && deliberateIdle)
             trimMemory();
     });
     m_reclaimTimer->start();
+
+    // 分辨率/DPI/显示器热插拔变化 → 防抖后重建布局(仅播放中有效)。
+    // QScreen 没有 devicePixelRatioChanged 信号；DPI 变化会同时触发 geometryChanged。
+    const auto screens = QGuiApplication::screens();
+    for (QScreen *s : screens)
+        connect(s, &QScreen::geometryChanged, this, &VideoWallpaper::scheduleRelayout);
+    connect(qGuiApp, &QGuiApplication::screenAdded, this, &VideoWallpaper::scheduleRelayout);
+    connect(qGuiApp, &QGuiApplication::screenRemoved, this, &VideoWallpaper::scheduleRelayout);
 }
 
 void VideoWallpaper::setPlaylist(const QStringList &files)
 {
+    const QString current = (m_index >= 0 && m_index < m_playlist.size())
+                                ? m_playlist.at(m_index)
+                                : QString();
     m_playlist = files;
-    m_index = -1;
+    // 播放中增删曲目时按文件名保持当前曲目指针，避免状态退化为“第 0 个”
+    m_index = current.isEmpty() ? -1 : m_playlist.indexOf(current);
 }
 
 void VideoWallpaper::clearPlaylist()
@@ -160,7 +85,7 @@ void VideoWallpaper::clearPlaylist()
 void VideoWallpaper::layoutOutputs()
 {
     teardownOutputs();
-    if (!ensureWorker())
+    if (!fbswin::ensureWorker())
         return;
 
     const QList<QScreen *> screens = QGuiApplication::screens();
@@ -169,6 +94,7 @@ void VideoWallpaper::layoutOutputs()
 
     auto makeOutput = [this](const QRect &g, bool withAudio) {
         VideoOutput out;
+        out.logicalRect = g;
         out.widget = new QVideoWidget;
         out.widget->setAspectRatioMode(Qt::IgnoreAspectRatio);
         out.widget->setWindowFlags(Qt::FramelessWindowHint | Qt::Tool
@@ -185,19 +111,45 @@ void VideoWallpaper::layoutOutputs()
             if (st == QMediaPlayer::EndOfMedia)
                 nextTrack();
         });
-        // Keep the pause/resume label in sync once playback really starts.
+        // Keep the pause/resume label in sync once playback really starts, and
+        // count a successful start as proof the current file is playable.
         connect(out.player, &QMediaPlayer::playbackStateChanged, this,
                 [this](QMediaPlayer::PlaybackState st) {
-            if (st == QMediaPlayer::PlayingState && m_index >= 0)
-                emit playbackStateChanged(QStringLiteral("第 %1 个 播放中").arg(m_index + 1));
+            if (st == QMediaPlayer::PlayingState) {
+                m_errorStreak = 0;
+                m_lastErrorText.clear();
+                emitTrackState();
+            }
         });
         // 元数据就绪后应用帧率上限(此时才知道视频原生帧率)
         connect(out.player, &QMediaPlayer::metaDataChanged, this,
                 [this, out] { applyPlaybackRate(out.player); });
+        // 解码/打开失败 → 提示并自动跳过；连续失败铺满列表即整体停播。
+        // 只有首个输出参与推进(MirrorAll 的副本播放器会对同一文件重复报错)。
+        connect(out.player, &QMediaPlayer::errorOccurred, this,
+                [this, out](QMediaPlayer::Error, const QString &msg) {
+            if (!m_started || m_outputs.isEmpty()
+                || out.player != m_outputs.first().player)
+                return;
+            ++m_errorStreak;
+            if (m_errorStreak >= m_playlist.size()) {
+                emit playbackStateChanged(
+                    QStringLiteral("所有视频都无法播放（%1），已停止").arg(msg));
+                stopAll();
+                return;
+            }
+            const QString text =
+                QStringLiteral("第 %1 个无法播放（%2），自动跳过").arg(m_index + 1).arg(msg);
+            if (text != m_lastErrorText) {
+                m_lastErrorText = text;
+                emit playbackStateChanged(text);
+            }
+            QTimer::singleShot(200, this, &VideoWallpaper::advanceOnError);
+        });
 
         out.widget->setGeometry(g);
         out.widget->show();
-        mountBehindIcons(out.widget);
+        fbswin::mountBehindIcons(out.widget, g);
         m_outputs.append(out);
     };
 
@@ -216,19 +168,61 @@ void VideoWallpaper::layoutOutputs()
 
 void VideoWallpaper::remountOutputs()
 {
-    // 轻量重挂载：只修正父窗口与 z 序，不重建解码管线(避免换曲时资源反复销毁)。
-    // 已挂载且尺寸正确的窗口直接跳过，消除每圈的 SetParent/SetWindowPos churn。
+    // 轻量重挂载：只修正父窗口与位置，不重建解码管线(避免换曲时资源反复销毁)。
+    // 位置与尺寸都比对物理像素，纠正历史遗留的错误坐标。
     for (const VideoOutput &out : std::as_const(m_outputs)) {
-        HWND hwnd = reinterpret_cast<HWND>(out.widget->winId());
         const qreal dpr = out.widget->devicePixelRatioF();
-        const int w = int(out.widget->width() * dpr);
-        const int h = int(out.widget->height() * dpr);
-        RECT r;
-        if (g_workerW && GetParent(hwnd) == g_workerW && GetWindowRect(hwnd, &r)
-            && r.right - r.left == w && r.bottom - r.top == h)
+        const QRect phys(int(out.logicalRect.x() * dpr), int(out.logicalRect.y() * dpr),
+                         int(out.logicalRect.width() * dpr),
+                         int(out.logicalRect.height() * dpr));
+        if (fbswin::isWindowMounted(out.widget, phys))
             continue; // 已在正确位置
-        mountBehindIcons(out.widget);
+        fbswin::mountBehindIcons(out.widget, out.logicalRect);
     }
+}
+
+// Explorer 重启会连带销毁挂载在 WorkerW 下的壁纸窗口；探测到失联后由
+// scheduleMountFix 重新查找 WorkerW 并重挂载(节流 10s，避免 shell 恢复期空转)。
+bool VideoWallpaper::mountIsStale() const
+{
+    if (m_outputs.isEmpty())
+        return false;
+    QVideoWidget *w = m_outputs.first().widget;
+    if (!w)
+        return false;
+    const qreal dpr = w->devicePixelRatioF();
+    const VideoOutput &out = m_outputs.first();
+    const QRect phys(int(out.logicalRect.x() * dpr), int(out.logicalRect.y() * dpr),
+                     int(out.logicalRect.width() * dpr),
+                     int(out.logicalRect.height() * dpr));
+    return !fbswin::isWindowMounted(w, phys);
+}
+
+void VideoWallpaper::scheduleMountFix()
+{
+    if (m_mountFixClock->isValid() && m_mountFixClock->elapsed() < 10000)
+        return;
+    m_mountFixClock->restart();
+    if (!fbswin::ensureWorker())
+        return;
+    remountOutputs();
+}
+
+void VideoWallpaper::scheduleRelayout()
+{
+    if (!m_started || m_outputs.isEmpty() || m_relayoutPending)
+        return;
+    m_relayoutPending = true;
+    // DPI/几何变化会连发多个信号，防抖合并成一次重建
+    QTimer::singleShot(600, this, [this] {
+        m_relayoutPending = false;
+        if (!m_started || m_outputs.isEmpty())
+            return;
+        layoutOutputs();
+        if (!m_playlist.isEmpty())
+            playIndex(qMax(0, m_index));
+        evaluateSuspend();
+    });
 }
 
 void VideoWallpaper::teardownOutputs()
@@ -237,8 +231,7 @@ void VideoWallpaper::teardownOutputs()
         if (out.player)
             out.player->stop();
         if (out.widget) {
-            HWND hwnd = reinterpret_cast<HWND>(out.widget->winId());
-            SetParent(hwnd, nullptr);
+            fbswin::unmountWindow(out.widget);
             out.widget->hide();
             out.widget->deleteLater();
         }
@@ -297,7 +290,7 @@ void VideoWallpaper::playIndex(int index)
         out.player->play();
         first = false;
     }
-    emit playbackStateChanged(QStringLiteral("第 %1 个 播放中").arg(m_index + 1));
+    emitTrackState();
 }
 
 void VideoWallpaper::nextTrack()
@@ -316,6 +309,19 @@ void VideoWallpaper::nextTrack()
         next = 0;
     }
     playIndex(next);
+}
+
+// 解码失败自动跳转的收口：挂起/手动暂停期间只换源不强行播放
+void VideoWallpaper::advanceOnError()
+{
+    if (!m_started || m_outputs.isEmpty() || m_playlist.isEmpty())
+        return;
+    nextTrack();
+    if (m_manualPaused || m_suspendReasons != 0) {
+        for (const VideoOutput &out : std::as_const(m_outputs))
+            if (out.player)
+                out.player->pause();
+    }
 }
 
 bool VideoWallpaper::startPlaying(QString *error)
@@ -339,6 +345,7 @@ void VideoWallpaper::pauseResume()
         return;
     m_manualPaused = isPlaying(); // 正在播 → 用户要暂停；已暂停(含自动挂起) → 用户要继续
     evaluateSuspend();
+    emitTrackState();
 }
 
 void VideoWallpaper::stopAll()
@@ -351,6 +358,8 @@ void VideoWallpaper::stopAll()
     m_started = false;
     m_manualPaused = false;
     m_suspendReasons = 0;
+    m_errorStreak = 0;
+    m_lastErrorText.clear();
     if (m_reclaimMemory)
         trimMemory(); // 停止后立即把解码器释放后的内存还给系统，不等下一个回收周期
     emit playbackStateChanged(QStringLiteral("已停止"));
@@ -437,6 +446,7 @@ void VideoWallpaper::setVolume(int percent)
 // FrameScheduler 状态机：汇总全部挂起原因(全屏/锁屏/显示器关闭/电池)，
 // 任一原因存在即暂停解码与呈现，全部消失且用户未手动暂停则自动续播。
 // 不渲染的瞬间 CPU/GPU 占用趋近于零，恢复时解码器原地续用，无重建开销。
+// 同时承担壁纸窗口健康检查(Explorer 重启恢复)。
 void VideoWallpaper::evaluateSuspend()
 {
     if (!m_started) {
@@ -445,22 +455,26 @@ void VideoWallpaper::evaluateSuspend()
     }
 
     int reasons = 0;
-    if (m_pauseOnFullscreen && isForegroundFullscreen())
+    if (m_pauseOnFullscreen && fbswin::isForegroundFullscreen())
         reasons |= SuspendFullscreen;
-    if (isWorkstationLocked())
+    if (fbswin::isWorkstationLocked())
         reasons |= SuspendLocked;
     if (!m_monitorOn)
         reasons |= SuspendMonitorOff;
-    if (m_pauseOnBattery && isOnBattery())
+    if (m_pauseOnBattery && fbswin::isOnBattery())
         reasons |= SuspendBattery;
     m_suspendReasons = reasons;
+
+    // 挂载健康检查放在同一条 1s 心跳里，开销为几次窗口句柄查询
+    if (mountIsStale())
+        scheduleMountFix();
 
     const bool shouldPlay = !m_manualPaused && reasons == 0;
     const bool wasPlaying = isPlaying();
     if (shouldPlay && !wasPlaying) {
         for (const VideoOutput &out : std::as_const(m_outputs))
             out.player->play();
-        emit playbackStateChanged(QStringLiteral("第 %1 个 播放中").arg(m_index + 1));
+        emitTrackState();
         m_lastEmittedReasons = 0;
         return;
     }
@@ -470,7 +484,7 @@ void VideoWallpaper::evaluateSuspend()
         if (m_reclaimMemory) {
             // 暂停后解码器队列逐渐排空，稍等片刻再把工作集还给系统
             QTimer::singleShot(2000, this, [this] {
-                if (!isPlaying())
+                if (!isPlaying() && (m_manualPaused || m_suspendReasons != 0))
                     trimMemory();
             });
         }
@@ -497,8 +511,15 @@ void VideoWallpaper::setReclaimMemory(bool on)
 
 void VideoWallpaper::trimMemory()
 {
-    // Return pages to the OS; playback pages them back in as needed.
-    SetProcessWorkingSetSize(GetCurrentProcess(), SIZE_T(-1), SIZE_T(-1));
+    fbswin::trimProcessMemory();
+}
+
+void VideoWallpaper::emitTrackState()
+{
+    if (m_index >= 0)
+        emit playbackStateChanged(QStringLiteral("第 %1 个 播放中").arg(m_index + 1));
+    else
+        emit playbackStateChanged(QStringLiteral("播放中"));
 }
 
 void VideoWallpaper::setAutostart(bool on)

@@ -917,6 +917,12 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     m_playBtn->setObjectName(QStringLiteral("PrimaryButton"));
     m_playBtn->setMinimumHeight(40);
     connect(m_playBtn, &QPushButton::clicked, this, &MainWindow::startVideo);
+    m_pauseBtn = new QPushButton(QStringLiteral("暂停"), leftCard);
+    m_pauseBtn->setMinimumHeight(40);
+    m_pauseBtn->setEnabled(false);
+    connect(m_pauseBtn, &QPushButton::clicked, this, [] {
+        VideoWallpaper::instance().pauseResume();
+    });
     m_stopBtn = new QPushButton(QStringLiteral("取消"), leftCard);
     m_stopBtn->setMinimumHeight(40);
     m_stopBtn->setEnabled(false);
@@ -924,6 +930,7 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     auto *playRow = new QHBoxLayout();
     playRow->setSpacing(10);
     playRow->addWidget(m_playBtn, 1);
+    playRow->addWidget(m_pauseBtn, 1);
     playRow->addWidget(m_stopBtn, 1);
     leftLay->addLayout(playRow);
 
@@ -2320,8 +2327,13 @@ void MainWindow::updateVideoButtons()
     const bool empty = VideoWallpaper::instance().playlist().isEmpty();
     const bool started = VideoWallpaper::instance().isStarted();
 
-    m_playBtn->setEnabled(!empty && !started); // 运行中由“取消”接管
+    m_playBtn->setEnabled(!empty && !started); // 运行中由“暂停/继续”与“取消”接管
     m_stopBtn->setEnabled(started);
+    if (m_pauseBtn) {
+        m_pauseBtn->setEnabled(started);
+        m_pauseBtn->setText(VideoWallpaper::instance().isManualPaused()
+                                ? QStringLiteral("继续") : QStringLiteral("暂停"));
+    }
 }
 
 void MainWindow::uninstallAll()

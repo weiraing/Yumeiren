@@ -155,6 +155,7 @@ private:
     QCheckBox *m_autostartBox = nullptr;
     QComboBox *m_screenModeCombo = nullptr;
     QPushButton *m_playBtn = nullptr;
+    QPushButton *m_pauseBtn = nullptr;
     QPushButton *m_stopBtn = nullptr;
     QComboBox *m_fpsBox = nullptr;
     QLabel *m_videoStatus = nullptr;

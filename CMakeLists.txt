@@ -22,6 +22,7 @@ set(YUMEIREN_SOURCES
     src/imageprocess.cpp
     src/engine.cpp
     src/videowallpaper.cpp
+    src/platform/windows/desktopmount.cpp
 )
 
 qt_add_executable(Yumeiren WIN32

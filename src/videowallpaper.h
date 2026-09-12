@@ -2,14 +2,15 @@
 #define VIDEOWALLPAPER_H
 
 #include <QObject>
+#include <QRect>
 #include <QString>
 #include <QStringList>
 
 class QMediaPlayer;
 class QAudioOutput;
 class QVideoWidget;
+class QElapsedTimer;
 class QTimer;
-
 // Live wallpaper: plays videos in frameless windows mounted behind the desktop
 // icons (WorkerW). Rendering goes through QVideoWidget (GPU path, no per-frame
 // CPU conversion) so memory stays flat while it plays.
@@ -29,6 +30,7 @@ public:
     void pauseResume();
     void stopAll();
     bool isPlaying() const;
+    bool isManualPaused() const { return m_manualPaused; }
     int currentIndex() const { return m_index; }
 
     void setAutoLoop(bool on) { m_autoLoop = on; }
@@ -67,15 +69,21 @@ private:
         QVideoWidget *widget = nullptr;
         QMediaPlayer *player = nullptr;
         QAudioOutput *audio = nullptr;
+        QRect logicalRect; // 期望的逻辑几何(所在屏幕/覆盖区域)，重挂载时换算物理坐标比对
     };
     bool ensureOutputs(QString *error);
     void layoutOutputs();
     void remountOutputs();
+    bool mountIsStale() const;
+    void scheduleMountFix();
+    void scheduleRelayout();
     void teardownOutputs();
     void playIndex(int index);
     void nextTrack();
+    void advanceOnError();
     void trimMemory();
     void applyPlaybackRate(QMediaPlayer *player);
+    void emitTrackState();
 
     QStringList m_playlist;
     int m_index = -1;
@@ -94,6 +102,14 @@ private:
     int m_suspendReasons = 0;      // 当前生效的挂起原因
     int m_lastEmittedReasons = -1; // 去重：挂起原因不变时不重复发状态文本
     int m_targetFps = 30;          // 帧率上限(0=跟随视频原生帧率)
+
+    // 错误恢复：连续失败达到播放列表长度即整体停播，成功起播即清零
+    int m_errorStreak = 0;
+    QString m_lastErrorText;       // 同一错误只发一次状态
+
+    // Explorer 重启 / 窗口失效修复的节流
+    QElapsedTimer *m_mountFixClock = nullptr;
+    bool m_relayoutPending = false;
 
     QList<VideoOutput> m_outputs;
     QTimer *m_fullscreenTimer = nullptr;
