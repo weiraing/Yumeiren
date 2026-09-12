@@ -99,6 +99,25 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     // 标题栏自绘方案：保留 WS_THICKFRAME(圆角/阴影/贴边由 DWM 提供)，
     // 通过 WM_NCCALCSIZE 隐藏系统标题栏，WM_NCHITTEST 实现边缘缩放与标题拖动。
 
+    // 立刻恢复上次的视频壁纸：媒体打开+解码器初始化约需 1.5-2s，必须赶在
+    // 界面构建(图片库缩略图等)之前起跑，否则壁纸要多等近一秒才出现。
+    // 失败提示延迟到事件循环启动(日志控件就绪)后再补发。
+    {
+        QSettings early = appinfo::settings();
+        const QStringList earlyPlaylist =
+            early.value(QStringLiteral("video/playlist")).toStringList();
+        if (!earlyPlaylist.isEmpty()
+            && early.value(QStringLiteral("video/wasPlaying"), false).toBool()) {
+            VideoWallpaper::instance().setPlaylist(earlyPlaylist);
+            QString err;
+            if (!VideoWallpaper::instance().startPlaying(&err)) {
+                const QString msg = err.isEmpty()
+                    ? QStringLiteral("视频壁纸自动恢复失败") : err;
+                QTimer::singleShot(0, this, [this, msg] { setLog(msg, true); });
+            }
+        }
+    }
+
     // Effect presets collected from the three projects' default configs.
     m_effectPresets = {
         {QStringLiteral("亚克力 · 浅色"),
@@ -198,16 +217,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
             applyTheme(0);
     });
 
-    // resume the video wallpaper saved from the last session
-    QSettings st = appinfo::settings();
-    if (!VideoWallpaper::instance().playlist().isEmpty()
-        && st.value(QStringLiteral("video/wasPlaying"), false).toBool()) {
-        QString err;
-        if (!VideoWallpaper::instance().startPlaying(&err))
-            setLog(QStringLiteral("视频壁纸自动恢复失败：%1").arg(err), true);
-        else
-            setLog(QStringLiteral("已恢复上次的视频壁纸。"), false);
-    }
+    // 上次的视频壁纸已在构造函数开头恢复(抢先于界面构建)；loadSettings 会把
+    // 音量/帧率/多屏等设置应用到已存在的播放管线。
 
     // TEMPORARY diagnostic build hook: FBS_COMBO_DEBUG=<dir> walks every combo box,
     // opens its popup and writes metrics plus a rendered PNG into that directory.

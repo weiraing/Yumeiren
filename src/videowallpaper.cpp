@@ -278,6 +278,11 @@ void VideoWallpaper::playIndex(int index)
             break;
         }
     }
+    if (!sameSource) {
+        // 媒体打开+解码器初始化需要 1-2s，立刻给出状态反馈避免“点了没反应”
+        emit playbackStateChanged(
+            QStringLiteral("第 %1 个 打开中…").arg(m_index + 1));
+    }
     bool first = true;
     for (const VideoOutput &out : std::as_const(m_outputs)) {
         if (sameSource)
