@@ -13,6 +13,12 @@ if(MSVC)
     add_compile_options(/utf-8)
 endif()
 
+# app.rc is UTF-8 too; windres otherwise decodes it with the ANSI codepage and
+# the version-info strings (FileDescription/ProductName) turn into mojibake.
+if(MINGW)
+    set(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -c 65001")
+endif()
+
 find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets)
 
 set(YUMEIREN_SOURCES
