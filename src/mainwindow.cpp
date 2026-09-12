@@ -16,25 +16,34 @@
 #include <QEvent>
 #include <QFileInfo>
 #include <QFrame>
+#include <QAbstractItemView>
 #include <QGuiApplication>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListView>
+#include <QDir>
+#include <QImage>
 #include <QListWidget>
 #include <QMouseEvent>
 #include <QPointer>
 #include <QWindow>
 #include <QPushButton>
+#include <QPainterPath>
+#include <QRegion>
+#include <QAbstractScrollArea>
+#include <QScrollBar>
 #include <QScrollArea>
 #include <QSettings>
 #include <QStackedWidget>
 #include <QStyledItemDelegate>
 #include <QTextStream>
 #include <QThreadPool>
+#include <functional>
 #include <QStyle>
 #include <QStyleHints>
+#include <QTimer>
 #include <QUrl>
 #include <QScreen>
 #include <QVBoxLayout>
@@ -76,6 +85,10 @@ protected:
 };
 
 } // namespace
+
+// Defined next to the combo popup helpers; only ever called from the diagnostic hook
+// at the end of the constructor, and declared here because the constructor comes first.
+void runComboSelfTest(QWidget *window);
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 {
@@ -195,6 +208,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
         else
             setLog(QStringLiteral("已恢复上次的视频壁纸。"), false);
     }
+
+    // TEMPORARY diagnostic build hook: FBS_COMBO_DEBUG=<dir> walks every combo box,
+    // opens its popup and writes metrics plus a rendered PNG into that directory.
+    if (qEnvironmentVariableIsSet("FBS_COMBO_DEBUG"))
+        runComboSelfTest(this);
 }
 
 QWidget *MainWindow::buildTitleBar()
@@ -275,6 +293,7 @@ QWidget *MainWindow::buildSidebar()
     themeRow->addWidget(themeLbl);
     m_themeCombo = new QComboBox(sideCard);
     m_themeCombo->addItems({QStringLiteral("跟随系统"), QStringLiteral("亮色"), QStringLiteral("深色")});
+    styleCombo(m_themeCombo);
     connect(m_themeCombo, &QComboBox::currentIndexChanged, this, [this](int idx) {
         QSettings st = appinfo::settings();
         st.setValue(QStringLiteral("ui/theme"), idx);
@@ -628,6 +647,7 @@ QWidget *MainWindow::buildImagePage()
     rightLay->addWidget(m_comboEffect);
 
     auto *btnRow = new QHBoxLayout();
+    btnRow->setSpacing(10);
     m_applyImageBtn = new QPushButton(QStringLiteral("应用图片背景"), rightCard);
     m_applyImageBtn->setObjectName(QStringLiteral("PrimaryButton"));
     auto *resetBtn = new QPushButton(QStringLiteral("恢复默认(卸载)"), rightCard);
@@ -635,7 +655,7 @@ QWidget *MainWindow::buildImagePage()
     connect(m_applyImageBtn, &QPushButton::clicked, this, &MainWindow::applyImage);
     connect(resetBtn, &QPushButton::clicked, this, &MainWindow::uninstallAll);
     btnRow->addWidget(m_applyImageBtn, 1);
-    btnRow->addWidget(resetBtn);
+    btnRow->addWidget(resetBtn, 1);
     rightLay->addLayout(btnRow);
 
     lay->addWidget(rightCard, 5);
@@ -730,6 +750,7 @@ QWidget *MainWindow::buildEffectPage()
                              QStringLiteral("3 - Blur(Clear) 纯模糊"),
                              QStringLiteral("4 - MicaAlt(仅 Win11)")});
     m_effectCombo->setCurrentIndex(1);
+    styleCombo(m_effectCombo);
     grid->addWidget(m_effectCombo, 0, 1, 1, 3);
 
     m_lightColorBtn = new QPushButton(QStringLiteral("亮色混合"), card);
@@ -800,6 +821,7 @@ QWidget *MainWindow::buildEffectPage()
     btnCard->setObjectName(QStringLiteral("PageCard"));
     auto *btnLay = new QHBoxLayout(btnCard);
     btnLay->setContentsMargins(14, 12, 14, 12);
+    btnLay->setSpacing(10);
     m_applyEffectBtn = new QPushButton(QStringLiteral("应用效果样式"), btnCard);
     m_applyEffectBtn->setObjectName(QStringLiteral("PrimaryButton"));
     auto *resetBtn = new QPushButton(QStringLiteral("恢复默认(卸载)"), btnCard);
@@ -807,7 +829,7 @@ QWidget *MainWindow::buildEffectPage()
     connect(m_applyEffectBtn, &QPushButton::clicked, this, &MainWindow::applyEffect);
     connect(resetBtn, &QPushButton::clicked, this, &MainWindow::uninstallAll);
     btnLay->addWidget(m_applyEffectBtn, 1);
-    btnLay->addWidget(resetBtn);
+    btnLay->addWidget(resetBtn, 1);
     lay->addWidget(btnCard);
 
     lay->addStretch(1);
@@ -947,6 +969,7 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     m_screenModeCombo = new QComboBox(leftCard);
     m_screenModeCombo->addItems({QStringLiteral("主屏显示"), QStringLiteral("全屏拉伸"),
                                  QStringLiteral("多屏镜像")});
+    styleCombo(m_screenModeCombo);
     modeRow->addWidget(m_screenModeCombo, 1);
     leftLay->addLayout(modeRow);
 
@@ -958,6 +981,7 @@ QWidget *MainWindow::buildVideoWallpaperPage()
                         QStringLiteral("24 FPS"), QStringLiteral("30 FPS"),
                         QStringLiteral("60 FPS")});
     m_fpsBox->setCurrentIndex(3); // 默认 30 FPS
+    styleCombo(m_fpsBox);
     m_fpsBox->setToolTip(QStringLiteral(
         "限制壁纸呈现帧率：视频帧率高于上限时按上限放慢呈现节奏(画面为慢动作效果)；"
         "“跟随视频”保持原生帧率"));
@@ -1104,15 +1128,18 @@ QWidget *MainWindow::buildWebWallpaperPage()
     refreshCombo->addItems({QStringLiteral("实时渲染"), QStringLiteral("每分钟刷新"),
                             QStringLiteral("每小时刷新")});
     refreshCombo->setDisabled(true);
+    styleCombo(refreshCombo);
     grid->addWidget(refreshCombo, 0, 1);
     grid->addWidget(new QLabel(QStringLiteral("交互模式"), card), 1, 0);
     auto *interCombo = new QComboBox(card);
     interCombo->addItems({QStringLiteral("允许鼠标交互"), QStringLiteral("仅展示(穿透点击)")});
     interCombo->setDisabled(true);
+    styleCombo(interCombo);
     grid->addWidget(interCombo, 1, 1);
     cardLay->addLayout(grid);
 
     auto *btnRow = new QHBoxLayout();
+    btnRow->setSpacing(10);
     auto *applyBtn = new QPushButton(QStringLiteral("应用网页壁纸"), card);
     applyBtn->setObjectName(QStringLiteral("PrimaryButton"));
     applyBtn->setDisabled(true);
@@ -1120,7 +1147,7 @@ QWidget *MainWindow::buildWebWallpaperPage()
     resetBtn->setObjectName(QStringLiteral("DangerButton"));
     resetBtn->setDisabled(true);
     btnRow->addWidget(applyBtn, 1);
-    btnRow->addWidget(resetBtn);
+    btnRow->addWidget(resetBtn, 1);
     cardLay->addLayout(btnRow);
 
     lay->addWidget(card);
@@ -1589,6 +1616,330 @@ void MainWindow::applyTheme(int mode)
         m_darkTheme = dark;
         updateImagePreview(); // re-render the mock in the matching scheme
     }
+}
+
+namespace {
+
+// Everything here has to stay in step with the popup rules in style.qss/light.qss:
+constexpr int kItemPadV = 8;      // ::item padding, top and bottom
+constexpr int kItemPadH = 12;     // ::item padding, left and right
+constexpr int kItemGapV = 2;      // ::item margin, top and bottom
+constexpr int kItemGapH = 3;      // ::item margin, left and right
+constexpr int kPopupRadius = 12;  // #ComboContainer border-radius
+constexpr int kPopupGutter = 6;   // space between the panel edge and the first row
+
+// A combo popup is a menu-style list, and the delegate Qt gives it sizes a row from the
+// font alone: it never sees the padding and margin the stylesheet puts on ::item, so the
+// popup lands a row or two short and answers by bringing up a scrollbar. This delegate
+// reports the box the stylesheet actually paints, which is what lets Qt size the popup
+// around the whole list on its own.
+class ComboItemDelegate : public QStyledItemDelegate
+{
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override
+    {
+        QSize hint = QStyledItemDelegate::sizeHint(option, index);
+        QFont font = option.font;
+        if (const auto *view = qobject_cast<const QWidget *>(parent()))
+            font.resolve(view->font());
+        const QFontMetrics fm(font);
+        hint.setHeight(fm.height() + 2 * (kItemPadV + kItemGapV));
+        hint.setWidth(qMax(hint.width(),
+                           fm.horizontalAdvance(index.data(Qt::DisplayRole).toString())
+                               + 2 * (kItemPadH + kItemGapH)));
+        return hint;
+    }
+};
+
+// Qt shows the popup in a top-level QFrame of its own. That frame is square, and it is
+// all that sits behind the item view: leave it unpainted and the backing store comes
+// through as a black plate, round only the view and the two borders stack up. So the
+// frame takes the rounded panel from the stylesheet and this helper clips its corners.
+class ComboPopupShape : public QObject
+{
+public:
+    explicit ComboPopupShape(QComboBox *combo)
+        : QObject(combo), m_combo(combo)
+    {
+        if (QAbstractItemView *view = combo->view()) {
+            view->setItemDelegate(new ComboItemDelegate(view));
+            view->installEventFilter(this);
+        }
+        combo->installEventFilter(this);
+        styleFrame();
+    }
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        switch (event->type()) {
+        case QEvent::ChildAdded:
+            // The popup frame is built lazily; retry once the child object is complete.
+            if (watched == m_combo)
+                QMetaObject::invokeMethod(this, [this] { styleFrame(); }, Qt::QueuedConnection);
+            break;
+        case QEvent::Show:
+            styleFrame();
+            clipCorners();
+            break;
+        case QEvent::Resize:
+            if (watched == m_frame)
+                clipCorners();
+            break;
+        default:
+            break;
+        }
+        return false;
+    }
+
+private:
+    void styleFrame()
+    {
+        QAbstractItemView *view = m_combo ? m_combo->view() : nullptr;
+        QWidget *frame = view ? view->parentWidget() : nullptr;
+        if (!frame || frame == m_frame)
+            return;
+        m_frame = frame;
+        frame->setObjectName(QStringLiteral("ComboContainer"));
+        frame->setAttribute(Qt::WA_StyledBackground, true);
+        if (auto *box = qobject_cast<QFrame *>(frame)) {
+            box->setFrameShape(QFrame::NoFrame);
+            box->setFrameShadow(QFrame::Plain);
+        }
+        // The panel deliberately keeps no layout margins of its own: Qt sizes the popup
+        // from the row hints plus the border and pays no attention to margins set here,
+        // so anything added at this level only eats the rows. The space around the list
+        // comes from the ::item margin instead, which the hints do account for.
+        // The name lands after the frame was first polished, so the style has to be
+        // told to look the rules up again or the panel keeps its palette grey.
+        frame->style()->unpolish(frame);
+        frame->style()->polish(frame);
+        frame->update();
+        frame->installEventFilter(this);
+        clipCorners();
+    }
+
+    void clipCorners()
+    {
+        QWidget *frame = m_frame;
+        if (!frame || frame->width() <= 2 * kPopupRadius || frame->height() <= 2 * kPopupRadius)
+            return;
+        QPainterPath path;
+        path.addRoundedRect(frame->rect(), kPopupRadius, kPopupRadius);
+        frame->setMask(QRegion(path.toFillPolygon().toPolygon()));
+    }
+
+    QComboBox *m_combo = nullptr;
+    QPointer<QWidget> m_frame;
+};
+
+} // namespace
+
+// TEMPORARY diagnostic hook, not part of a normal run: FBS_COMBO_DEBUG points at a
+// directory, and this opens every combo box in the window once per theme, writes down
+// the geometry Qt settled on, saves a picture of the popup, and then quits.
+void runComboSelfTest(QWidget *window)
+{
+    const QString dirPath =
+        QString::fromLocal8Bit(qEnvironmentVariable("FBS_COMBO_DEBUG").toUtf8());
+    QDir().mkpath(dirPath);
+    const QList<QComboBox *> boxes = window->findChildren<QComboBox *>();
+
+    auto record = [dirPath](const QString &line) {
+        QFile file(dirPath + QStringLiteral("/combo-debug.txt"));
+        if (file.open(QIODevice::Append | QIODevice::Text))
+            QTextStream(&file) << line << '\n';
+    };
+
+    auto applyQss = [record](bool dark) {
+        QFile f(dark ? QStringLiteral(":/style.qss") : QStringLiteral(":/light.qss"));
+        const QByteArray data =
+            f.open(QIODevice::ReadOnly | QIODevice::Text) ? f.readAll() : QByteArray();
+        if (auto *app = qobject_cast<QApplication *>(QApplication::instance())) {
+            app->setStyleSheet(QString::fromUtf8(data));
+            record(QStringLiteral("\n=== theme %1 === open=%2 read=%3 appCss=%4")
+                       .arg(dark ? QStringLiteral("dark") : QStringLiteral("light"))
+                       .arg(f.error() == QFileDevice::NoError)
+                       .arg(data.size())
+                       .arg(app->styleSheet().size()));
+        }
+    };
+
+    auto step = std::make_shared<std::function<void(int, int)>>();
+    *step = [boxes, record, applyQss, dirPath, step, window](int theme, int i) {
+        if (i >= boxes.size()) {
+            if (theme == 0)
+                (*step)(1, 0);
+            else
+                QApplication::quit();
+            return;
+        }
+        if (i == 0)
+            applyQss(theme == 1);
+
+        QComboBox *combo = boxes.at(i);
+        // Half of these live on a page of the stacked settings view, so bring that page
+        // forward first; a hidden combo box refuses to open its popup.
+        for (QWidget *w = combo; w && w != combo->window(); w = w->parentWidget())
+            if (auto *stack = qobject_cast<QStackedWidget *>(w->parentWidget()))
+                stack->setCurrentWidget(w);
+
+        // Probe matrix: the popup frame only exists after the first show, so open and
+        // close once to get it built, then hang a different selector form on each of
+        // the first five combos and see which one the painter actually obeys.
+        combo->showPopup();
+        combo->hidePopup();
+        QAbstractItemView *probeView = combo->view();
+        QWidget *probeFrame = probeView ? probeView->window() : nullptr;
+        if (probeView)
+            probeView->setStyleSheet(QString());
+        if (probeFrame)
+            probeFrame->setStyleSheet(QString());
+        switch (i) {
+        case 0:
+            break; // baseline: the app-level #ComboPopup rules as they stand
+        case 1: // local rule on the view, bare class selector
+            probeView->setStyleSheet(QStringLiteral(
+                "QAbstractItemView::item { background:#ffffff; color:#000000;"
+                " padding:8px 12px; margin:2px 3px; }"
+                "QAbstractItemView::item:selected { background:#00ff00; color:#000000; }"));
+            break;
+        case 2: // local rule on the view, id selector
+            probeView->setStyleSheet(QStringLiteral(
+                "#ComboPopup::item { background:#ffffff; color:#000000;"
+                " padding:8px 12px; margin:2px 3px; }"
+                "#ComboPopup::item:selected { background:#00ff00; color:#000000; }"));
+            break;
+        case 3: // local rule on the view, wildcard
+            probeView->setStyleSheet(QStringLiteral("QWidget { background:#ffd0d0; }"));
+            break;
+        case 4: // local rule on the popup frame
+            if (probeFrame)
+                probeFrame->setStyleSheet(QStringLiteral(
+                    "QFrame { background:#ffe0a0; border:2px solid #ff0000;"
+                    " border-radius:12px; }"));
+            break;
+        default:
+            break;
+        }
+        combo->showPopup();
+        QTimer::singleShot(300, combo, [combo, record, dirPath, theme, i, step, window] {
+            QAbstractItemView *view = combo->view();
+            QWidget *frame = view ? view->window() : nullptr;
+            auto *scroll = qobject_cast<QAbstractScrollArea *>(view);
+            if (!view || !frame || !scroll || !scroll->viewport()) {
+                record(QStringLiteral("[%1] %2: no popup").arg(i).arg(combo->objectName()));
+                (*step)(theme, i + 1);
+                return;
+            }
+            // Which popup does Qt really open: the QListView, or a QMenu behind our back?
+            QString tops;
+            const QList<QWidget *> wids = QApplication::allWidgets();
+            for (QWidget *w : wids) {
+                if (!w->isVisible() || !w->isWindow() || w == window)
+                    continue;
+                tops += QStringLiteral(" [%1 obj=%2 %3x%4]")
+                            .arg(QString::fromLatin1(w->metaObject()->className()))
+                            .arg(w->objectName())
+                            .arg(w->width())
+                            .arg(w->height());
+            }
+            record(QStringLiteral("[%1] hint SH_ComboBox_Popup=%2 viewClass=%3 viewObj=%4 "
+                                  "viewVisible=%5 frameClass=%6 frameObj=%7 styleClass=%8 "
+                                  "appCssBytes=%9 popupTops=%10")
+                       .arg(i)
+                       .arg(combo->style()->styleHint(QStyle::SH_ComboBox_Popup, nullptr, combo))
+                       .arg(QString::fromLatin1(view->metaObject()->className()))
+                       .arg(view->objectName())
+                       .arg(view->isVisible())
+                       .arg(QString::fromLatin1(frame->metaObject()->className()))
+                       .arg(frame->objectName())
+                       .arg(QString::fromLatin1(view->style()->metaObject()->className()))
+                       .arg(qobject_cast<QApplication *>(QApplication::instance())
+                                ? qobject_cast<QApplication *>(QApplication::instance())
+                                      ->styleSheet().size()
+                                : -1)
+                       .arg(tops));
+            QScrollBar *bar = scroll->verticalScrollBar();
+            int content = 0;
+            QString rows;
+            for (int r = 0; r < combo->count(); ++r) {
+                content += view->sizeHintForRow(r);
+                const QRect vr = view->visualRect(combo->model()->index(r, 0));
+                rows += QStringLiteral("    row%1 hint=%2 at %3,%4 %5x%6\n")
+                            .arg(r)
+                            .arg(view->sizeHintForRow(r))
+                            .arg(vr.x())
+                            .arg(vr.y())
+                            .arg(vr.width())
+                            .arg(vr.height());
+            }
+            const bool fits = bar->maximum() == 0 && content <= scroll->viewport()->height();
+            record(QStringLiteral("[%1] %2 items=%3 %4 | frame=%5x%6 view=%7x%8 vp=%9x%10 "
+                                 "chrome=%11 margins=%12,%13,%14,%15 delegate=%16 barMax=%17")
+                       .arg(i)
+                       .arg(combo->objectName().isEmpty() ? combo->metaObject()->className()
+                                                          : combo->objectName())
+                       .arg(combo->count())
+                       .arg(fits ? QStringLiteral("FITS") : QStringLiteral("SCROLLS"))
+                       .arg(frame->width())
+                       .arg(frame->height())
+                       .arg(view->width())
+                       .arg(view->height())
+                       .arg(scroll->viewport()->width())
+                       .arg(scroll->viewport()->height())
+                       .arg(frame->height() - scroll->viewport()->height())
+                       .arg(view->contentsMargins().left())
+                       .arg(view->contentsMargins().top())
+                       .arg(view->contentsMargins().right())
+                       .arg(view->contentsMargins().bottom())
+                       .arg(view->itemDelegate() ? view->itemDelegate()->metaObject()->className()
+                                                 : QStringLiteral("none"))
+                       .arg(bar->maximum())
+                   + rows);
+
+            // Grab at the ratio the popup is really shown at, so the picture says what
+            // the screen will instead of what a shrunken copy of it looks like.
+            const qreal dpr = frame->devicePixelRatioF();
+            QImage image(QSize(qRound(frame->width() * dpr), qRound(frame->height() * dpr)),
+                         QImage::Format_ARGB32_Premultiplied);
+            image.setDevicePixelRatio(dpr);
+            image.fill(Qt::transparent);
+            frame->render(&image);
+            image.save(dirPath + QStringLiteral("/%1-%2.png")
+                                   .arg(theme)
+                                   .arg(i, 2, 10, QLatin1Char('0')));
+            combo->hidePopup();
+            QTimer::singleShot(120, combo, [combo, step, theme, i] {
+                combo->setCurrentIndex(0);
+                (*step)(theme, i + 1);
+            });
+        });
+    };
+    QTimer::singleShot(1200, window, [step] { (*step)(0, 0); });
+}
+
+void MainWindow::styleCombo(QComboBox *combo) const
+{
+    if (combo->property("fbsShape").isValid())
+        return;
+    combo->setProperty("fbsShape", true);
+    // Qt caps the popup at this many rows and scrolls the rest, so keep the ceiling
+    // well above any list this app builds; nothing here should ever need scrolling.
+    combo->setMaxVisibleItems(32);
+    combo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+
+    QAbstractItemView *view = combo->view();
+    view->setObjectName(QStringLiteral("ComboPopup"));
+    view->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    view->setTextElideMode(Qt::ElideRight);
+    view->setSelectionBehavior(QAbstractItemView::SelectRows);
+    if (auto *list = qobject_cast<QListView *>(view))
+        list->setUniformItemSizes(true);
+
+    new ComboPopupShape(combo);
 }
 
 Engine::EffectConfig MainWindow::currentEffectConfig() const

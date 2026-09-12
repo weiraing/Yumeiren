@@ -76,6 +76,9 @@ private:
     void saveImageSettings();
     void saveEffectSettings();
     void applyTheme(int mode);
+    // Shared setup for every QComboBox: names the popup view and its top-level
+    // frame, and clips that frame to the rounded panel the stylesheet paints.
+    void styleCombo(QComboBox *combo) const;
     Engine::EffectConfig currentEffectConfig() const;
     void setImageSourceText(const QString &text);
     QString elidedTwoLineText(const QString &text, int width) const;
