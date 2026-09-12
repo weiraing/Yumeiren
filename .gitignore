@@ -1,0 +1,18 @@
+# build output
+build*/
+deploy/
+*.log
+*.bak
+
+# user-specific
+*.user
+*.autosave
+.vs/
+.vscode/
+
+# archives & temp
+*.zip
+.idea
+cmake-build-debug
+
+*.dll

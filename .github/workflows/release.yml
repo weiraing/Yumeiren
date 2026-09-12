@@ -1,0 +1,58 @@
+name: 构建并发布
+
+on:
+  push:
+    tags:
+      - 'v*'            # 推送 v 开头的标签(如 v1.0.0)时：编译并创建 Release
+  workflow_dispatch:    # 也允许在 Actions 页面手动触发(仅构建并上传 Artifact)
+
+permissions:
+  contents: write       # 创建 Release 需要写权限
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Qt 6.10 (MSVC 64 位)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.10.2'          # 若镜像暂缺此版本可改为 6.9.2
+          arch: 'win64_msvc2022_64'
+          cache: true
+
+      - name: 配置 CMake (MSVC, Release)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: 编译 Yumeiren
+        run: cmake --build build --config Release --target Yumeiren
+
+      - name: 部署 Qt 运行时并压缩为便携版
+        shell: pwsh
+        run: |
+          $out = "build/Release"
+          # 拷贝 Qt DLL/插件与 VC 运行时到 exe 旁，做成免安装目录
+          windeployqt --release --no-translations --compiler-runtime "$out/Yumeiren.exe"
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $zip = "Yumeiren-portable-${{ github.ref_name }}-win64.zip"
+          } else {
+            $zip = "Yumeiren-portable-win64.zip"
+          }
+          Compress-Archive -Path "$out/*" -DestinationPath $zip -Force
+          "ZIP_NAME=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: 上传构建产物(Artifact,保留 7 天)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Yumeiren-portable
+          path: ${{ env.ZIP_NAME }}
+          retention-days: 7
+
+      - name: 创建 Release 并上传便携版(源码包由 GitHub 自动附带)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ZIP_NAME }}
+          generate_release_notes: true
