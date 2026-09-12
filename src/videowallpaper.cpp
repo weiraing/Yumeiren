@@ -489,6 +489,10 @@ void VideoWallpaper::evaluateSuspend()
     int reasons = 0;
     if (m_pauseOnFullscreen && fbswin::isForegroundFullscreen())
         reasons |= SuspendFullscreen;
+    // 主屏模式下，前台应用盖满主屏工作区时壁纸完全不可见，暂停白省
+    if (m_pauseOnFullscreen && m_screenMode == PrimaryScreen
+        && fbswin::isDesktopCovered())
+        reasons |= SuspendCovered;
     if (fbswin::isWorkstationLocked())
         reasons |= SuspendLocked;
     if (!m_monitorOn)
@@ -526,7 +530,9 @@ void VideoWallpaper::evaluateSuspend()
     }
     if (!shouldPlay) {
         if (reasons != m_lastEmittedReasons) {
-            if (reasons & SuspendFullscreen)
+            if (reasons & SuspendCovered)
+                emit playbackStateChanged(QStringLiteral("桌面被完全遮挡，已自动暂停"));
+            else if (reasons & SuspendFullscreen)
                 emit playbackStateChanged(QStringLiteral("检测到全屏应用，已自动暂停"));
             else if (reasons & SuspendLocked)
                 emit playbackStateChanged(QStringLiteral("系统已锁定，已自动暂停"));

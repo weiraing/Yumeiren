@@ -61,7 +61,8 @@ private:
         SuspendFullscreen = 1,  // 前台全屏应用
         SuspendLocked = 2,      // 系统锁定
         SuspendMonitorOff = 4,  // 显示器关闭
-        SuspendBattery = 8      // 电池供电(用户开启后生效)
+        SuspendBattery = 8,     // 电池供电(用户开启后生效)
+        SuspendCovered = 16     // 桌面被前台窗口完全遮挡(主屏模式)
     };
 
     struct VideoOutput

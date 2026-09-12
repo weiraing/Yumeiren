@@ -37,6 +37,11 @@ bool isWindowMounted(QWidget *window, const QRect &physicalRect);
 // exclusive fullscreen). Comparison happens in physical pixels because
 // GetWindowRect is not DPI-scaled; QScreen::geometry() is.
 bool isForegroundFullscreen();
+// True when the foreground window fully covers the primary monitor's work area
+// (i.e. a maximized normal app): the desktop wallpaper is invisible then, so
+// playback can pause without anyone noticing. Shell/explorer windows are
+// excluded so looking AT the desktop never pauses it.
+bool isDesktopCovered();
 bool isWorkstationLocked();
 bool isOnBattery();
 

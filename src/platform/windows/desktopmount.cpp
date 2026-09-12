@@ -149,16 +149,32 @@ bool isWindowMounted(QWidget *window, const QRect &physicalRect)
            && r.bottom - r.top == physicalRect.height();
 }
 
+bool isSelfOrShellProcess(HWND hwnd)
+{
+    // 自家进程与 explorer(Progman/WorkerW/DefView 等桌面层都是全屏矩形)都不算
+    // "前台全屏/遮挡"——用户看着桌面时壁纸必须照常播放
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (pid == GetCurrentProcessId())
+        return true;
+    wchar_t imagePath[MAX_PATH] = {};
+    DWORD pathLen = MAX_PATH;
+    HANDLE proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (proc) {
+        QueryFullProcessImageNameW(proc, 0, imagePath, &pathLen);
+        CloseHandle(proc);
+    }
+    const wchar_t *base = imagePath;
+    for (const wchar_t *p = imagePath; *p; ++p)
+        if (*p == L'\\' || *p == L'/')
+            base = p + 1;
+    return _wcsicmp(base, L"explorer.exe") == 0;
+}
+
 bool isForegroundFullscreen()
 {
     const HWND fg = GetForegroundWindow();
-    if (!fg)
-        return false;
-    // 自家窗口(壁纸 QVideoWidget 是屏幕大小的 Qt::Tool 窗口，可能被系统置为
-    // 前台)不构成“全屏应用”，否则壁纸会把自己误判挂起。
-    DWORD fgPid = 0;
-    GetWindowThreadProcessId(fg, &fgPid);
-    if (fgPid == GetCurrentProcessId())
+    if (!fg || isSelfOrShellProcess(fg))
         return false;
     RECT r;
     if (!GetWindowRect(fg, &r))
@@ -181,6 +197,24 @@ bool isForegroundFullscreen()
             return true;
     }
     return false;
+}
+
+bool isDesktopCovered()
+{
+    const HWND fg = GetForegroundWindow();
+    if (!fg || isSelfOrShellProcess(fg))
+        return false;
+
+    RECT r;
+    if (!GetWindowRect(fg, &r))
+        return false;
+    RECT wa;
+    if (!SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0))
+        return false;
+    // SPI_GETWORKAREA 在本进程按物理像素返回；前台窗口盖满主屏工作区即视为
+    // 桌面被完全遮挡(最大化普通窗口带边框外扩，恰好落进包含关系)
+    return r.left <= wa.left && r.top <= wa.top && r.right >= wa.right
+           && r.bottom >= wa.bottom;
 }
 
 bool isWorkstationLocked()

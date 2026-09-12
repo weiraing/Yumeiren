@@ -967,6 +967,8 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     m_randomBox = new QCheckBox(QStringLiteral("随机播放"), leftCard);
     m_fullscreenPauseBox = new QCheckBox(QStringLiteral("全屏自动暂停"), leftCard);
     m_fullscreenPauseBox->setChecked(true);
+    m_fullscreenPauseBox->setToolTip(QStringLiteral(
+        "前台应用全屏或完全遮住桌面时暂停视频壁纸(省 GPU/电量)，回到桌面 1 秒内自动恢复"));
     m_batteryBox = new QCheckBox(QStringLiteral("电池模式自动暂停"), leftCard);
     m_batteryBox->setToolTip(QStringLiteral("使用电池供电时自动暂停视频壁纸以省电，接通电源后自动恢复"));
     leftLay->addWidget(m_autoLoopBox);
