@@ -14,6 +14,10 @@
 #include <QUrl>
 #include <QVideoWidget>
 
+// 持续挂起多久后卸载解码管线(省显存/内存)，恢复时重建约需 2s。
+// YUMEIREN_LONG_SUSPEND_MS 仅用于自动化测试覆盖阈值。
+constexpr qint64 kLongSuspendReleaseMs = 180000;
+
 VideoWallpaper &VideoWallpaper::instance()
 {
     static VideoWallpaper v;
@@ -36,6 +40,7 @@ VideoWallpaper::VideoWallpaper(QObject *parent) : QObject(parent)
 {
     m_mountFixClock = new QElapsedTimer();
     m_mountFixClock->start();
+    m_suspendClock = new QElapsedTimer();
 
     m_fullscreenTimer = new QTimer(this);
     m_fullscreenTimer->setInterval(1000);
@@ -107,9 +112,15 @@ void VideoWallpaper::layoutOutputs()
 
         // Track end: advance in the playlist or stop (keeping the last frame).
         connect(out.player, &QMediaPlayer::mediaStatusChanged, this,
-                [this](QMediaPlayer::MediaStatus st) {
+                [this, out](QMediaPlayer::MediaStatus st) {
             if (st == QMediaPlayer::EndOfMedia)
                 nextTrack();
+            else if (st == QMediaPlayer::LoadedMedia && m_resumePosMs > 0) {
+                // 长挂起释放后的恢复：跳回暂停时的进度
+                out.player->setPosition(m_resumePosMs);
+                if (m_outputs.isEmpty() || out.player == m_outputs.last().player)
+                    m_resumePosMs = -1;
+            }
         });
         // Keep the pause/resume label in sync once playback really starts, and
         // count a successful start as proof the current file is playable.
@@ -261,12 +272,13 @@ bool VideoWallpaper::ensureOutputs(QString *error)
     return true;
 }
 
-void VideoWallpaper::playIndex(int index)
+void VideoWallpaper::playIndex(int index, qint64 resumePos)
 {
     if (m_playlist.isEmpty())
         return;
     m_started = true;
     m_index = qBound(0, index, m_playlist.size() - 1);
+    m_resumePosMs = resumePos;   // LoadedMedia 时消费；普通换曲传 -1 即无跳转
     QString err;
     if (!ensureOutputs(&err)) {
         emit playbackStateChanged(err);
@@ -353,8 +365,14 @@ bool VideoWallpaper::startPlaying(QString *error)
 
 void VideoWallpaper::pauseResume()
 {
-    if (m_outputs.isEmpty())
+    if (m_outputs.isEmpty()) {
+        // 长挂起已释放管线：重建并按当前状态继续(维持暂停由挂起原因决定)
+        if (m_started && !m_playlist.isEmpty()) {
+            m_manualPaused = false;
+            evaluateSuspend();
+        }
         return;
+    }
     m_manualPaused = isPlaying(); // 正在播 → 用户要暂停；已暂停(含自动挂起) → 用户要继续
     evaluateSuspend();
     // 状态文本必须反映真实结果：手动暂停发“已暂停”(按钮文字靠这条信号翻转)；
@@ -378,6 +396,7 @@ void VideoWallpaper::stopAll()
     m_suspendReasons = 0;
     m_errorStreak = 0;
     m_lastErrorText.clear();
+    m_resumePosMs = -1;
     if (m_reclaimMemory)
         trimMemory(); // 停止后立即把解码器释放后的内存还给系统，不等下一个回收周期
     emit playbackStateChanged(QStringLiteral("已停止"));
@@ -537,6 +556,18 @@ void VideoWallpaper::evaluateSuspend()
 
     const bool shouldPlay = !m_manualPaused && reasons == 0;
     const bool wasPlaying = isPlaying();
+
+    // 长挂起期间管线已被释放，现在应当恢复：重建管线并跳回暂停时的进度
+    if (shouldPlay && m_outputs.isEmpty() && !m_playlist.isEmpty()) {
+        // 节流：挂载点缺失(如 explorer 未响应)时每 5s 重试一次，不空转
+        if (!m_suspendClock->isValid() || m_suspendClock->elapsed() >= 5000) {
+            m_suspendClock->restart();
+            playIndex(qMax(0, m_index), m_resumePosMs);
+        }
+        m_lastEmittedReasons = 0;
+        return;
+    }
+
     if (shouldPlay && !wasPlaying) {
         for (const VideoOutput &out : std::as_const(m_outputs))
             out.player->play();
@@ -547,6 +578,7 @@ void VideoWallpaper::evaluateSuspend()
     if (!shouldPlay && wasPlaying) {
         for (const VideoOutput &out : std::as_const(m_outputs))
             out.player->pause();
+        m_suspendClock->restart(); // 挂起计时开始(持续挂起超阈值即释放管线)
         if (m_reclaimMemory) {
             // 暂停后解码器队列逐渐排空，稍等片刻再把工作集还给系统
             QTimer::singleShot(2000, this, [this] {
@@ -554,6 +586,18 @@ void VideoWallpaper::evaluateSuspend()
                     trimMemory();
             });
         }
+    }
+    // 持续挂起超过阈值：壁纸反正看不见，整条解码管线+呈现表面全部释放，
+    // 显存/内存回落到近空闲水平；恢复时重建并续播(代价 ~2s)
+    if (!shouldPlay && !wasPlaying && !m_outputs.isEmpty()
+        && m_suspendClock->isValid()) {
+        qint64 threshold = kLongSuspendReleaseMs;
+        if (const int overrideMs = qEnvironmentVariableIntValue(
+                "YUMEIREN_LONG_SUSPEND_MS");
+            overrideMs > 0)
+            threshold = overrideMs;
+        if (m_suspendClock->elapsed() >= threshold)
+            longSuspendRelease();
     }
     if (!shouldPlay) {
         if (reasons != m_lastEmittedReasons) {
@@ -588,6 +632,29 @@ void VideoWallpaper::emitTrackState()
         emit playbackStateChanged(QStringLiteral("第 %1 个 播放中").arg(m_index + 1));
     else
         emit playbackStateChanged(QStringLiteral("播放中"));
+}
+
+// 持续挂起(全屏/遮挡/锁屏/熄屏)超过阈值：卸载整条解码管线。暂停态下
+// 解码表面+帧池+交换链仍占着数百 MB 显存/内存，而壁纸根本不可见。
+// m_resumePosMs 记住进度，恢复时重建管线经 LoadedMedia 跳回原位置。
+void VideoWallpaper::longSuspendRelease()
+{
+    qint64 pos = -1;
+    for (const VideoOutput &out : std::as_const(m_outputs)) {
+        if (out.player) {
+            const qint64 p = out.player->position();
+            if (p > 0) {
+                pos = p;
+                break;
+            }
+        }
+    }
+    m_resumePosMs = pos;
+    teardownOutputs();
+    if (m_reclaimMemory)
+        trimMemory(); // 立刻把释放后的页还给系统
+    emit playbackStateChanged(
+        QStringLiteral("暂停较久，已释放壁纸资源；回到桌面自动恢复"));
 }
 
 void VideoWallpaper::setAutostart(bool on)

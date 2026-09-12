@@ -79,7 +79,8 @@ private:
     void scheduleMountFix();
     void scheduleRelayout();
     void teardownOutputs();
-    void playIndex(int index);
+    void longSuspendRelease();
+    void playIndex(int index, qint64 resumePos = -1);
     void nextTrack();
     void advanceOnError();
     void trimMemory();
@@ -109,6 +110,11 @@ private:
     // 错误恢复：连续失败达到播放列表长度即整体停播，成功起播即清零
     int m_errorStreak = 0;
     QString m_lastErrorText;       // 同一错误只发一次状态
+
+    // 长挂起释放：暂停持续超过阈值即卸载解码管线省显存/内存，
+    // m_resumePosMs 记录暂停位置，恢复时经 LoadedMedia 跳回
+    QElapsedTimer *m_suspendClock = nullptr;
+    qint64 m_resumePosMs = -1;
 
     // Explorer 重启 / 窗口失效修复的节流
     QElapsedTimer *m_mountFixClock = nullptr;
