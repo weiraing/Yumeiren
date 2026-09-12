@@ -345,7 +345,13 @@ void VideoWallpaper::pauseResume()
         return;
     m_manualPaused = isPlaying(); // 正在播 → 用户要暂停；已暂停(含自动挂起) → 用户要继续
     evaluateSuspend();
-    emitTrackState();
+    // 状态文本必须反映真实结果：手动暂停发“已暂停”(按钮文字靠这条信号翻转)；
+    // 请求被挂起原因拦下时 evaluateSuspend 已发出原因文本，不能再用
+    // “播放中”把它盖掉(否则画面停着、状态栏却显示播放中且不会自愈)。
+    if (isPlaying())
+        emitTrackState();
+    else if (m_manualPaused)
+        emit playbackStateChanged(QStringLiteral("已暂停"));
 }
 
 void VideoWallpaper::stopAll()
