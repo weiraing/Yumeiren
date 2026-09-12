@@ -121,9 +121,13 @@ void VideoWallpaper::layoutOutputs()
                 emitTrackState();
             }
         });
-        // 元数据就绪后应用帧率上限(此时才知道视频原生帧率)
+        // 元数据就绪后应用帧率上限(此时才知道视频原生帧率)；轨道选择也会被
+        // 后端在媒体加载时重置为默认，所以这里同时重新断言音频策略
         connect(out.player, &QMediaPlayer::metaDataChanged, this,
-                [this, out] { applyPlaybackRate(out.player); });
+                [this, out, carriesAudio = withAudio] {
+            applyAudioPolicy(out, carriesAudio);
+            applyPlaybackRate(out.player);
+        });
         // 解码/打开失败 → 提示并自动跳过；连续失败铺满列表即整体停播。
         // 只有首个输出参与推进(MirrorAll 的副本播放器会对同一文件重复报错)。
         connect(out.player, &QMediaPlayer::errorOccurred, this,
@@ -290,6 +294,7 @@ void VideoWallpaper::playIndex(int index)
         else
             out.player->setSource(url);
         applyPlaybackRate(out.player);
+        applyAudioPolicy(out, first);
         out.audio->setVolume(first ? qBound(0, m_volume, 100) / 100.0 : 0);
         out.audio->setMuted(!first);
         out.player->play();
@@ -386,7 +391,11 @@ bool VideoWallpaper::isPlaying() const
 
 void VideoWallpaper::setScreenMode(int mode)
 {
+    const int prev = m_screenMode;
     m_screenMode = qBound(0, mode, 2);
+    if (m_screenMode == prev)
+        return; // 值未变时不重建：启动时 loadSettings 会对已运行的管线重复调用，
+                // 重建会短暂保留上一代窗口，平白多出一份渲染表面
     if (!m_outputs.isEmpty()) {
         layoutOutputs();
         // 重建后恢复播放(状态机会在全屏等挂起原因下保持暂停)
@@ -450,8 +459,20 @@ void VideoWallpaper::setVolume(int percent)
     for (const VideoOutput &out : std::as_const(m_outputs)) {
         out.audio->setMuted(!first);
         out.audio->setVolume(m_volume / 100.0);
+        if (first)
+            applyAudioPolicy(out, true); // 音量归零时连音频轨一起停掉
         first = false;
     }
+}
+
+// 音频策略：音量 0(壁纸默认态)时彻底不选音频轨——AAC 解码线程、重采样器和
+// 音频设备占用全部省掉；调高音量由 setVolume 恢复。轨道选择会被后端在媒体
+// 加载时重置，playIndex 和 metaDataChanged 两处都会调用这里重新断言。
+void VideoWallpaper::applyAudioPolicy(const VideoOutput &out, bool carriesAudio)
+{
+    if (!out.player)
+        return;
+    out.player->setActiveAudioTrack(carriesAudio && m_volume > 0 ? 0 : -1);
 }
 
 // FrameScheduler 状态机：汇总全部挂起原因(全屏/锁屏/显示器关闭/电池)，

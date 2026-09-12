@@ -83,6 +83,7 @@ private:
     void advanceOnError();
     void trimMemory();
     void applyPlaybackRate(QMediaPlayer *player);
+    void applyAudioPolicy(const VideoOutput &out, bool carriesAudio);
     void emitTrackState();
 
     QStringList m_playlist;
