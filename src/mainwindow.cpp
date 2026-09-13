@@ -2319,19 +2319,39 @@ void MainWindow::removeSelectedVideos()
     const QList<QListWidgetItem *> selected = m_videoList->selectedItems();
     if (selected.isEmpty())
         return;
+    // 就地删除选中行(不重建列表)：删除后把选中迁移到同位置条目(非末项)或新的
+    // 末项——滚动位置、选中高亮都保持，支持连点删除。此前 clear+重建 的方案会让
+    // 滚动归顶、选中丢失，正是要避免的。
+    int firstRow = m_videoList->count();
     QStringList list = VideoWallpaper::instance().playlist();
-    for (QListWidgetItem *item : selected)
+    for (QListWidgetItem *item : selected) {
+        firstRow = qMin(firstRow, m_videoList->row(item));
         list.removeAll(item->data(Qt::UserRole).toString());
-    // 删除前先清选中：Qt 选择模型会把当前项迁移到被删行的相邻行，不清会导致
-    // 连点删除连锁误删；重建后再兜底清一次(重建过程可能按索引恢复选中)。
+    }
     m_videoList->clearSelection();
     m_videoList->setCurrentRow(-1);
+    for (QListWidgetItem *item : selected) {
+        const int row = m_videoList->row(item);
+        delete m_videoList->takeItem(row);
+    }
     VideoWallpaper::instance().setPlaylist(list);
     QSettings st = appinfo::settings();
     st.setValue(QStringLiteral("video/playlist"), list);
-    refreshVideoList();
-    m_videoList->clearSelection();
-    m_videoList->setCurrentRow(-1);
+    // 选中迁移到同位置(删的是末项则为新的末项)；scrollToItem 对已可见行不动滚动
+    const int target = qMin(firstRow, m_videoList->count() - 1);
+    if (target >= 0) {
+        m_videoList->setCurrentRow(target, QItemSelectionModel::SelectCurrent);
+        m_videoList->scrollToItem(m_videoList->item(target),
+                                  QAbstractItemView::EnsureVisible);
+    }
+    // 就地删除不重建列表：计数标签需要单独刷新
+    if (m_videoStatus)
+        m_videoStatus->setText(QStringLiteral("共 %1 个视频 · %2")
+                                   .arg(list.size())
+                                   .arg(VideoWallpaper::instance().isPlaying()
+                                            ? QStringLiteral("播放中") : QStringLiteral("停止")));
+    updateVideoButtons();
+    updatePlayingHighlight();
 }
 
 void MainWindow::clearVideos()
