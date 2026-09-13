@@ -171,17 +171,33 @@ void VideoWallpaper::layoutOutputs()
                 nextTrack();
             else if (st == QMediaPlayer::LoadedMedia && m_started
                      && !m_outputs.isEmpty()
-                     && out.player == m_outputs.first().player
-                     && !out.player->hasVideo()
-                     && !out.player->metaData()
-                             .value(QMediaMetaData::Resolution).isValid()) {
-                out.player->stop();
-                handleUnplayable(QStringLiteral("没有视频轨"));
-            } else if (st == QMediaPlayer::LoadedMedia && m_resumePosMs > 0) {
+                     && out.player == m_outputs.first().player) {
                 // 长挂起释放后的恢复：跳回暂停时的进度
-                out.player->setPosition(m_resumePosMs);
-                if (m_outputs.isEmpty() || out.player == m_outputs.last().player)
-                    m_resumePosMs = -1;
+                if (m_resumePosMs > 0) {
+                    out.player->setPosition(m_resumePosMs);
+                    if (m_outputs.isEmpty() || out.player == m_outputs.last().player)
+                        m_resumePosMs = -1;
+                }
+                // 无视频轨检测延迟 2s：LoadedMedia 时刻有效视频的 hasVideo 与
+                // 分辨率元数据可能尚未就绪(实测误判过正常文件)。到期后仍是
+                // 首个输出且仍加载同一 source，才判定为纯音频素材。
+                if (!m_noVideoCheckPending) {
+                    m_noVideoCheckPending = true;
+                    const QUrl src = out.player->source();
+                    QTimer::singleShot(2000, this, [this, out, src] {
+                        m_noVideoCheckPending = false;
+                        if (!m_started || m_outputs.isEmpty()
+                            || out.player != m_outputs.first().player
+                            || out.player->source() != src)
+                            return;
+                        if (!out.player->hasVideo()
+                            && !out.player->metaData()
+                                    .value(QMediaMetaData::Resolution).isValid()) {
+                            out.player->stop();
+                            handleUnplayable(QStringLiteral("没有视频轨"));
+                        }
+                    });
+                }
             }
         });
         // Keep the pause/resume label in sync once playback really starts, and
@@ -255,8 +271,10 @@ void VideoWallpaper::layoutOutputs()
                     QStringLiteral("第 %1 个打开失败（%2），重试 %3/2")
                         .arg(m_index + 1).arg(reason).arg(m_fileRetries));
                 QTimer::singleShot(delay, this, [this] {
-                    if (!m_started || m_outputs.isEmpty() || m_manualPaused
-                        || m_suspendReasons != 0)
+                    // 挂起/手动暂停期间照常重开媒体(只换源)，最终播停由
+                    // evaluateSuspend 心跳统一裁决——否则挂起窗口内的重试
+                    // 会被永久放弃，留下"已加载但无事件"的僵局(实测复现)。
+                    if (!m_started || m_outputs.isEmpty())
                         return;
                     for (const VideoOutput &out : std::as_const(m_outputs))
                         if (out.player)
@@ -492,28 +510,27 @@ void VideoWallpaper::advanceOnError()
     }
 }
 
-// 错误统一收口(阶段3)：重试耗尽或素材无视频轨时进入失败计数并跳下一曲。
-// 同一曲目累计 2 次轮转失败即入失败名单(不再参与轮换)；全部曲目入名单
-// 则整体停播。仅首个输出允许调用(防 MirrorAll 重复推进)。
+// 错误统一收口(阶段3)：重试耗尽或素材无视频轨时跳下一曲，该曲目立即进入
+// 失败名单、不再参与后续轮换——轮转重试既造成坏素材乒乓循环，也触发后端
+// 对特定媒体的重载阻塞(实测复现)；瞬态故障已由跳过前的原地重试覆盖。
+// 全部曲目入名单则整体停播。仅首个输出允许调用(防 MirrorAll 重复推进)。
 void VideoWallpaper::handleUnplayable(const QString &reason)
 {
     m_fileRetries = 0;
     const int fails = ++m_trackFails[m_index];
+    m_deadTracks.insert(m_index);
     videodiag::log(videodiag::Level::Warning,
         QStringLiteral("session=%1 曲目不可播 track=%2 fails=%3 dead=%4 reason=%5")
             .arg(m_playbackSessionId).arg(m_index + 1).arg(fails)
             .arg(m_deadTracks.size()).arg(reason));
-    if (fails >= 2)
-        m_deadTracks.insert(m_index);
     if (m_deadTracks.size() >= m_playlist.size()) {
         emit playbackStateChanged(
             QStringLiteral("所有视频都无法播放（%1），已停止").arg(reason));
         stopAll();
         return;
     }
-    const QString text = fails >= 2
-        ? QStringLiteral("第 %1 个多次失败（%2），已跳过").arg(m_index + 1).arg(reason)
-        : QStringLiteral("第 %1 个无法播放（%2），自动跳过").arg(m_index + 1).arg(reason);
+    const QString text =
+        QStringLiteral("第 %1 个无法播放（%2），已跳过").arg(m_index + 1).arg(reason);
     if (text != m_lastErrorText) {
         m_lastErrorText = text;
         emit playbackStateChanged(text);

@@ -1,0 +1,11 @@
+2026-09-13 16:26:41.961 [I] ==== 视频壁纸模块启动 (diag=on) ====
+2026-09-13 16:26:41.964 [I] VideoWallpaper 初始化完成
+2026-09-13 16:26:41.964 [I] session=1 play index=1/1 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 16:26:42.159 [D] 创建输出: players=1/0 widgets=1/0 audios=1/0
+2026-09-13 16:26:43.279 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 16:26:43.280 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 16:27:41.974 [I] teardown n=1 累计 players=1/1 widgets=1/1 audios=1/1
+2026-09-13 16:27:41.998 [I] stopAll: 管线已卸载 session=1
+2026-09-13 16:28:11.970 [I] session=2 play index=1/1 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 16:28:11.970 [D] 创建输出: players=2/1 widgets=2/1 audios=2/1
+2026-09-13 16:28:12.072 [I] 恢复播放: reasons=0 manualPaused=0

@@ -78,8 +78,8 @@ Uninitialized ──startPlaying(playlist非空)──▶ playIndex ──▶ en
 
 ## 5. 异常状态处理方式
 
-- 单文件失败：errorOccurred → 记日志(Warning) → 有限重试（500ms/1500ms 两次，阶段 3）→ 仍失败则跳下一曲并 `++m_errorStreak`；仅首个输出参与推进（MirrorAll 防重复报错）。
-- 全部失败：`m_errorStreak >= m_playlist.size()` → 状态提示 + `stopAll()`（终态，无重试循环）。
+- 单文件失败：errorOccurred → 记日志(Warning) → 有限重试（500ms/1500ms 两次，阶段 3）→ 仍失败则该曲目**立即进入失败名单**并跳下一曲（轮转重试会造成坏素材乒乓循环与后端重载阻塞，实测后移除）；仅首个输出参与推进（MirrorAll 防重复报错）。
+- 全部曲目进入失败名单：状态提示 + `stopAll()`（终态，无重试循环）。失败名单在起播/改列表/停止时清空。
 - 用户主动停止 / 系统挂起：不记为错误（stopAll 与 Suspended 均走 Info 级状态日志）。
 - 解锁/唤醒/熄屏恢复：evaluateSuspend 心跳自动恢复；长挂起走重建路径。
 - Explorer 重启：1s 心跳检测挂载失联 → 10s 节流重查 WorkerW → remount。

@@ -116,9 +116,9 @@ private:
     int m_lastEmittedReasons = -1; // 去重：挂起原因不变时不重复发状态文本
     int m_targetFps = 30;          // 帧率上限(0=跟随视频原生帧率)
 
-    // 错误恢复(阶段3)：每曲目独立失败计数；连续两次轮转失败(共 ≥2 次换曲后仍失败)
-    // 的曲目进入失败名单不再参与轮换，避免坏曲目造成每圈解码器重建的乒乓循环；
-    // 全部曲目进入名单才整体停播。起播/改列表/停止时清空。
+    // 错误恢复(阶段3)：每曲目独立失败计数；跳过一次即入失败名单(原地重试
+    // 已在跳过前完成)，不再参与后续轮换——避免坏曲目每圈解码器重建的乒乓
+    // 循环及后端重载阻塞。全部曲目进入名单才整体停播。起播/改列表/停止时清空。
     QHash<int, int> m_trackFails;
     QSet<int> m_deadTracks;
     QString m_lastErrorText;       // 同一错误只发一次状态
@@ -145,6 +145,7 @@ private:
     int m_audiosCreated = 0, m_audiosDestroyed = 0;
 
     QSize m_lastHintRes; // 阶段6 高分辨率提示去重(同一分辨率只提示一次)
+    bool m_noVideoCheckPending = false; // 阶段3 延迟无视频轨检测的去重标志
 
     // 探针专用对象(独立于 m_outputs，不参与状态机；由父对象持有至进程退出)
     QMediaPlayer *m_probePlayer = nullptr;

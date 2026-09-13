@@ -1,0 +1,22 @@
+2026-09-13 16:30:43.437 [I] ==== 视频壁纸模块启动 (diag=on) ====
+2026-09-13 16:30:43.440 [I] VideoWallpaper 初始化完成
+2026-09-13 16:30:43.440 [I] session=1 play index=1/2 file=bad_truncated.mp4 resumePos=-1
+2026-09-13 16:30:43.677 [D] 创建输出: players=1/0 widgets=1/0 audios=1/0
+2026-09-13 16:30:44.763 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 16:30:44.764 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 16:30:45.089 [W] session=1 媒体错误 file=bad_truncated.mp4 reason=格式不支持 detail=Could not open file
+2026-09-13 16:30:45.209 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 16:30:45.434 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 16:30:45.590 [I] session=2 play index=1/2 file=bad_truncated.mp4 resumePos=-1
+2026-09-13 16:30:45.594 [W] session=2 媒体错误 file=bad_truncated.mp4 reason=格式不支持 detail=Could not open file
+2026-09-13 16:30:46.444 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 16:30:47.100 [I] session=3 play index=1/2 file=bad_truncated.mp4 resumePos=-1
+2026-09-13 16:30:47.103 [W] session=3 媒体错误 file=bad_truncated.mp4 reason=格式不支持 detail=Could not open file
+2026-09-13 16:30:47.103 [W] session=3 曲目不可播 track=1 fails=1 dead=1 reason=格式不支持
+2026-09-13 16:30:47.309 [I] session=4 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 16:30:59.374 [I] session=5 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 16:31:11.385 [I] session=6 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 16:31:23.393 [I] session=7 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 16:31:35.402 [I] session=8 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 16:31:47.410 [I] session=9 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 16:31:59.421 [I] session=10 play index=2/2 file=inv_1080p30.mp4 resumePos=-1

@@ -1,0 +1,46 @@
+2026-09-13 16:23:21.740 [I] ==== 视频壁纸模块启动 (diag=on) ====
+2026-09-13 16:23:21.743 [I] VideoWallpaper 初始化完成
+2026-09-13 16:23:21.743 [I] session=1 play index=1/5 file=perf_switch1.mp4 resumePos=-1
+2026-09-13 16:23:22.011 [D] 创建输出: players=1/0 widgets=1/0 audios=1/0
+2026-09-13 16:23:23.115 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 16:23:23.116 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 16:23:28.649 [I] session=2 play index=2/5 file=perf_switch2.mp4 resumePos=-1
+2026-09-13 16:23:33.753 [I] session=3 play index=3/5 file=perf_switch3.mp4 resumePos=-1
+2026-09-13 16:23:38.836 [I] session=4 play index=4/5 file=perf_switch4.mp4 resumePos=-1
+2026-09-13 16:23:43.959 [I] session=5 play index=5/5 file=perf_switch5.mp4 resumePos=-1
+2026-09-13 16:23:48.550 [I] session=6 play index=1/5 file=perf_switch1.mp4 resumePos=-1
+2026-09-13 16:23:53.644 [I] session=7 play index=2/5 file=perf_switch2.mp4 resumePos=-1
+2026-09-13 16:23:58.733 [I] session=8 play index=3/5 file=perf_switch3.mp4 resumePos=-1
+2026-09-13 16:23:58.759 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 16:24:03.820 [I] session=9 play index=4/5 file=perf_switch4.mp4 resumePos=-1
+2026-09-13 16:24:08.913 [I] session=10 play index=5/5 file=perf_switch5.mp4 resumePos=-1
+2026-09-13 16:24:13.495 [I] session=11 play index=1/5 file=perf_switch1.mp4 resumePos=-1
+2026-09-13 16:24:18.589 [I] session=12 play index=2/5 file=perf_switch2.mp4 resumePos=-1
+2026-09-13 16:24:23.677 [I] session=13 play index=3/5 file=perf_switch3.mp4 resumePos=-1
+2026-09-13 16:24:28.791 [I] session=14 play index=4/5 file=perf_switch4.mp4 resumePos=-1
+2026-09-13 16:24:33.886 [I] session=15 play index=5/5 file=perf_switch5.mp4 resumePos=-1
+2026-09-13 16:24:38.478 [I] session=16 play index=1/5 file=perf_switch1.mp4 resumePos=-1
+2026-09-13 16:24:43.570 [I] session=17 play index=2/5 file=perf_switch2.mp4 resumePos=-1
+2026-09-13 16:24:48.660 [I] session=18 play index=3/5 file=perf_switch3.mp4 resumePos=-1
+2026-09-13 16:24:53.758 [I] session=19 play index=4/5 file=perf_switch4.mp4 resumePos=-1
+2026-09-13 16:24:53.787 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 16:24:58.841 [I] session=20 play index=5/5 file=perf_switch5.mp4 resumePos=-1
+2026-09-13 16:25:03.430 [I] session=21 play index=1/5 file=perf_switch1.mp4 resumePos=-1
+2026-09-13 16:25:08.518 [I] session=22 play index=2/5 file=perf_switch2.mp4 resumePos=-1
+2026-09-13 16:25:13.608 [I] session=23 play index=3/5 file=perf_switch3.mp4 resumePos=-1
+2026-09-13 16:25:18.691 [I] session=24 play index=4/5 file=perf_switch4.mp4 resumePos=-1
+2026-09-13 16:25:23.775 [I] session=25 play index=5/5 file=perf_switch5.mp4 resumePos=-1
+2026-09-13 16:25:28.364 [I] session=26 play index=1/5 file=perf_switch1.mp4 resumePos=-1
+2026-09-13 16:25:33.452 [I] session=27 play index=2/5 file=perf_switch2.mp4 resumePos=-1
+2026-09-13 16:25:38.534 [I] session=28 play index=3/5 file=perf_switch3.mp4 resumePos=-1
+2026-09-13 16:25:43.626 [I] session=29 play index=4/5 file=perf_switch4.mp4 resumePos=-1
+2026-09-13 16:25:48.724 [I] session=30 play index=5/5 file=perf_switch5.mp4 resumePos=-1
+2026-09-13 16:25:53.320 [I] session=31 play index=1/5 file=perf_switch1.mp4 resumePos=-1
+2026-09-13 16:25:58.463 [I] session=32 play index=2/5 file=perf_switch2.mp4 resumePos=-1
+2026-09-13 16:26:03.537 [I] session=33 play index=3/5 file=perf_switch3.mp4 resumePos=-1
+2026-09-13 16:26:08.622 [I] session=34 play index=4/5 file=perf_switch4.mp4 resumePos=-1
+2026-09-13 16:26:13.697 [I] session=35 play index=5/5 file=perf_switch5.mp4 resumePos=-1
+2026-09-13 16:26:18.270 [I] session=36 play index=1/5 file=perf_switch1.mp4 resumePos=-1
+2026-09-13 16:26:23.347 [I] session=37 play index=2/5 file=perf_switch2.mp4 resumePos=-1
+2026-09-13 16:26:28.425 [I] session=38 play index=3/5 file=perf_switch3.mp4 resumePos=-1
+2026-09-13 16:26:33.505 [I] session=39 play index=4/5 file=perf_switch4.mp4 resumePos=-1

@@ -1,0 +1,6 @@
+2026-09-13 16:21:58.341 [I] ==== 视频壁纸模块启动 (diag=on) ====
+2026-09-13 16:21:58.343 [I] VideoWallpaper 初始化完成
+2026-09-13 16:21:58.343 [I] session=1 play index=1/1 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 16:21:58.608 [D] 创建输出: players=1/0 widgets=1/0 audios=1/0
+2026-09-13 16:21:59.703 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 16:21:59.703 [I] 恢复播放: reasons=0 manualPaused=0

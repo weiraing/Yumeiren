@@ -1,0 +1,15 @@
+2026-09-13 16:32:06.428 [I] ==== 视频壁纸模块启动 (diag=on) ====
+2026-09-13 16:32:06.434 [I] VideoWallpaper 初始化完成
+2026-09-13 16:32:06.434 [I] session=1 play index=1/2 file=audio_only.mp4 resumePos=-1
+2026-09-13 16:32:06.628 [D] 创建输出: players=1/0 widgets=1/0 audios=1/0
+2026-09-13 16:32:07.800 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 16:32:07.801 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 16:32:10.154 [W] session=1 曲目不可播 track=1 fails=1 dead=1 reason=没有视频轨
+2026-09-13 16:32:10.354 [I] session=2 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 16:32:22.427 [I] session=3 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 16:32:34.439 [I] session=4 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 16:32:46.460 [I] session=5 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 16:32:58.470 [I] session=6 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 16:33:10.481 [I] session=7 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 16:33:22.492 [I] session=8 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 16:33:34.520 [I] session=9 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
