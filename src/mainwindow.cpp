@@ -1074,6 +1074,7 @@ QWidget *MainWindow::buildVideoWallpaperPage()
         strip->addWidget(b);
         return b;
     };
+    addStripBtn(QStringLiteral("扫描"), [this] { scanVideoDir(); });
     addStripBtn(QStringLiteral("添加"), [this] { addVideos(); });
     addStripBtn(QStringLiteral("删除"), [this] { removeSelectedVideos(); });
     addStripBtn(QStringLiteral("清空"), [this] { clearVideos(); });
@@ -2275,6 +2276,40 @@ void MainWindow::addVideos()
     QSettings st = appinfo::settings();
     st.setValue(QStringLiteral("video/playlist"), list);
     refreshVideoList();
+}
+
+// 扫描软件目录 media/video(含子目录)下的视频文件，去重后并入播放列表。
+// 只增不删：不影响现有条目与正在播放的曲目(setPlaylist 按文件名保持当前曲)。
+void MainWindow::scanVideoDir()
+{
+    const QString videoDir = QCoreApplication::applicationDirPath()
+                             + QStringLiteral("/media/video");
+    const QStringList nameFilters = {
+        QStringLiteral("*.mp4"),  QStringLiteral("*.webm"), QStringLiteral("*.mkv"),
+        QStringLiteral("*.avi"),  QStringLiteral("*.mov"),  QStringLiteral("*.wmv")};
+    QStringList found;
+    QDirIterator it(videoDir, nameFilters, QDir::Files, QDirIterator::Subdirectories);
+    while (it.hasNext())
+        found << it.next();
+
+    QStringList list = VideoWallpaper::instance().playlist();
+    int added = 0;
+    for (const QString &f : found) {
+        if (!list.contains(f)) {
+            list.append(f);
+            ++added;
+        }
+    }
+    if (added == 0) {
+        setLog(QStringLiteral("扫描完成：未发现新视频"), false);
+        return;
+    }
+    VideoWallpaper::instance().setPlaylist(list);
+    QSettings st = appinfo::settings();
+    st.setValue(QStringLiteral("video/playlist"), list);
+    refreshVideoList();
+    setLog(QStringLiteral("扫描完成：新增 %1 个视频(共 %2 个)")
+               .arg(added).arg(list.size()), false);
 }
 
 void MainWindow::removeSelectedVideos()

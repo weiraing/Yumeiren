@@ -31,6 +31,7 @@ private slots:
     void selectHeaderTab(int index);
     void selectWallTab(int index);
     void addVideos();
+    void scanVideoDir(); // 扫描软件目录 media/video 下的视频并入列表
     void removeSelectedVideos();
     void clearVideos();
     void startVideo();
