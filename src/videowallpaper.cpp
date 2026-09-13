@@ -14,9 +14,32 @@
 #include <QUrl>
 #include <QVideoWidget>
 
+namespace {
+
 // 持续挂起多久后卸载解码管线(省显存/内存)，恢复时重建约需 2s。
 // YUMEIREN_LONG_SUSPEND_MS 仅用于自动化测试覆盖阈值。
 constexpr qint64 kLongSuspendReleaseMs = 180000;
+
+// 阶段3 错误分类：把 QMediaPlayer::Error 映射为用户可读文本(错误处理文档见
+// docs/VIDEO_WALLPAPER_ERROR_HANDLING.md)。detail 仅在分类无法覆盖时透传。
+QString mediaErrorText(QMediaPlayer::Error err, const QString &detail)
+{
+    switch (err) {
+    case QMediaPlayer::ResourceError:
+        return QStringLiteral("资源错误（文件缺失、损坏或读取失败）");
+    case QMediaPlayer::FormatError:
+        return QStringLiteral("格式不支持");
+    case QMediaPlayer::NetworkError:
+        return QStringLiteral("网络流错误");
+    case QMediaPlayer::AccessDeniedError:
+        return QStringLiteral("访问被拒绝");
+    case QMediaPlayer::NoError:
+        break;
+    }
+    return detail.isEmpty() ? QStringLiteral("未知错误") : detail;
+}
+
+} // namespace
 
 VideoWallpaper &VideoWallpaper::instance()
 {
@@ -86,6 +109,10 @@ void VideoWallpaper::setPlaylist(const QStringList &files)
     m_playlist = files;
     // 播放中增删曲目时按文件名保持当前曲目指针，避免状态退化为“第 0 个”
     m_index = current.isEmpty() ? -1 : m_playlist.indexOf(current);
+    // 列表内容可能变化，失败名单按索引记录，必须一并失效
+    m_trackFails.clear();
+    m_deadTracks.clear();
+    m_fileRetries = 0;
 }
 
 void VideoWallpaper::clearPlaylist()
@@ -115,16 +142,30 @@ void VideoWallpaper::layoutOutputs()
                                    | Qt::WindowTransparentForInput);
         out.player = new QMediaPlayer(this);
         out.audio = new QAudioOutput(this);
+        ++m_playersCreated;
+        ++m_widgetsCreated;
+        ++m_audiosCreated;
         out.audio->setMuted(true);
         out.player->setAudioOutput(out.audio);
         out.player->setVideoOutput(out.widget);
 
         // Track end: advance in the playlist or stop (keeping the last frame).
+        // 阶段3：LoadedMedia 时先检查 hasVideo——纯音频素材对壁纸无意义：
+        // 立即 stop(否则音频继续播放且会进入 PlayingState 重置失败计数)，
+        // 然后走与错误一致的跳过链路(重试不会长出视频轨，故不重试)。
         connect(out.player, &QMediaPlayer::mediaStatusChanged, this,
                 [this, out](QMediaPlayer::MediaStatus st) {
             if (st == QMediaPlayer::EndOfMedia)
                 nextTrack();
-            else if (st == QMediaPlayer::LoadedMedia && m_resumePosMs > 0) {
+            else if (st == QMediaPlayer::LoadedMedia && m_started
+                     && !m_outputs.isEmpty()
+                     && out.player == m_outputs.first().player
+                     && !out.player->hasVideo()
+                     && !out.player->metaData()
+                             .value(QMediaMetaData::Resolution).isValid()) {
+                out.player->stop();
+                handleUnplayable(QStringLiteral("没有视频轨"));
+            } else if (st == QMediaPlayer::LoadedMedia && m_resumePosMs > 0) {
                 // 长挂起释放后的恢复：跳回暂停时的进度
                 out.player->setPosition(m_resumePosMs);
                 if (m_outputs.isEmpty() || out.player == m_outputs.last().player)
@@ -134,41 +175,78 @@ void VideoWallpaper::layoutOutputs()
         // Keep the pause/resume label in sync once playback really starts, and
         // count a successful start as proof the current file is playable.
         connect(out.player, &QMediaPlayer::playbackStateChanged, this,
-                [this](QMediaPlayer::PlaybackState st) {
+                [this, out](QMediaPlayer::PlaybackState st) {
             if (st == QMediaPlayer::PlayingState) {
-                m_errorStreak = 0;
+                // 仅“真素材成功”才恢复失败额度：无视频轨素材也会进入
+                // PlayingState(音频在播)，不能借此洗白失败计数
+                if (out.player->hasVideo()
+                    || out.player->metaData()
+                           .value(QMediaMetaData::Resolution).isValid())
+                    m_trackFails.remove(m_index);
+                m_fileRetries = 0;
                 m_lastErrorText.clear();
                 emitTrackState();
             }
         });
         // 元数据就绪后应用帧率上限(此时才知道视频原生帧率)；轨道选择也会被
-        // 后端在媒体加载时重置为默认，所以这里同时重新断言音频策略
+        // 后端在媒体加载时重置为默认，所以这里同时重新断言音频策略。
+        // 阶段6：分辨率高于主屏物理分辨率时给出一次性提示(不强制转码，
+        // 策略见 docs/VIDEO_MEDIA_COMPATIBILITY_POLICY.md)。
         connect(out.player, &QMediaPlayer::metaDataChanged, this,
                 [this, out, carriesAudio = withAudio] {
             applyAudioPolicy(out, carriesAudio);
             applyPlaybackRate(out.player);
+            const QSize res = out.player->metaData()
+                                  .value(QMediaMetaData::Resolution).toSize();
+            if (!res.isValid() || res == m_lastHintRes)
+                return;
+            m_lastHintRes = res;
+            QSize screen;
+            if (const QScreen *s = QGuiApplication::primaryScreen()) {
+                const qreal dpr = s->devicePixelRatio();
+                screen = QSize(qRound(s->geometry().width() * dpr),
+                               qRound(s->geometry().height() * dpr));
+            }
+            if (screen.isEmpty()
+                || res.width() * res.height() <= screen.width() * screen.height())
+                return;
+            // 内存估算来自归因实验阶梯：固定 ~210MB + ~88MB/百万像素(±15%)
+            const int est = qRound((210.0 + 88.0 * (double(res.width()) * res.height() / 1e6)) / 10) * 10;
+            emit playbackStateChanged(QStringLiteral(
+                "提示：视频分辨率 %1×%2 高于主屏物理分辨率，播放内存/显存占用较高"
+                "（实测约 %3MB），可继续使用或更换适配素材")
+                .arg(res.width()).arg(res.height()).arg(est));
         });
-        // 解码/打开失败 → 提示并自动跳过；连续失败铺满列表即整体停播。
-        // 只有首个输出参与推进(MirrorAll 的副本播放器会对同一文件重复报错)。
+        // 解码/打开失败 → 有限重试 → 提示并自动跳过；连续失败铺满列表即整体
+        // 停播。只有首个输出参与推进(MirrorAll 的副本播放器会对同一文件重复报错)。
         connect(out.player, &QMediaPlayer::errorOccurred, this,
-                [this, out](QMediaPlayer::Error, const QString &msg) {
+                [this, out](QMediaPlayer::Error err, const QString &msg) {
             if (!m_started || m_outputs.isEmpty()
                 || out.player != m_outputs.first().player)
                 return;
-            ++m_errorStreak;
-            if (m_errorStreak >= m_playlist.size()) {
+            const QString reason = mediaErrorText(err, msg);
+            // 有限重试(阶段3)：第1次失败 500ms 后原地重试，第2次 1500ms，
+            // 第3次放弃跳曲。重试不推进列表；退避递增，杜绝高频重建。
+            // 注意：错误态的播放器对同一 source 不会再发 errorOccurred，
+            // 重试前必须清空 source 强制后端重新打开。
+            if (m_fileRetries < 2) {
+                const int delay = m_fileRetries == 0 ? 500 : 1500;
+                ++m_fileRetries;
                 emit playbackStateChanged(
-                    QStringLiteral("所有视频都无法播放（%1），已停止").arg(msg));
-                stopAll();
+                    QStringLiteral("第 %1 个打开失败（%2），重试 %3/2")
+                        .arg(m_index + 1).arg(reason).arg(m_fileRetries));
+                QTimer::singleShot(delay, this, [this] {
+                    if (!m_started || m_outputs.isEmpty() || m_manualPaused
+                        || m_suspendReasons != 0)
+                        return;
+                    for (const VideoOutput &out : std::as_const(m_outputs))
+                        if (out.player)
+                            out.player->setSource(QUrl());
+                    playIndex(m_index);
+                });
                 return;
             }
-            const QString text =
-                QStringLiteral("第 %1 个无法播放（%2），自动跳过").arg(m_index + 1).arg(msg);
-            if (text != m_lastErrorText) {
-                m_lastErrorText = text;
-                emit playbackStateChanged(text);
-            }
-            QTimer::singleShot(200, this, &VideoWallpaper::advanceOnError);
+            handleUnplayable(reason);
         });
 
         out.widget->setGeometry(g);
@@ -258,11 +336,14 @@ void VideoWallpaper::teardownOutputs()
             fbswin::unmountWindow(out.widget);
             out.widget->hide();
             out.widget->deleteLater();
+            ++m_widgetsDestroyed;
         }
         if (out.player)
             out.player->deleteLater();
         if (out.audio)
             out.audio->deleteLater();
+        ++m_playersDestroyed;
+        ++m_audiosDestroyed;
     }
     m_outputs.clear();
 }
@@ -286,6 +367,9 @@ void VideoWallpaper::playIndex(int index, qint64 resumePos)
     if (m_playlist.isEmpty())
         return;
     m_started = true;
+    ++m_playbackSessionId; // 会话 ID：每次起播/换曲/重试自增，供诊断日志关联
+    if (index != m_index)
+        m_fileRetries = 0; // 换曲重置单文件重试额度；同 index 的重试调用保留计数
     m_index = qBound(0, index, m_playlist.size() - 1);
     m_resumePosMs = resumePos;   // LoadedMedia 时消费；普通换曲传 -1 即无跳转
     QString err;
@@ -330,16 +414,33 @@ void VideoWallpaper::nextTrack()
 {
     if (m_playlist.isEmpty())
         return;
-    int next = m_index + 1;
-    if (m_random && m_playlist.size() > 1) {
-        do { next = QRandomGenerator::global()->bounded(m_playlist.size()); }
-        while (next == m_index);
-    } else if (next >= m_playlist.size()) {
-        if (!m_autoLoop) {
-            emit playbackStateChanged(QStringLiteral("播放结束"));
-            return;
+    const int size = m_playlist.size();
+    // 失败名单里的曲目不再参与轮换(阶段3)，避免坏素材每圈触发解码器重建
+    const auto alive = [&](int i) { return !m_deadTracks.contains(i); };
+    if (m_deadTracks.size() >= size) {
+        emit playbackStateChanged(QStringLiteral("所有视频都无法播放，已停止"));
+        stopAll();
+        return;
+    }
+    if (m_random && size > 1) {
+        int next = m_index;
+        do { next = QRandomGenerator::global()->bounded(size); }
+        while (next == m_index || !alive(next));
+        playIndex(next);
+        return;
+    }
+    int next = m_index;
+    for (int step = 0; step < size; ++step) {
+        next += 1;
+        if (next >= size) {
+            if (!m_autoLoop) {
+                emit playbackStateChanged(QStringLiteral("播放结束"));
+                return;
+            }
+            next = 0;
         }
-        next = 0;
+        if (alive(next))
+            break;
     }
     playIndex(next);
 }
@@ -357,6 +458,31 @@ void VideoWallpaper::advanceOnError()
     }
 }
 
+// 错误统一收口(阶段3)：重试耗尽或素材无视频轨时进入失败计数并跳下一曲。
+// 同一曲目累计 2 次轮转失败即入失败名单(不再参与轮换)；全部曲目入名单
+// 则整体停播。仅首个输出允许调用(防 MirrorAll 重复推进)。
+void VideoWallpaper::handleUnplayable(const QString &reason)
+{
+    m_fileRetries = 0;
+    const int fails = ++m_trackFails[m_index];
+    if (fails >= 2)
+        m_deadTracks.insert(m_index);
+    if (m_deadTracks.size() >= m_playlist.size()) {
+        emit playbackStateChanged(
+            QStringLiteral("所有视频都无法播放（%1），已停止").arg(reason));
+        stopAll();
+        return;
+    }
+    const QString text = fails >= 2
+        ? QStringLiteral("第 %1 个多次失败（%2），已跳过").arg(m_index + 1).arg(reason)
+        : QStringLiteral("第 %1 个无法播放（%2），自动跳过").arg(m_index + 1).arg(reason);
+    if (text != m_lastErrorText) {
+        m_lastErrorText = text;
+        emit playbackStateChanged(text);
+    }
+    QTimer::singleShot(200, this, &VideoWallpaper::advanceOnError);
+}
+
 bool VideoWallpaper::startPlaying(QString *error)
 {
     if (m_playlist.isEmpty()) {
@@ -365,6 +491,9 @@ bool VideoWallpaper::startPlaying(QString *error)
     }
     m_manualPaused = false; // 用户点击“启动”即视为要求播放
     m_started = true;
+    m_trackFails.clear(); // 全新起播会话：失败名单清空，所有曲目重新获得机会
+    m_deadTracks.clear();
+    m_fileRetries = 0;
     if (m_outputs.isEmpty())
         playIndex(m_index >= 0 ? m_index : 0);
     else
@@ -403,7 +532,9 @@ void VideoWallpaper::stopAll()
     m_started = false;
     m_manualPaused = false;
     m_suspendReasons = 0;
-    m_errorStreak = 0;
+    m_trackFails.clear();
+    m_deadTracks.clear();
+    m_fileRetries = 0;
     m_lastErrorText.clear();
     m_resumePosMs = -1;
     if (m_reclaimMemory)
