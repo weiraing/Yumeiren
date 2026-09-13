@@ -455,7 +455,7 @@ QListWidget#VideoList::item {
     margin: 1px 1px;
 }
 
-QListWidget#VideoList::item:selected { background: #e8f0fd; }
+QListWidget#VideoList::item:selected { background: #b9d6fb; }
 
 /* 视频列表操作键: 按语义配色(扫描=青绿查找/添加=蓝主操作/删除=红危险/清空=橙批量) */
 QPushButton#VideoScanButton {

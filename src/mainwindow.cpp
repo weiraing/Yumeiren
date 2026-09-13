@@ -1076,6 +1076,7 @@ QWidget *MainWindow::buildVideoWallpaperPage()
         return b;
     };
     addStripBtn(QStringLiteral("扫描"), "VideoScanButton", [this] { scanVideoDir(); });
+    strip->addSpacing(46); // 扫描(发现类)与列表管理三键之间空一个按键距离
     addStripBtn(QStringLiteral("添加"), "VideoAddButton", [this] { addVideos(); });
     addStripBtn(QStringLiteral("删除"), "VideoDeleteButton", [this] { removeSelectedVideos(); });
     addStripBtn(QStringLiteral("清空"), "VideoClearButton", [this] { clearVideos(); });
