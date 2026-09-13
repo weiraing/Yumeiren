@@ -1066,18 +1066,19 @@ QWidget *MainWindow::buildVideoWallpaperPage()
 
     auto *strip = new QVBoxLayout();
     strip->setSpacing(8);
-    auto addStripBtn = [&](const QString &text, auto slot) {
+    auto addStripBtn = [&](const QString &text, const char *objectName, auto slot) {
         auto *b = new QPushButton(text, rightCard);
+        b->setObjectName(QString::fromUtf8(objectName)); // 语义配色见 style.qss/light.qss
         b->setMinimumWidth(72);
         b->setMinimumHeight(38);
         connect(b, &QPushButton::clicked, this, slot);
         strip->addWidget(b);
         return b;
     };
-    addStripBtn(QStringLiteral("扫描"), [this] { scanVideoDir(); });
-    addStripBtn(QStringLiteral("添加"), [this] { addVideos(); });
-    addStripBtn(QStringLiteral("删除"), [this] { removeSelectedVideos(); });
-    addStripBtn(QStringLiteral("清空"), [this] { clearVideos(); });
+    addStripBtn(QStringLiteral("扫描"), "VideoScanButton", [this] { scanVideoDir(); });
+    addStripBtn(QStringLiteral("添加"), "VideoAddButton", [this] { addVideos(); });
+    addStripBtn(QStringLiteral("删除"), "VideoDeleteButton", [this] { removeSelectedVideos(); });
+    addStripBtn(QStringLiteral("清空"), "VideoClearButton", [this] { clearVideos(); });
     strip->addStretch(1);
     listRow->addLayout(strip);
     rightLay->addLayout(listRow, 1);
