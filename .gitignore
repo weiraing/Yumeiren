@@ -15,4 +15,4 @@ deploy/
 .idea
 cmake-build-debug
 
-*.dll
+*.dllloop_capture*.mp4
