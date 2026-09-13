@@ -2309,6 +2309,8 @@ void MainWindow::refreshVideoList()
         item->setData(Qt::UserRole, f);
         QFileInfo fi(f);
         auto *box = new QWidget;
+        box->setProperty("data-playing", false); // 播放中的条目高亮(QSS 按 property 着色)
+        box->setProperty("data-path", f);
         auto *boxLay = new QVBoxLayout(box);
         boxLay->setContentsMargins(8, 5, 8, 5);
         boxLay->setSpacing(1);
@@ -2330,6 +2332,32 @@ void MainWindow::refreshVideoList()
                                    .arg(VideoWallpaper::instance().isPlaying()
                                             ? QStringLiteral("播放中") : QStringLiteral("停止")));
     updateVideoButtons();
+    updatePlayingHighlight();
+}
+
+// 正在播放(含暂停/自动挂起，恢复时仍是这一曲)的条目以底色高亮，便于辨别当前曲目
+void MainWindow::updatePlayingHighlight()
+{
+    if (!m_videoList)
+        return;
+    const auto &vp = VideoWallpaper::instance();
+    const QStringList &pl = vp.playlist();
+    const QString current = (vp.currentIndex() >= 0 && vp.currentIndex() < pl.size())
+                                ? pl.at(vp.currentIndex())
+                                : QString();
+    const bool highlight = vp.isStarted() && !current.isEmpty();
+    for (int i = 0; i < m_videoList->count(); ++i) {
+        QWidget *w = m_videoList->itemWidget(m_videoList->item(i));
+        if (!w)
+            continue;
+        const bool playing = highlight && w->property("data-path").toString() == current;
+        if (w->property("data-playing") != playing) {
+            w->setProperty("data-playing", playing);
+            w->style()->unpolish(w);
+            w->style()->polish(w);
+            w->update();
+        }
+    }
 }
 
 void MainWindow::onVideoStateChanged(const QString &text)
@@ -2337,6 +2365,7 @@ void MainWindow::onVideoStateChanged(const QString &text)
     if (m_videoStatus)
         m_videoStatus->setText(text);
     updateVideoButtons();
+    updatePlayingHighlight();
 }
 
 void MainWindow::updateVideoButtons()

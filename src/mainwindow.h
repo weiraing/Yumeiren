@@ -38,6 +38,7 @@ private slots:
     void refreshVideoList();
     void onVideoStateChanged(const QString &text);
     void updateVideoButtons();
+    void updatePlayingHighlight(); // 播放列表中当前曲目条目高亮
     void pickPresetFolder();
     void rebuildGallery();
     void pickImage();

@@ -459,6 +459,13 @@ QListWidget#VideoList::item:selected { background: #2c3a5e; }
 
 QListWidget#VideoList::item:hover { background: #26272e; }
 
+/* 正在播放的视频条目(由条目容器上的 data-playing 属性驱动) */
+QWidget[data-playing="true"] {
+    background: rgba(64, 118, 227, 0.20);
+    border: 1px solid rgba(64, 118, 227, 0.55);
+    border-radius: 8px;
+}
+
 QLabel#VideoItemPath {
     color: #7c7f8a;
     font-size: 11px;
