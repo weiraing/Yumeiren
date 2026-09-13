@@ -2320,14 +2320,18 @@ void MainWindow::removeSelectedVideos()
     if (selected.isEmpty())
         return;
     QStringList list = VideoWallpaper::instance().playlist();
-    for (QListWidgetItem *item : selected) {
+    for (QListWidgetItem *item : selected)
         list.removeAll(item->data(Qt::UserRole).toString());
-        delete item;
-    }
+    // 删除前先清选中：Qt 选择模型会把当前项迁移到被删行的相邻行，不清会导致
+    // 连点删除连锁误删；重建后再兜底清一次(重建过程可能按索引恢复选中)。
+    m_videoList->clearSelection();
+    m_videoList->setCurrentRow(-1);
     VideoWallpaper::instance().setPlaylist(list);
     QSettings st = appinfo::settings();
     st.setValue(QStringLiteral("video/playlist"), list);
     refreshVideoList();
+    m_videoList->clearSelection();
+    m_videoList->setCurrentRow(-1);
 }
 
 void MainWindow::clearVideos()
