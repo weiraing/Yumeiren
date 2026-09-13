@@ -8,7 +8,7 @@
 
 ## 第一部分：任务书 §3 扫描十项结论（代码事实）
 
-1. **当前循环控制入口**：唯一——`applyLoopPolicy()`（videowallpaper.cpp），单视频+自动循环+非随机时 `setLoops(QMediaPlayer::Infinite)`，多曲目 `setLoops(Once)` + EndOfMedia 推进。**已使用 Qt 原生循环机制**（阶段2/3 早已落地），故按任务书 §4 不重复添加，转入"其他逻辑是否干扰原生循环"的排查。
+1. **当前循环控制入口**：唯一——`applyLoopPolicy()`（videowallpaper.cpp），单视频+列表循环(m_autoLoop)+非随机时 `setLoops(QMediaPlayer::Infinite)`，多曲目 `setLoops(Once)` + EndOfMedia 推进。**已使用 Qt 原生循环机制**（阶段2/3 早已落地），故按任务书 §4 不重复添加，转入"其他逻辑是否干扰原生循环"的排查。
 2. **EndOfMedia 处理流程**：仅多曲目播放时触发 `nextTrack()`；单视频 Infinite 循环下后端回绕**不发出** EndOfMedia（见第四部分取证）。
 3. **播放器生命周期**：循环边界无任何对象操作（无 teardown/rebuild/重连）。
 4. **媒体源设置次数**：每次会话 1 次（`playIndex`；同源重播仅 `setPosition(0)`，且该路径只用于错误重试，非循环）。

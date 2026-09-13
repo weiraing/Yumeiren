@@ -968,8 +968,11 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     volRow->addWidget(volVal);
     leftLay->addLayout(volRow);
 
-    m_autoLoopBox = new QCheckBox(QStringLiteral("自动循环"), leftCard);
+    m_autoLoopBox = new QCheckBox(QStringLiteral("列表循环"), leftCard);
     m_autoLoopBox->setChecked(true);
+    m_autoLoopBox->setToolTip(QStringLiteral(
+        "勾选：列表逐个播放，播完最后一个回到第一个继续；单个视频自动从头循环。\n"
+        "不勾选：列表播放一遍后停止。"));
     m_randomBox = new QCheckBox(QStringLiteral("随机播放"), leftCard);
     m_fullscreenPauseBox = new QCheckBox(QStringLiteral("全屏自动暂停"), leftCard);
     m_fullscreenPauseBox->setChecked(true);
