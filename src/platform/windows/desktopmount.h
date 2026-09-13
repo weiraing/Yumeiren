@@ -47,6 +47,10 @@ bool isOnBattery();
 
 // Return idle pages to the OS. Cosmetic (Private Bytes unchanged) and pages
 // back in on demand; only meaningful when the pipeline is torn down.
+// 单实例二次启动体验：把同 exe 已运行实例的主窗口(标题精确匹配)调到前台。
+// 最小化则先还原；找不到实例或主窗口返回 false，由调用方决定兜底行为。
+bool activateExistingInstanceWindow(const QString &mainWindowTitle);
+
 void trimProcessMemory();
 
 } // namespace fbswin

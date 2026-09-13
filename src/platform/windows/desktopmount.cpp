@@ -6,6 +6,7 @@
 #include <QWidget>
 
 #include <windows.h>
+#include <tlhelp32.h>
 
 // Desktop hosts icons inside SHELLDLL_DefView on a WorkerW window. After
 // sending 0x052C to Progman, an extra WorkerW is spawned BEHIND that one; our
@@ -235,6 +236,70 @@ bool isOnBattery()
     if (s.BatteryFlag & 128)
         return false; // 无电池(台式机)
     return s.ACLineStatus == 0;
+}
+
+bool activateExistingInstanceWindow(const QString &mainWindowTitle)
+{
+    // 1) 找到同 exe 的已运行实例(排除本进程)
+    wchar_t selfPath[MAX_PATH] = {};
+    GetModuleFileNameW(nullptr, selfPath, MAX_PATH);
+    const wchar_t *selfBase = selfPath;
+    for (const wchar_t *p = selfPath; *p; ++p)
+        if (*p == L'\\' || *p == L'/')
+            selfBase = p + 1;
+    DWORD targetPid = 0;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap != INVALID_HANDLE_VALUE) {
+        PROCESSENTRY32W pe = {};
+        pe.dwSize = sizeof(pe);
+        if (Process32FirstW(snap, &pe)) {
+            do {
+                if (_wcsicmp(pe.szExeFile, selfBase) == 0
+                    && pe.th32ProcessID != GetCurrentProcessId()) {
+                    targetPid = pe.th32ProcessID;
+                    break;
+                }
+            } while (Process32NextW(snap, &pe));
+        }
+        CloseHandle(snap);
+    }
+    if (!targetPid)
+        return false;
+
+    // 2) 该实例的可见顶层主窗口：标题精确匹配(壁纸窗口无标题，不会误中)
+    const std::wstring wantTitle = mainWindowTitle.toStdWString();
+    HWND found = nullptr;
+    struct Ctx { DWORD pid; const std::wstring *title; HWND main; } ctx{
+        targetPid, &wantTitle, nullptr};
+    EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
+        auto *c = reinterpret_cast<Ctx *>(lp);
+        DWORD pid = 0;
+        GetWindowThreadProcessId(hwnd, &pid);
+        if (pid != c->pid || !IsWindowVisible(hwnd))
+            return TRUE;
+        if (GetAncestor(hwnd, GA_ROOT) != hwnd)
+            return TRUE;
+        wchar_t title[128] = {};
+        GetWindowTextW(hwnd, title, 128);
+        if (*c->title == title) {
+            c->main = hwnd;
+            return FALSE;
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&ctx));
+    if (!ctx.main)
+        return false;
+
+    // 3) 最小化则还原；置顶一拍再还原以绕过前台锁(本实例由用户点击启动，
+    //    本身具备前台激活权限，双保险)
+    if (IsIconic(ctx.main))
+        ShowWindow(ctx.main, SW_RESTORE);
+    SetWindowPos(ctx.main, HWND_TOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    SetWindowPos(ctx.main, HWND_NOTOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    SetForegroundWindow(ctx.main);
+    return true;
 }
 
 void trimProcessMemory()

@@ -6,6 +6,7 @@
 
 #include "appinfo.h"
 #include "mainwindow.h"
+#include "platform/windows/desktopmount.h"
 #include "videodiag.h"
 #include "videowallpaper.h"
 
@@ -26,8 +27,12 @@ int main(int argc, char *argv[])
             instanceGuard.detach();
     }
     if (!instanceGuard.create(1)) {
-        QMessageBox::information(nullptr, QStringLiteral("虞美人"),
-                                 QStringLiteral("虞美人已经在运行。"));
+        // 已有实例在运行：直接把它的主窗口调到最前，不弹窗打断；
+        // 找不到(窗口尚未建好等罕见情形)才兜底提示。
+        if (!fbswin::activateExistingInstanceWindow(appinfo::displayName())) {
+            QMessageBox::information(nullptr, QStringLiteral("虞美人"),
+                                     QStringLiteral("虞美人已经在运行。"));
+        }
         return 0;
     }
 
