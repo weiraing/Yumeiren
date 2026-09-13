@@ -16,7 +16,9 @@ param(
     [string]$Volume = "0",        # HKCU video/volume (0 = app disables the audio track)
     [string]$ProbeStage = "",     # YUMEIREN_PROBE_STAGE: B/C/D/E (empty = normal run)
     [int]$AutoStopMs = 0,         # YUMEIREN_AUTO_STOP_MS: one-shot stopAll() after N ms
-    [int]$AutoStartMs = 0         # YUMEIREN_AUTO_START_MS: one-shot startPlaying() after N ms
+    [int]$AutoStartMs = 0,        # YUMEIREN_AUTO_START_MS: one-shot startPlaying() after N ms
+    [string]$ProcName = "YumeirenTest",  # sampler target process name (SinkProbe A/B)
+    [string]$AppArgs = ""          # extra command line passed to $Exe (SinkProbe media/duration)
 )
 $ErrorActionPreference = "Continue"
 $vk = 'HKCU:\Software\Yumeiren\Yumeiren\video'
@@ -38,23 +40,27 @@ if ($AutoStopMs -gt 0) { $env:YUMEIREN_AUTO_STOP_MS = [string]$AutoStopMs }
 if ($AutoStartMs -gt 0) { $env:YUMEIREN_AUTO_START_MS = [string]$AutoStartMs }
 
 # ensure no stale instance
-$old = Get-Process -Name YumeirenTest -ErrorAction SilentlyContinue
+$old = Get-Process -Name $ProcName -ErrorAction SilentlyContinue
 if ($old) {
     $old | ForEach-Object { $_.CloseMainWindow() | Out-Null }
     Start-Sleep -Seconds 2
-    Get-Process -Name YumeirenTest -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-Process -Name $ProcName -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 1
 }
 
-Start-Process -FilePath $Exe -WorkingDirectory (Split-Path $Exe)
+if ($AppArgs) {
+    Start-Process -FilePath $Exe -ArgumentList $AppArgs -WorkingDirectory (Split-Path $Exe)
+} else {
+    Start-Process -FilePath $Exe -WorkingDirectory (Split-Path $Exe)
+}
 Start-Sleep -Seconds $InitWaitSec
-& (Join-Path $PSScriptRoot 'sample2.ps1') -DurationSec $DurationSec -IntervalSec $IntervalSec -OutCsv $OutCsv
+& (Join-Path $PSScriptRoot 'sample2.ps1') -ProcName $ProcName -DurationSec $DurationSec -IntervalSec $IntervalSec -OutCsv $OutCsv
 
-$p = Get-Process -Name YumeirenTest -ErrorAction SilentlyContinue
+$p = Get-Process -Name $ProcName -ErrorAction SilentlyContinue
 if ($p) {
     $p.CloseMainWindow() | Out-Null
     Start-Sleep -Seconds 3
-    $p = Get-Process -Name YumeirenTest -ErrorAction SilentlyContinue
+    $p = Get-Process -Name $ProcName -ErrorAction SilentlyContinue
     if ($p) { $p | Stop-Process -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Seconds 2
 }
