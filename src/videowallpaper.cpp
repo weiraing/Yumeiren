@@ -533,6 +533,24 @@ void VideoWallpaper::nextTrack()
 }
 
 // 解码失败自动跳转的收口：挂起/手动暂停期间只换源不强行播放
+// 列表双击(任务书交互)：运行中立即切换到指定条目作为壁纸。挂起/手动暂停期间
+// 只换源不强行播放(与 advanceOnError 同策略)，恢复由状态机裁决；用户点名会
+// 清除该曲目的失败记录，给一次重新打开的机会。
+void VideoWallpaper::switchToTrack(int index)
+{
+    if (!m_started || index < 0 || index >= m_playlist.size() || index == m_index)
+        return;
+    m_trackFails.remove(index);
+    m_deadTracks.remove(index);
+    m_fileRetries = 0;
+    playIndex(index);
+    if (m_manualPaused || m_suspendReasons != 0) {
+        for (const VideoOutput &out : std::as_const(m_outputs))
+            if (out.player)
+                out.player->pause();
+    }
+}
+
 void VideoWallpaper::advanceOnError()
 {
     if (!m_started || m_outputs.isEmpty() || m_playlist.isEmpty())
@@ -573,7 +591,7 @@ void VideoWallpaper::handleUnplayable(const QString &reason)
     QTimer::singleShot(200, this, &VideoWallpaper::advanceOnError);
 }
 
-bool VideoWallpaper::startPlaying(QString *error)
+bool VideoWallpaper::startPlaying(QString *error, int preferIndex)
 {
     if (m_playlist.isEmpty()) {
         if (error) *error = QStringLiteral("播放列表为空，请先添加视频");
@@ -584,10 +602,15 @@ bool VideoWallpaper::startPlaying(QString *error)
     m_trackFails.clear(); // 全新起播会话：失败名单清空，所有曲目重新获得机会
     m_deadTracks.clear();
     m_fileRetries = 0;
-    if (m_outputs.isEmpty())
-        playIndex(m_index >= 0 ? m_index : 0);
-    else
+    // 列表中选中了条目时，从选中项开始(用户点名的曲目优先于上次进度)
+    const bool preferValid = preferIndex >= 0 && preferIndex < m_playlist.size();
+    if (m_outputs.isEmpty()) {
+        playIndex(preferValid ? preferIndex : (m_index >= 0 ? m_index : 0));
+    } else if (preferValid && preferIndex != m_index) {
+        playIndex(preferIndex); // 运行中点了启动且选中了其他曲目：直接切换
+    } else {
         evaluateSuspend(); // 可能处于挂起原因中，由状态机决定播/停
+    }
     return true;
 }
 

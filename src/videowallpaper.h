@@ -28,7 +28,7 @@ public:
     void setPlaylist(const QStringList &files);
     void clearPlaylist();
 
-    bool startPlaying(QString *error);
+    bool startPlaying(QString *error, int preferIndex = -1);
     void pauseResume();
     void stopAll();
     bool isPlaying() const;
@@ -48,6 +48,9 @@ public:
     void setTargetFps(int fps);
     bool isStarted() const { return m_started; }
     void evaluateSuspend();
+    // 列表双击(任务书交互): 运行中立即切换到指定条目作为壁纸；
+    // 未启动时忽略(此时由 startPlaying 的 preferIndex 决定起点)
+    void switchToTrack(int index);
     // 自动化内存实验探针(仅 YUMEIREN_PROBE_STAGE 环境变量驱动，正常运行不触发)：
     // B=仅创建 QMediaPlayer+QAudioOutput / C=B+设置媒体源 / D=C+play()(无视频窗口) /
     // E=C+创建并挂载 QVideoWidget(不播放)。用于把内存增量归因到具体阶段。

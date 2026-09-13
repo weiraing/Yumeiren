@@ -1037,6 +1037,18 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     m_videoList->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_videoList->setUniformItemSizes(false);
     m_videoList->setSpacing(4);
+    m_videoList->setToolTip(QStringLiteral(
+        "运行中双击条目：立即切换该视频为壁纸；选中条目后点“启动”：从该视频开始播放"));
+    // 运行中双击列表条目 → 立即切换该视频为动态壁纸
+    connect(m_videoList, &QListWidget::itemDoubleClicked, this,
+            [this](QListWidgetItem *item) {
+        auto &vp = VideoWallpaper::instance();
+        if (!vp.isStarted() || vp.playlist().isEmpty())
+            return; // 未启动时双击仅作选中
+        const int row = m_videoList->row(item);
+        if (row >= 0 && row < vp.playlist().size())
+            vp.switchToTrack(row);
+    });
     listRow->addWidget(m_videoList, 1);
 
     auto *strip = new QVBoxLayout();
@@ -2281,7 +2293,9 @@ void MainWindow::clearVideos()
 void MainWindow::startVideo()
 {
     QString err;
-    if (!VideoWallpaper::instance().startPlaying(&err)) {
+    // 列表中选中了条目时，从选中项开始播放壁纸；未选中则沿用上次进度
+    const int selected = m_videoList ? m_videoList->currentRow() : -1;
+    if (!VideoWallpaper::instance().startPlaying(&err, selected)) {
         setLog(err.isEmpty() ? QStringLiteral("视频壁纸启动失败") : err, true);
         return;
     }
