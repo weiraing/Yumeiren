@@ -1,7 +1,8 @@
 #include <QApplication>
+#include <QDateTime>
 #include <QFile>
+#include <QThread>
 #include <QMessageBox>
-#include <QSharedMemory>
 #include <QStyleFactory>
 
 #include "appinfo.h"
@@ -21,17 +22,41 @@ int main(int argc, char *argv[])
     // Windows 上进程被强杀/崩溃后共享内存段会残留（引用计数无人递减），
     // 导致之后永远"已经在运行"——attach+detach 清掉残段后重试一次即可自愈；
     // 真有另一实例在跑时重试依旧失败，提示不变。
-    QSharedMemory instanceGuard(QStringLiteral("Yumeiren.single-instance"));
-    if (!instanceGuard.create(1)) {
-        if (instanceGuard.attach())
-            instanceGuard.detach();
-    }
-    if (!instanceGuard.create(1)) {
+    videodiag::init(); // 守卫阶段即可记录诊断(幂等)
+    if (!fbswin::acquireSingleInstanceLock()) {
         // 已有实例在运行：直接把它的主窗口调到最前，不弹窗打断；
         // 找不到(窗口尚未建好等罕见情形)才兜底提示。
-        if (!fbswin::activateExistingInstanceWindow(appinfo::displayName())) {
+        QString why;
+        // 唤起偶发失败(窗口枚举/前台锁的时序竞争，实测约一次性)——重试兜底
+        bool activated = false;
+        for (int attempt = 0; attempt < 3 && !activated; ++attempt) {
+            if (attempt > 0) {
+                QThread::msleep(300);
+                why.clear();
+            }
+            activated =
+                fbswin::activateExistingInstanceWindow(appinfo::displayName(), &why);
+        }
+        // 守卫结果写按 PID 独立文件：主日志可能被已运行实例锁定
+        {
+            QFile guardLog(appinfo::dataRoot() + QStringLiteral("/logs/guard_%1.log")
+                               .arg(QCoreApplication::applicationPid()));
+            if (guardLog.open(QIODevice::WriteOnly | QIODevice::Text))
+                guardLog.write(QStringLiteral("%1|%2\n")
+                                   .arg(QDateTime::currentDateTime()
+                                            .toString(QStringLiteral("HH:mm:ss.zzz")),
+                                        activated ? QStringLiteral("已唤起: ") + why
+                                                  : QStringLiteral("唤起失败: ") + why)
+                                   .toUtf8());
+        }
+        if (!activated) {
+            videodiag::log(videodiag::Level::Warning,
+                QStringLiteral("唤起已运行实例失败: %1").arg(why));
             QMessageBox::information(nullptr, QStringLiteral("虞美人"),
                                      QStringLiteral("虞美人已经在运行。"));
+        } else {
+            videodiag::log(videodiag::Level::Info,
+                QStringLiteral("已唤起已运行实例窗口: %1").arg(why));
         }
         return 0;
     }

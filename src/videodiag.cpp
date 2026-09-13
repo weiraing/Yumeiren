@@ -102,11 +102,16 @@ void init()
         g_diag = QSettings(QStringLiteral("Yumeiren"), QStringLiteral("Yumeiren"))
                      .value(QStringLiteral("video/diag"), false).toBool();
 
-    const QString path = logPath();
+    QString path = logPath();
     QDir().mkpath(QFileInfo(path).absolutePath());
     g_file.setFileName(path);
-    if (!g_file.isOpen())
+    if (!g_file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+        // 主日志被其他实例占用时回退到按 PID 独立的文件——多实例场景(单实例
+        // 守卫的二次启动诊断)下不能丢日志
+        path = QStringLiteral("%1.%2.log").arg(path).arg(GetCurrentProcessId());
+        g_file.setFileName(path);
         g_file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text);
+    }
     writeLine(Level::Info, QStringLiteral("==== 视频壁纸模块启动 (diag=%1) ====")
                                .arg(g_diag ? QStringLiteral("on") : QStringLiteral("off")));
 }

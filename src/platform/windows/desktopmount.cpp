@@ -238,8 +238,28 @@ bool isOnBattery()
     return s.ACLineStatus == 0;
 }
 
-bool activateExistingInstanceWindow(const QString &mainWindowTitle)
+bool acquireSingleInstanceLock()
 {
+    // Local\ 前缀=每会话命名空间(同登录会话内唯一)。持有句柄的进程退出时，
+    // 内核自动销毁互斥锁——强杀/崩溃都不会留下残段。
+    HANDLE m = CreateMutexW(nullptr, TRUE, L"Local\\Yumeiren.single-instance");
+    if (!m)
+        return true; // 极罕见的创建失败不阻止启动
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        CloseHandle(m);
+        return false;
+    }
+    // 故意不关闭句柄：锁的生命周期=本进程生命周期
+    return true;
+}
+
+bool activateExistingInstanceWindow(const QString &mainWindowTitle, QString *reason)
+{
+    auto fail = [reason](const QString &r) {
+        if (reason)
+            *reason = r;
+        return false;
+    };
     // 1) 找到同 exe 的已运行实例(排除本进程)
     wchar_t selfPath[MAX_PATH] = {};
     GetModuleFileNameW(nullptr, selfPath, MAX_PATH);
@@ -264,13 +284,13 @@ bool activateExistingInstanceWindow(const QString &mainWindowTitle)
         CloseHandle(snap);
     }
     if (!targetPid)
-        return false;
+        return fail(QStringLiteral("未找到已运行的同名进程"));
 
     // 2) 该实例的可见顶层主窗口：标题精确匹配(壁纸窗口无标题，不会误中)
     const std::wstring wantTitle = mainWindowTitle.toStdWString();
     HWND found = nullptr;
-    struct Ctx { DWORD pid; const std::wstring *title; HWND main; } ctx{
-        targetPid, &wantTitle, nullptr};
+    struct Ctx { DWORD pid; const std::wstring *title; HWND main; long area; } ctx{
+        targetPid, &wantTitle, nullptr, 0};
     EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
         auto *c = reinterpret_cast<Ctx *>(lp);
         DWORD pid = 0;
@@ -282,13 +302,21 @@ bool activateExistingInstanceWindow(const QString &mainWindowTitle)
         wchar_t title[128] = {};
         GetWindowTextW(hwnd, title, 128);
         if (*c->title == title) {
-            c->main = hwnd;
-            return FALSE;
+            // 取面积最大的匹配窗口：兜底弹窗(MessageBox)标题与应用名相同，
+            // 主窗口(990x780)远大于它，避免旧弹窗残留在场时误中
+            RECT r;
+            if (!GetWindowRect(hwnd, &r))
+                return TRUE;
+            const long area = (r.right - r.left) * (r.bottom - r.top);
+            if (!c->main || area > c->area) {
+                c->main = hwnd;
+                c->area = area;
+            }
         }
         return TRUE;
     }, reinterpret_cast<LPARAM>(&ctx));
     if (!ctx.main)
-        return false;
+        return fail(QStringLiteral("已运行实例(pid=%1)未找到标题匹配的主窗口").arg(targetPid));
 
     // 3) 最小化则还原；置顶一拍再还原以绕过前台锁(本实例由用户点击启动，
     //    本身具备前台激活权限，双保险)
@@ -299,6 +327,8 @@ bool activateExistingInstanceWindow(const QString &mainWindowTitle)
     SetWindowPos(ctx.main, HWND_NOTOPMOST, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     SetForegroundWindow(ctx.main);
+    if (reason)
+        *reason = QStringLiteral("已激活");
     return true;
 }
 

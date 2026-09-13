@@ -47,9 +47,15 @@ bool isOnBattery();
 
 // Return idle pages to the OS. Cosmetic (Private Bytes unchanged) and pages
 // back in on demand; only meaningful when the pipeline is torn down.
-// 单实例二次启动体验：把同 exe 已运行实例的主窗口(标题精确匹配)调到前台。
-// 最小化则先还原；找不到实例或主窗口返回 false，由调用方决定兜底行为。
-bool activateExistingInstanceWindow(const QString &mainWindowTitle);
+// 单实例二次启动体验：把同 exe 已运行实例的主窗口(标题精确匹配、有实际尺寸)
+// 调到前台。最小化则先还原；找不到实例或主窗口返回 false，由调用方决定兜底行为。
+bool activateExistingInstanceWindow(const QString &mainWindowTitle,
+                                    QString *reason = nullptr);
+
+// 单实例唯一运行权：命名互斥锁实现。进程退出(含强杀/崩溃)时内核自动释放，
+// 从原理上杜绝 QSharedMemory 段残留导致"已经在运行"却无实例的问题。
+// 返回 true=获得运行权(句柄故意保持打开=锁)；false=已有实例在运行。
+bool acquireSingleInstanceLock();
 
 void trimProcessMemory();
 
