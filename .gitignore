@@ -15,4 +15,7 @@ deploy/
 .idea
 cmake-build-debug
 
-*.dllloop_capture*.mp4
+*.dll
+loop_capture*.mp4
+loop_ydif*.csv
+
