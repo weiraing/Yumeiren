@@ -16,6 +16,6 @@ deploy/
 cmake-build-debug
 
 *.dll
-loop_capture*.mp4
+tools/perf/results/*.mp4
 loop_ydif*.csv
 

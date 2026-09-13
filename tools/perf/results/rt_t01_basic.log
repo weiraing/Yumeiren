@@ -1,6 +1,19 @@
-2026-09-13 16:21:58.341 [I] ==== 视频壁纸模块启动 (diag=on) ====
-2026-09-13 16:21:58.343 [I] VideoWallpaper 初始化完成
-2026-09-13 16:21:58.343 [I] session=1 play index=1/1 file=inv_1080p30.mp4 resumePos=-1
-2026-09-13 16:21:58.608 [D] 创建输出: players=1/0 widgets=1/0 audios=1/0
-2026-09-13 16:21:59.703 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-13 16:21:59.703 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 19:14:31.076 [I] ==== 视频壁纸模块启动 (diag=on) ====
+2026-09-13 19:14:31.078 [I] VideoWallpaper 初始化完成
+2026-09-13 19:14:31.078 [I] session=1 play index=1/1 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 19:14:31.297 [D] 创建输出: players=1/0 widgets=1/0 audios=1/0
+2026-09-13 19:14:31.501 [D] session=1 mediaStatus=1 file=inv_1080p30.mp4
+2026-09-13 19:14:31.501 [D] setLoops(Infinite) player=246c64b94e0 widget=246c64a5fb0 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/inv_1080p30.mp4
+2026-09-13 19:14:31.501 [D] setPlaybackRate(1)
+2026-09-13 19:14:32.643 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 19:14:32.643 [D] setPlaybackRate(1)
+2026-09-13 19:14:32.644 [D] setPlaybackRate(1)
+2026-09-13 19:14:32.644 [D] setLoops(Infinite) player=246c64b94e0 widget=246c64a5fb0 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/inv_1080p30.mp4
+2026-09-13 19:14:32.644 [D] setLoops(Infinite) player=246c64b94e0 widget=246c64a5fb0 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/inv_1080p30.mp4
+2026-09-13 19:14:32.644 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 19:14:32.897 [D] session=1 metaDataChanged file=inv_1080p30.mp4
+2026-09-13 19:14:32.898 [D] setPlaybackRate(1)
+2026-09-13 19:14:32.898 [D] session=1 mediaStatus=2 file=inv_1080p30.mp4
+2026-09-13 19:14:32.957 [D] session=1 mediaStatus=4 file=inv_1080p30.mp4
+2026-09-13 19:14:33.072 [D] session=1 mediaStatus=5 file=inv_1080p30.mp4
+2026-09-13 19:15:48.107 [D] session=1 mediaStatus=2 file=inv_1080p30.mp4

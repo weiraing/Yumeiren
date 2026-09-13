@@ -1,11 +1,33 @@
-2026-09-13 16:26:41.961 [I] ==== 视频壁纸模块启动 (diag=on) ====
-2026-09-13 16:26:41.964 [I] VideoWallpaper 初始化完成
-2026-09-13 16:26:41.964 [I] session=1 play index=1/1 file=inv_1080p30.mp4 resumePos=-1
-2026-09-13 16:26:42.159 [D] 创建输出: players=1/0 widgets=1/0 audios=1/0
-2026-09-13 16:26:43.279 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-13 16:26:43.280 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-13 16:27:41.974 [I] teardown n=1 累计 players=1/1 widgets=1/1 audios=1/1
-2026-09-13 16:27:41.998 [I] stopAll: 管线已卸载 session=1
-2026-09-13 16:28:11.970 [I] session=2 play index=1/1 file=inv_1080p30.mp4 resumePos=-1
-2026-09-13 16:28:11.970 [D] 创建输出: players=2/1 widgets=2/1 audios=2/1
-2026-09-13 16:28:12.072 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 19:19:16.884 [I] ==== 视频壁纸模块启动 (diag=on) ====
+2026-09-13 19:19:16.884 [I] VideoWallpaper 初始化完成
+2026-09-13 19:19:16.884 [I] session=1 play index=1/1 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 19:19:17.079 [D] 创建输出: players=1/0 widgets=1/0 audios=1/0
+2026-09-13 19:19:17.126 [D] session=1 mediaStatus=1 file=inv_1080p30.mp4
+2026-09-13 19:19:17.126 [D] setLoops(Infinite) player=1bb630b4390 widget=1bb630a2c70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/inv_1080p30.mp4
+2026-09-13 19:19:17.126 [D] setPlaybackRate(1)
+2026-09-13 19:19:18.119 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 19:19:18.119 [D] setPlaybackRate(1)
+2026-09-13 19:19:18.119 [D] setPlaybackRate(1)
+2026-09-13 19:19:18.119 [D] setLoops(Infinite) player=1bb630b4390 widget=1bb630a2c70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/inv_1080p30.mp4
+2026-09-13 19:19:18.119 [D] setLoops(Infinite) player=1bb630b4390 widget=1bb630a2c70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/inv_1080p30.mp4
+2026-09-13 19:19:18.119 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 19:19:18.408 [D] session=1 metaDataChanged file=inv_1080p30.mp4
+2026-09-13 19:19:18.408 [D] setPlaybackRate(1)
+2026-09-13 19:19:18.408 [D] session=1 mediaStatus=2 file=inv_1080p30.mp4
+2026-09-13 19:19:18.502 [D] session=1 mediaStatus=4 file=inv_1080p30.mp4
+2026-09-13 19:19:18.662 [D] session=1 mediaStatus=5 file=inv_1080p30.mp4
+2026-09-13 19:20:16.876 [D] session=1 mediaStatus=2 file=inv_1080p30.mp4
+2026-09-13 19:20:16.882 [I] teardown n=1 累计 players=1/1 widgets=1/1 audios=1/1
+2026-09-13 19:20:16.904 [I] stopAll: 管线已卸载 session=1
+2026-09-13 19:20:46.875 [I] session=2 play index=1/1 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 19:20:46.875 [D] 创建输出: players=2/1 widgets=2/1 audios=2/1
+2026-09-13 19:20:46.896 [D] session=2 mediaStatus=1 file=inv_1080p30.mp4
+2026-09-13 19:20:46.896 [D] setLoops(Infinite) player=1bb29064830 widget=1bb201e91f0 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/inv_1080p30.mp4
+2026-09-13 19:20:46.896 [D] setPlaybackRate(1)
+2026-09-13 19:20:46.956 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 19:20:46.958 [D] session=2 metaDataChanged file=inv_1080p30.mp4
+2026-09-13 19:20:46.958 [D] setPlaybackRate(1)
+2026-09-13 19:20:46.958 [D] session=2 mediaStatus=2 file=inv_1080p30.mp4
+2026-09-13 19:20:47.000 [D] session=2 mediaStatus=4 file=inv_1080p30.mp4
+2026-09-13 19:20:47.019 [D] session=2 mediaStatus=5 file=inv_1080p30.mp4
+2026-09-13 19:21:56.002 [D] session=2 mediaStatus=2 file=inv_1080p30.mp4

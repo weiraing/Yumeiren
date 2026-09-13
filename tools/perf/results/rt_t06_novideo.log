@@ -1,15 +1,71 @@
-2026-09-13 16:32:06.428 [I] ==== 视频壁纸模块启动 (diag=on) ====
-2026-09-13 16:32:06.434 [I] VideoWallpaper 初始化完成
-2026-09-13 16:32:06.434 [I] session=1 play index=1/2 file=audio_only.mp4 resumePos=-1
-2026-09-13 16:32:06.628 [D] 创建输出: players=1/0 widgets=1/0 audios=1/0
-2026-09-13 16:32:07.800 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-13 16:32:07.801 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-13 16:32:10.154 [W] session=1 曲目不可播 track=1 fails=1 dead=1 reason=没有视频轨
-2026-09-13 16:32:10.354 [I] session=2 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
-2026-09-13 16:32:22.427 [I] session=3 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
-2026-09-13 16:32:34.439 [I] session=4 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
-2026-09-13 16:32:46.460 [I] session=5 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
-2026-09-13 16:32:58.470 [I] session=6 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
-2026-09-13 16:33:10.481 [I] session=7 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
-2026-09-13 16:33:22.492 [I] session=8 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
-2026-09-13 16:33:34.520 [I] session=9 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 19:24:40.057 [I] ==== 视频壁纸模块启动 (diag=on) ====
+2026-09-13 19:24:40.058 [I] VideoWallpaper 初始化完成
+2026-09-13 19:24:40.058 [I] session=1 play index=1/2 file=audio_only.mp4 resumePos=-1
+2026-09-13 19:24:40.259 [D] 创建输出: players=1/0 widgets=1/0 audios=1/0
+2026-09-13 19:24:40.305 [D] session=1 mediaStatus=1 file=audio_only.mp4
+2026-09-13 19:24:40.305 [D] setLoops(Once) player=219c3f78dc0 widget=219c3f65b30 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/audio_only.mp4
+2026-09-13 19:24:40.305 [D] setPlaybackRate(1)
+2026-09-13 19:24:41.195 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 19:24:41.196 [D] setPlaybackRate(1)
+2026-09-13 19:24:41.196 [D] setPlaybackRate(1)
+2026-09-13 19:24:41.196 [D] setLoops(Once) player=219c3f78dc0 widget=219c3f65b30 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/audio_only.mp4
+2026-09-13 19:24:41.196 [D] setLoops(Once) player=219c3f78dc0 widget=219c3f65b30 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/audio_only.mp4
+2026-09-13 19:24:41.196 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 19:24:41.440 [D] session=1 metaDataChanged file=audio_only.mp4
+2026-09-13 19:24:41.440 [D] setPlaybackRate(1)
+2026-09-13 19:24:41.440 [D] session=1 mediaStatus=2 file=audio_only.mp4
+2026-09-13 19:24:41.440 [D] session=1 mediaStatus=4 file=audio_only.mp4
+2026-09-13 19:24:43.441 [D] session=1 mediaStatus=2 file=audio_only.mp4
+2026-09-13 19:24:43.441 [W] session=1 曲目不可播 track=1 fails=1 dead=1 reason=没有视频轨
+2026-09-13 19:24:43.641 [I] session=2 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 19:24:43.644 [D] session=2 mediaStatus=1 file=inv_1080p30.mp4
+2026-09-13 19:24:43.644 [D] setLoops(Once) player=219c3f78dc0 widget=219c3f65b30 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/inv_1080p30.mp4
+2026-09-13 19:24:43.644 [D] setPlaybackRate(1)
+2026-09-13 19:24:43.659 [D] session=2 metaDataChanged file=inv_1080p30.mp4
+2026-09-13 19:24:43.659 [D] setPlaybackRate(1)
+2026-09-13 19:24:43.659 [D] session=2 mediaStatus=2 file=inv_1080p30.mp4
+2026-09-13 19:24:43.703 [D] session=2 mediaStatus=4 file=inv_1080p30.mp4
+2026-09-13 19:24:43.715 [D] session=2 mediaStatus=5 file=inv_1080p30.mp4
+2026-09-13 19:24:55.707 [D] session=2 mediaStatus=6 file=inv_1080p30.mp4
+2026-09-13 19:24:55.707 [I] session=3 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 19:24:55.707 [D] session=3 mediaStatus=2 file=inv_1080p30.mp4
+2026-09-13 19:24:55.707 [D] setPlaybackRate(1)
+2026-09-13 19:24:55.707 [D] session=3 mediaStatus=4 file=inv_1080p30.mp4
+2026-09-13 19:24:55.719 [D] session=3 mediaStatus=5 file=inv_1080p30.mp4
+2026-09-13 19:25:07.727 [D] session=3 mediaStatus=6 file=inv_1080p30.mp4
+2026-09-13 19:25:07.727 [I] session=4 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 19:25:07.731 [D] session=4 mediaStatus=2 file=inv_1080p30.mp4
+2026-09-13 19:25:07.731 [D] setPlaybackRate(1)
+2026-09-13 19:25:07.731 [D] session=4 mediaStatus=4 file=inv_1080p30.mp4
+2026-09-13 19:25:07.735 [D] session=4 mediaStatus=5 file=inv_1080p30.mp4
+2026-09-13 19:25:19.744 [D] session=4 mediaStatus=6 file=inv_1080p30.mp4
+2026-09-13 19:25:19.744 [I] session=5 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 19:25:19.746 [D] session=5 mediaStatus=2 file=inv_1080p30.mp4
+2026-09-13 19:25:19.746 [D] setPlaybackRate(1)
+2026-09-13 19:25:19.746 [D] session=5 mediaStatus=4 file=inv_1080p30.mp4
+2026-09-13 19:25:19.752 [D] session=5 mediaStatus=5 file=inv_1080p30.mp4
+2026-09-13 19:25:31.763 [D] session=5 mediaStatus=6 file=inv_1080p30.mp4
+2026-09-13 19:25:31.763 [I] session=6 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 19:25:31.766 [D] session=6 mediaStatus=2 file=inv_1080p30.mp4
+2026-09-13 19:25:31.766 [D] setPlaybackRate(1)
+2026-09-13 19:25:31.766 [D] session=6 mediaStatus=4 file=inv_1080p30.mp4
+2026-09-13 19:25:31.777 [D] session=6 mediaStatus=5 file=inv_1080p30.mp4
+2026-09-13 19:25:43.772 [D] session=6 mediaStatus=6 file=inv_1080p30.mp4
+2026-09-13 19:25:43.772 [I] session=7 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 19:25:43.776 [D] session=7 mediaStatus=2 file=inv_1080p30.mp4
+2026-09-13 19:25:43.776 [D] setPlaybackRate(1)
+2026-09-13 19:25:43.777 [D] session=7 mediaStatus=4 file=inv_1080p30.mp4
+2026-09-13 19:25:43.786 [D] session=7 mediaStatus=5 file=inv_1080p30.mp4
+2026-09-13 19:25:55.784 [D] session=7 mediaStatus=6 file=inv_1080p30.mp4
+2026-09-13 19:25:55.784 [I] session=8 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 19:25:55.786 [D] session=8 mediaStatus=2 file=inv_1080p30.mp4
+2026-09-13 19:25:55.786 [D] setPlaybackRate(1)
+2026-09-13 19:25:55.786 [D] session=8 mediaStatus=4 file=inv_1080p30.mp4
+2026-09-13 19:25:55.796 [D] session=8 mediaStatus=5 file=inv_1080p30.mp4
+2026-09-13 19:26:07.796 [D] session=8 mediaStatus=6 file=inv_1080p30.mp4
+2026-09-13 19:26:07.796 [I] session=9 play index=2/2 file=inv_1080p30.mp4 resumePos=-1
+2026-09-13 19:26:07.796 [D] session=9 mediaStatus=2 file=inv_1080p30.mp4
+2026-09-13 19:26:07.796 [D] setPlaybackRate(1)
+2026-09-13 19:26:07.796 [D] session=9 mediaStatus=4 file=inv_1080p30.mp4
+2026-09-13 19:26:07.813 [D] session=9 mediaStatus=5 file=inv_1080p30.mp4
+2026-09-13 19:26:14.924 [D] session=9 mediaStatus=2 file=inv_1080p30.mp4

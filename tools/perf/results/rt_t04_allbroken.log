@@ -1,27 +1,79 @@
-2026-09-13 16:29:30.002 [I] ==== 视频壁纸模块启动 (diag=on) ====
-2026-09-13 16:29:30.004 [I] VideoWallpaper 初始化完成
-2026-09-13 16:29:30.004 [I] session=1 play index=1/2 file=bad_truncated.mp4 resumePos=-1
-2026-09-13 16:29:30.199 [D] 创建输出: players=1/0 widgets=1/0 audios=1/0
-2026-09-13 16:29:31.286 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-13 16:29:31.287 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-13 16:29:31.606 [W] session=1 媒体错误 file=bad_truncated.mp4 reason=格式不支持 detail=Could not open file
-2026-09-13 16:29:31.768 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-13 16:29:32.003 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-13 16:29:32.106 [I] session=2 play index=1/2 file=bad_truncated.mp4 resumePos=-1
-2026-09-13 16:29:32.116 [W] session=2 媒体错误 file=bad_truncated.mp4 reason=格式不支持 detail=Could not open file
-2026-09-13 16:29:32.996 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-13 16:29:33.617 [I] session=3 play index=1/2 file=bad_truncated.mp4 resumePos=-1
-2026-09-13 16:29:33.624 [W] session=3 媒体错误 file=bad_truncated.mp4 reason=格式不支持 detail=Could not open file
-2026-09-13 16:29:33.624 [W] session=3 曲目不可播 track=1 fails=1 dead=1 reason=格式不支持
-2026-09-13 16:29:33.831 [I] session=4 play index=2/2 file=bad_fake.mp4 resumePos=-1
-2026-09-13 16:29:33.835 [W] session=4 媒体错误 file=bad_fake.mp4 reason=格式不支持 detail=Could not open file
-2026-09-13 16:29:33.999 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-13 16:29:34.338 [I] session=5 play index=2/2 file=bad_fake.mp4 resumePos=-1
-2026-09-13 16:29:34.342 [W] session=5 媒体错误 file=bad_fake.mp4 reason=格式不支持 detail=Could not open file
-2026-09-13 16:29:34.994 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-13 16:29:35.848 [I] session=6 play index=2/2 file=bad_fake.mp4 resumePos=-1
-2026-09-13 16:29:35.852 [W] session=6 媒体错误 file=bad_fake.mp4 reason=格式不支持 detail=Could not open file
-2026-09-13 16:29:35.852 [W] session=6 曲目不可播 track=2 fails=1 dead=2 reason=格式不支持
-2026-09-13 16:29:35.856 [I] teardown n=1 累计 players=1/1 widgets=1/1 audios=1/1
-2026-09-13 16:29:35.871 [I] stopAll: 管线已卸载 session=6
-2026-09-13 16:30:37.764 [I] stopAll: 管线已卸载 session=6
+2026-09-13 19:22:01.609 [I] ==== 视频壁纸模块启动 (diag=on) ====
+2026-09-13 19:22:01.609 [I] VideoWallpaper 初始化完成
+2026-09-13 19:22:01.609 [I] session=1 play index=1/2 file=bad_truncated.mp4 resumePos=-1
+2026-09-13 19:22:01.844 [D] 创建输出: players=1/0 widgets=1/0 audios=1/0
+2026-09-13 19:22:01.899 [D] session=1 mediaStatus=1 file=bad_truncated.mp4
+2026-09-13 19:22:01.899 [D] setLoops(Once) player=22d75619220 widget=22d75605b70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/bad_truncated.mp4
+2026-09-13 19:22:01.899 [D] setPlaybackRate(1)
+2026-09-13 19:22:02.920 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 19:22:02.920 [D] setPlaybackRate(1)
+2026-09-13 19:22:02.920 [D] setPlaybackRate(1)
+2026-09-13 19:22:02.920 [D] setLoops(Once) player=22d75619220 widget=22d75605b70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/bad_truncated.mp4
+2026-09-13 19:22:02.920 [D] setLoops(Once) player=22d75619220 widget=22d75605b70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/bad_truncated.mp4
+2026-09-13 19:22:02.920 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 19:22:03.188 [W] session=1 媒体错误 file=bad_truncated.mp4 reason=格式不支持 detail=Could not open file
+2026-09-13 19:22:03.189 [D] session=1 metaDataChanged file=bad_truncated.mp4
+2026-09-13 19:22:03.189 [D] setPlaybackRate(1)
+2026-09-13 19:22:03.189 [D] session=1 mediaStatus=7 file=bad_truncated.mp4
+2026-09-13 19:22:03.304 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 19:22:03.614 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 19:22:03.689 [D] session=1 metaDataChanged file=
+2026-09-13 19:22:03.689 [D] setPlaybackRate(1)
+2026-09-13 19:22:03.689 [D] session=1 mediaStatus=0 file=
+2026-09-13 19:22:03.689 [I] session=2 play index=1/2 file=bad_truncated.mp4 resumePos=-1
+2026-09-13 19:22:03.696 [D] session=2 mediaStatus=1 file=bad_truncated.mp4
+2026-09-13 19:22:03.696 [D] setLoops(Once) player=22d75619220 widget=22d75605b70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/bad_truncated.mp4
+2026-09-13 19:22:03.696 [D] setPlaybackRate(1)
+2026-09-13 19:22:03.697 [W] session=2 媒体错误 file=bad_truncated.mp4 reason=格式不支持 detail=Could not open file
+2026-09-13 19:22:03.697 [D] session=2 metaDataChanged file=bad_truncated.mp4
+2026-09-13 19:22:03.697 [D] setPlaybackRate(1)
+2026-09-13 19:22:03.697 [D] session=2 mediaStatus=7 file=bad_truncated.mp4
+2026-09-13 19:22:04.607 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 19:22:05.202 [D] session=2 metaDataChanged file=
+2026-09-13 19:22:05.202 [D] setPlaybackRate(1)
+2026-09-13 19:22:05.202 [D] session=2 mediaStatus=0 file=
+2026-09-13 19:22:05.202 [I] session=3 play index=1/2 file=bad_truncated.mp4 resumePos=-1
+2026-09-13 19:22:05.202 [D] session=3 mediaStatus=1 file=bad_truncated.mp4
+2026-09-13 19:22:05.202 [D] setLoops(Once) player=22d75619220 widget=22d75605b70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/bad_truncated.mp4
+2026-09-13 19:22:05.202 [D] setPlaybackRate(1)
+2026-09-13 19:22:05.202 [W] session=3 媒体错误 file=bad_truncated.mp4 reason=格式不支持 detail=Could not open file
+2026-09-13 19:22:05.202 [W] session=3 曲目不可播 track=1 fails=1 dead=1 reason=格式不支持
+2026-09-13 19:22:05.202 [D] session=3 metaDataChanged file=bad_truncated.mp4
+2026-09-13 19:22:05.202 [D] setPlaybackRate(1)
+2026-09-13 19:22:05.202 [D] session=3 mediaStatus=7 file=bad_truncated.mp4
+2026-09-13 19:22:05.405 [I] session=4 play index=2/2 file=bad_fake.mp4 resumePos=-1
+2026-09-13 19:22:05.408 [D] session=4 mediaStatus=1 file=bad_fake.mp4
+2026-09-13 19:22:05.408 [D] setLoops(Once) player=22d75619220 widget=22d75605b70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/bad_fake.mp4
+2026-09-13 19:22:05.408 [D] setPlaybackRate(1)
+2026-09-13 19:22:05.408 [W] session=4 媒体错误 file=bad_fake.mp4 reason=格式不支持 detail=Could not open file
+2026-09-13 19:22:05.408 [D] session=4 metaDataChanged file=bad_fake.mp4
+2026-09-13 19:22:05.408 [D] setPlaybackRate(1)
+2026-09-13 19:22:05.408 [D] session=4 mediaStatus=7 file=bad_fake.mp4
+2026-09-13 19:22:05.615 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 19:22:05.912 [D] session=4 metaDataChanged file=
+2026-09-13 19:22:05.912 [D] setPlaybackRate(1)
+2026-09-13 19:22:05.912 [D] session=4 mediaStatus=0 file=
+2026-09-13 19:22:05.912 [I] session=5 play index=2/2 file=bad_fake.mp4 resumePos=-1
+2026-09-13 19:22:05.916 [D] session=5 mediaStatus=1 file=bad_fake.mp4
+2026-09-13 19:22:05.916 [D] setLoops(Once) player=22d75619220 widget=22d75605b70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/bad_fake.mp4
+2026-09-13 19:22:05.916 [D] setPlaybackRate(1)
+2026-09-13 19:22:05.917 [W] session=5 媒体错误 file=bad_fake.mp4 reason=格式不支持 detail=Could not open file
+2026-09-13 19:22:05.917 [D] session=5 metaDataChanged file=bad_fake.mp4
+2026-09-13 19:22:05.917 [D] setPlaybackRate(1)
+2026-09-13 19:22:05.917 [D] session=5 mediaStatus=7 file=bad_fake.mp4
+2026-09-13 19:22:06.608 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-13 19:22:07.418 [D] session=5 metaDataChanged file=
+2026-09-13 19:22:07.418 [D] setPlaybackRate(1)
+2026-09-13 19:22:07.418 [D] session=5 mediaStatus=0 file=
+2026-09-13 19:22:07.418 [I] session=6 play index=2/2 file=bad_fake.mp4 resumePos=-1
+2026-09-13 19:22:07.418 [D] session=6 mediaStatus=1 file=bad_fake.mp4
+2026-09-13 19:22:07.418 [D] setLoops(Once) player=22d75619220 widget=22d75605b70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/bad_fake.mp4
+2026-09-13 19:22:07.418 [D] setPlaybackRate(1)
+2026-09-13 19:22:07.418 [W] session=6 媒体错误 file=bad_fake.mp4 reason=格式不支持 detail=Could not open file
+2026-09-13 19:22:07.418 [W] session=6 曲目不可播 track=2 fails=1 dead=2 reason=格式不支持
+2026-09-13 19:22:07.426 [I] teardown n=1 累计 players=1/1 widgets=1/1 audios=1/1
+2026-09-13 19:22:07.439 [I] stopAll: 管线已卸载 session=6
+2026-09-13 19:22:07.439 [D] session=6 metaDataChanged file=bad_fake.mp4
+2026-09-13 19:22:07.439 [D] setPlaybackRate(1)
+2026-09-13 19:22:07.439 [D] session=6 mediaStatus=7 file=bad_fake.mp4
+2026-09-13 19:23:09.234 [I] stopAll: 管线已卸载 session=6
