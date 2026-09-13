@@ -153,6 +153,7 @@ private:
     QCheckBox *m_fullscreenPauseBox = nullptr;
     QCheckBox *m_batteryBox = nullptr;
     QCheckBox *m_reclaimBox = nullptr;
+    QCheckBox *m_affinityBox = nullptr;   // 资源友好模式(限制逻辑核, 重启生效)
     QCheckBox *m_autostartBox = nullptr;
     QComboBox *m_screenModeCombo = nullptr;
     QPushButton *m_playBtn = nullptr;

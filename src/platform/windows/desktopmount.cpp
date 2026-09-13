@@ -238,6 +238,16 @@ bool isOnBattery()
     return s.ACLineStatus == 0;
 }
 
+bool applyProcessAffinityLimit(int maxCores)
+{
+    SYSTEM_INFO si = {};
+    GetSystemInfo(&si);
+    if (si.dwNumberOfProcessors <= static_cast<DWORD>(maxCores))
+        return false; // 核数本就不多，不限制
+    const DWORD_PTR mask = (1ULL << maxCores) - 1;
+    return SetProcessAffinityMask(GetCurrentProcess(), mask) != FALSE;
+}
+
 bool acquireSingleInstanceLock()
 {
     // Local\ 前缀=每会话命名空间(同登录会话内唯一)。持有句柄的进程退出时，

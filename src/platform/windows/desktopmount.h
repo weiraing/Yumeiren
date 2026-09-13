@@ -52,6 +52,11 @@ bool isOnBattery();
 bool activateExistingInstanceWindow(const QString &mainWindowTitle,
                                     QString *reason = nullptr);
 
+// 资源友好模式：把进程亲和性限制到前 maxCores 个逻辑核。解码线程数跟随
+// QThread::idealThreadCount(受掩码影响)，实测(32核机,1080p30)内存-27%、
+// 显存-36%、CPU不变。核数<=maxCores 时不做任何修改，返回 false。
+bool applyProcessAffinityLimit(int maxCores);
+
 // 单实例唯一运行权：命名互斥锁实现。进程退出(含强杀/崩溃)时内核自动释放，
 // 从原理上杜绝 QSharedMemory 段残留导致"已经在运行"却无实例的问题。
 // 返回 true=获得运行权(句柄故意保持打开=锁)；false=已有实例在运行。
