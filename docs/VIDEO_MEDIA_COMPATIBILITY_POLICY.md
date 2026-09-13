@@ -56,6 +56,25 @@
 - **代价：高于 24fps 的素材全部慢动作**——60fps→0.4 倍速、30fps→0.8 倍速；≤24fps 素材无变化。这是有意为之的省资源语义，用户可在 UI"帧率上限"中改回"跟随视频"。
 - 默认值 24 存在于：`videowallpaper.h`（成员默认）、`mainwindow.cpp`（下拉默认项 + `video/targetFps` 读取默认）；已保存过设置的用户保持其选择。
 
+## 3.6 循环边界接缝抖动：定位与修复（2026-09-13 实测）
+
+**现象**：单视频 `setLoops(Infinite)` 循环壁纸在回绕瞬间偶发极短促的画面抖动。
+
+**帧级取证**（60fps gdigrab 屏幕捕获 + signalstats 逐帧帧差，`tools/perf/results/loop_capture*.mp4/loop_ydif*.csv`）：
+- 伪影形态 = **1 个源帧（~33ms）的运动跳变**：边界帧差 YDIF 27.6，为正常运动峰值（16）的约 2 倍；**无黑帧、无末帧停滞**。
+- 诊断日志证明边界处后端不发任何事件（无 EndOfMedia/mediaStatusChanged/metaDataChanged，应用层信号处理器未被触发）→ 抖动完全在 Qt FFmpeg 后端内部（回绕 seek 的解码器 flush + 重填），与社区报告的"FFmpeg 后端媒体结束清空视频缓冲"一致（Qt 6.5.3 起行为变化）。后端 `setLoops(Infinite)` 已消除旧手工循环的黑帧，残余即此帧级跳变；其发生概率不稳定（35s 捕获 3 个边界仅 1~2 处尖峰），与"偶发"观感吻合。
+
+**修复（内容级，已 A/B 验证）**：把视频首帧克隆约 3 帧（0.1s）垫到片尾——无论后端丢弃的是尾帧还是头帧，接缝两侧都是同一画面，跳变不可见。实测同条件捕获：**帧差尖峰 2 → 0**。
+
+```powershell
+# 一键生成循环友好副本（不覆盖原文件；输出 .loop.mp4，仅视频轨）
+tools\make_loop_clip.ps1 -InputFile <视频路径>
+# 等价 ffmpeg 命令：
+ffmpeg -i in.mp4 -loop 1 -framerate 30 -t 0.1 -i frame0.png -filter_complex "[0:v][1:v]concat=n=2:v=1:a=0" -map "[out]" -c:v libopenh264 -b:v 8M out.mp4
+```
+
+**其他路径与不推荐项**：升级 Qt（6.10.2 之后的版本是否改进循环回绕未验证，属环境级尝试）；`QT_MEDIA_BACKEND=windows/gstreamer` 切后端违反任务书"不引入 Media Foundation 等框架"约束；双播放器接力可使接缝无感但同文件解码管线翻倍（+~265MB），违背资源目标。
+
 ## 4. 不默认使用 AV1 的理由（任务书 9.5）
 
 | 风险项 | 说明 |

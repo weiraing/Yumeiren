@@ -167,6 +167,10 @@ void VideoWallpaper::layoutOutputs()
         // 然后走与错误一致的跳过链路(重试不会长出视频轨，故不重试)。
         connect(out.player, &QMediaPlayer::mediaStatusChanged, this,
                 [this, out](QMediaPlayer::MediaStatus st) {
+            videodiag::log(videodiag::Level::Debug,
+                QStringLiteral("session=%1 mediaStatus=%2 file=%3")
+                    .arg(m_playbackSessionId).arg(int(st))
+                    .arg(QFileInfo(out.player->source().toLocalFile()).fileName()));
             if (st == QMediaPlayer::EndOfMedia)
                 nextTrack();
             else if (st == QMediaPlayer::LoadedMedia && m_started
@@ -222,6 +226,10 @@ void VideoWallpaper::layoutOutputs()
         // 策略见 docs/VIDEO_MEDIA_COMPATIBILITY_POLICY.md)。
         connect(out.player, &QMediaPlayer::metaDataChanged, this,
                 [this, out, carriesAudio = withAudio] {
+            videodiag::log(videodiag::Level::Debug,
+                QStringLiteral("session=%1 metaDataChanged file=%2")
+                    .arg(m_playbackSessionId)
+                    .arg(QFileInfo(out.player->source().toLocalFile()).fileName()));
             applyAudioPolicy(out, carriesAudio);
             applyPlaybackRate(out.player);
             const QSize res = out.player->metaData()
@@ -667,6 +675,8 @@ void VideoWallpaper::applyPlaybackRate(QMediaPlayer *player)
         if (src > m_targetFps + 0.5)
             rate = m_targetFps / src;
     }
+    videodiag::log(videodiag::Level::Debug,
+        QStringLiteral("setPlaybackRate(%1)").arg(rate));
     player->setPlaybackRate(rate);
 }
 
@@ -694,7 +704,10 @@ void VideoWallpaper::applyAudioPolicy(const VideoOutput &out, bool carriesAudio)
 }
 
 // 单视频循环走后端原生 setLoops(Infinite)：EndOfMedia→setPosition(0) 的手工
-// 循环在换头瞬间解码器 seek 会清空呈现面，壁纸闪黑帧；后端循环无此间隙。
+// 循环在换头瞬间解码器 seek 会清空呈现面，壁纸闪黑帧；后端循环无黑帧间隙，
+// 但实测回绕瞬间仍有约 1 帧的运动跳变(帧差约为正常运动的 2 倍，60fps 屏捕
+// 帧级取证)，且后端不发任何事件、应用层无法拦截。彻底消除需内容级配合：
+// 把首帧克隆 2-3 帧垫到片尾(tools/make_loop_clip.ps1)，跳变在数学上不可见。
 // 多曲目列表仍走 EndOfMedia→nextTrack 手动推进(需要切源)。
 void VideoWallpaper::applyLoopPolicy(QMediaPlayer *player)
 {
