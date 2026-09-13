@@ -16,6 +16,12 @@
 #include <QTimer>
 #include <QUrl>
 #include <QVideoWidget>
+#include <QWindow>
+
+#ifdef Q_OS_WIN
+#define NOMINMAX
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -318,6 +324,18 @@ void VideoWallpaper::remountOutputs()
     // 轻量重挂载：只修正父窗口与位置，不重建解码管线(避免换曲时资源反复销毁)。
     // 位置与尺寸都比对物理像素，纠正历史遗留的错误坐标。
     for (const VideoOutput &out : std::as_const(m_outputs)) {
+        // explorer 重启会销毁其 WorkerW 及挂在下面的我们的原生窗口，而 Qt 并不
+        // 知道原生句柄已死(winId() 会返回陈旧句柄，SetParent 静默失败，壁纸永久
+        // 消失)。挂载前必须检测：句柄已死则销毁 Qt 侧平台窗口并重建，再挂载。
+        if (!IsWindow(reinterpret_cast<HWND>(out.widget->winId()))) {
+            videodiag::log(videodiag::Level::Info,
+                QStringLiteral("壁纸窗口原生句柄已失效(explorer 重启)，重建后重挂"));
+            // QWidget::destroy 是 protected，用其 QWindow 的公开 destroy()
+            // 销毁失效的平台窗口，再经 winId() 触发原生窗口重建
+            if (QWindow *wh = out.widget->windowHandle())
+                wh->destroy();
+            reinterpret_cast<void *>(out.widget->winId());
+        }
         const qreal dpr = out.widget->devicePixelRatioF();
         const QRect phys(int(out.logicalRect.x() * dpr), int(out.logicalRect.y() * dpr),
                          int(out.logicalRect.width() * dpr),
@@ -349,9 +367,11 @@ void VideoWallpaper::scheduleMountFix()
 {
     if (m_mountFixClock->isValid() && m_mountFixClock->elapsed() < 10000)
         return;
-    m_mountFixClock->restart();
+    // 探测失败(explorer 正在重启，Progman 尚未出现)时不重置节流——下个心跳(1s)
+    // 立即重试，把重启后的壁纸黑屏时间从最长 10s 压到 ~2s
     if (!fbswin::ensureWorker())
         return;
+    m_mountFixClock->restart();
     remountOutputs();
 }
 

@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 
 #include "appinfo.h"
+#include "videodiag.h"
 #include "videowallpaper.h"
 
 #include <QApplication>
@@ -106,8 +107,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
         QSettings early = appinfo::settings();
         const QStringList earlyPlaylist =
             early.value(QStringLiteral("video/playlist")).toStringList();
-        if (!earlyPlaylist.isEmpty()
-            && early.value(QStringLiteral("video/wasPlaying"), false).toBool()) {
+        const bool earlyWasPlaying =
+            early.value(QStringLiteral("video/wasPlaying"), false).toBool();
+        if (!earlyPlaylist.isEmpty() && earlyWasPlaying) {
             VideoWallpaper::instance().setPlaylist(earlyPlaylist);
             QString err;
             if (!VideoWallpaper::instance().startPlaying(&err)) {
@@ -115,6 +117,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
                     ? QStringLiteral("视频壁纸自动恢复失败") : err;
                 QTimer::singleShot(0, this, [this, msg] { setLog(msg, true); });
             }
+        } else if (earlyWasPlaying) {
+            // wasPlaying 为真但列表为空：自动恢复被跳过，记录原因避免无声失败
+            videodiag::log(videodiag::Level::Warning,
+                QStringLiteral("自动恢复跳过: 上次标记播放中但播放列表为空"));
         }
     }
 
