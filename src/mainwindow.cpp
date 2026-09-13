@@ -1000,7 +1000,7 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     m_fpsBox->addItems({QStringLiteral("跟随视频"), QStringLiteral("15 FPS"),
                         QStringLiteral("24 FPS"), QStringLiteral("30 FPS"),
                         QStringLiteral("60 FPS")});
-    m_fpsBox->setCurrentIndex(3); // 默认 30 FPS
+    m_fpsBox->setCurrentIndex(2); // 默认 24 FPS(省内存/显存/CPU；高于24fps的素材为慢动作)
     styleCombo(m_fpsBox);
     m_fpsBox->setToolTip(QStringLiteral(
         "限制壁纸呈现帧率：视频帧率高于上限时按上限放慢呈现节奏(画面为慢动作效果)；"
@@ -2039,7 +2039,7 @@ void MainWindow::loadSettings()
     m_fullscreenPauseBox->setChecked(s.value(QStringLiteral("video/pauseFullscreen"), true).toBool());
     m_batteryBox->setChecked(s.value(QStringLiteral("video/pauseBattery"), false).toBool());
     {
-        const int targetFps = s.value(QStringLiteral("video/targetFps"), 30).toInt();
+        const int targetFps = s.value(QStringLiteral("video/targetFps"), 24).toInt();
         static const int fpsValues[] = {0, 15, 24, 30, 60};
         for (int i = 0; i < 5; ++i)
             if (fpsValues[i] == targetFps) {

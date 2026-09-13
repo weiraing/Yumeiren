@@ -9,7 +9,8 @@ param(
     [string]$AutoStartMs = "0",
     [string]$Volume = "0",
     [string]$WasPlaying = "true",
-    [string]$PauseFullscreen = "true"
+    [string]$PauseFullscreen = "true",
+    [string]$TargetFps = "0"
 )
 $ErrorActionPreference = "Continue"
 Add-Type -MemberDefinition @'
@@ -26,7 +27,7 @@ Add-Type -MemberDefinition @'
 try {
     & (Join-Path $PSScriptRoot 'run_scenario.ps1') -PlaylistCsv $PlaylistCsv -WasPlaying $WasPlaying `
         -AutoStopMs $AutoStopMs -AutoStartMs $AutoStartMs -Volume $Volume `
-        -PauseFullscreen $PauseFullscreen `
+        -PauseFullscreen $PauseFullscreen -TargetFps $TargetFps `
         -DurationSec $DurationSec -OutCsv $OutCsv
 } finally {
     [Win32.W32Helper]::SetThreadExecutionState(0x80000000) | Out-Null # clear display requirement

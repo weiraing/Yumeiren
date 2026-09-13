@@ -114,7 +114,10 @@ private:
     bool m_monitorOn = true;       // 显示器电源状态(MainWindow 转发)
     int m_suspendReasons = 0;      // 当前生效的挂起原因
     int m_lastEmittedReasons = -1; // 去重：挂起原因不变时不重复发状态文本
-    int m_targetFps = 30;          // 帧率上限(0=跟随视频原生帧率)
+    // 帧率上限(0=跟随视频原生帧率)。默认 24：高于 24fps 的素材按比例放慢播放，
+    // 实测可显著降低内存/显存/CPU(4K60 约 -40%，见 VIDEO_MEDIA_COMPATIBILITY_POLICY.md)。
+    // 注意语义是"慢动作"而非丢帧渲染。
+    int m_targetFps = 24;
 
     // 错误恢复(阶段3)：每曲目独立失败计数；跳过一次即入失败名单(原地重试
     // 已在跳过前完成)，不再参与后续轮换——避免坏曲目每圈解码器重建的乒乓

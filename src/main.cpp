@@ -16,8 +16,15 @@ int main(int argc, char *argv[])
     QApplication::setApplicationName(appinfo::id());
     QApplication::setApplicationVersion(QStringLiteral("1.0.0"));
 
-    // 单实例守卫：两个实例会各建一套解码管线并互抢 WorkerW 挂载点
+    // 单实例守卫：两个实例会各建一套解码管线并互抢 WorkerW 挂载点。
+    // Windows 上进程被强杀/崩溃后共享内存段会残留（引用计数无人递减），
+    // 导致之后永远"已经在运行"——attach+detach 清掉残段后重试一次即可自愈；
+    // 真有另一实例在跑时重试依旧失败，提示不变。
     QSharedMemory instanceGuard(QStringLiteral("Yumeiren.single-instance"));
+    if (!instanceGuard.create(1)) {
+        if (instanceGuard.attach())
+            instanceGuard.detach();
+    }
     if (!instanceGuard.create(1)) {
         QMessageBox::information(nullptr, QStringLiteral("虞美人"),
                                  QStringLiteral("虞美人已经在运行。"));
