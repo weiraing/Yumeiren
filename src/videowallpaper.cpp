@@ -323,18 +323,25 @@ void VideoWallpaper::remountOutputs()
 {
     // 轻量重挂载：只修正父窗口与位置，不重建解码管线(避免换曲时资源反复销毁)。
     // 位置与尺寸都比对物理像素，纠正历史遗留的错误坐标。
-    for (const VideoOutput &out : std::as_const(m_outputs)) {
+    for (int i = 0; i < m_outputs.size(); ++i) {
+        VideoOutput &out = m_outputs[i];
         // explorer 重启会销毁其 WorkerW 及挂在下面的我们的原生窗口，而 Qt 并不
-        // 知道原生句柄已死(winId() 会返回陈旧句柄，SetParent 静默失败，壁纸永久
-        // 消失)。挂载前必须检测：句柄已死则销毁 Qt 侧平台窗口并重建，再挂载。
+        // 知道原生句柄已死(winId() 返回陈旧句柄)。仅重建原生窗口不够：实测
+        // QVideoWidget 的呈现面(D3D 交换链)随旧窗口一起失效，播放器继续向旧
+        // 表面送帧，新窗口永远收不到画面(壁纸"消失")。必须换全新 QVideoWidget
+        // 并重新绑定视频输出，让呈现面从零建立。
         if (!IsWindow(reinterpret_cast<HWND>(out.widget->winId()))) {
             videodiag::log(videodiag::Level::Info,
-                QStringLiteral("壁纸窗口原生句柄已失效(explorer 重启)，重建后重挂"));
-            // QWidget::destroy 是 protected，用其 QWindow 的公开 destroy()
-            // 销毁失效的平台窗口，再经 winId() 触发原生窗口重建
-            if (QWindow *wh = out.widget->windowHandle())
-                wh->destroy();
-            reinterpret_cast<void *>(out.widget->winId());
+                QStringLiteral("壁纸窗口原生句柄已失效(explorer 重启)，更换视频窗口并重绑输出"));
+            QVideoWidget *old = out.widget;
+            QVideoWidget *nw = new QVideoWidget;
+            nw->setAspectRatioMode(old->aspectRatioMode());
+            nw->setWindowFlags(old->windowFlags());
+            nw->setGeometry(old->geometry());
+            out.player->setVideoOutput(nw); // 视频输出重绑到新窗口(旧 sink 随之释放)
+            out.widget = nw;
+            nw->show();
+            old->deleteLater();
         }
         const qreal dpr = out.widget->devicePixelRatioF();
         const QRect phys(int(out.logicalRect.x() * dpr), int(out.logicalRect.y() * dpr),

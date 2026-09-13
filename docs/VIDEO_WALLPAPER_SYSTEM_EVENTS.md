@@ -28,7 +28,7 @@
 | 睡眠/唤醒 | 走熄屏同路径（PBT_APMSUSPEND→monitorOn=false） | ⚠️ 推断（与熄屏同一代码路径，该路径已被真实事件验证）；主动睡眠/唤醒需人工确认一次 | 代码路径 mainwindow.cpp:1511-1527 |
 | 播放中锁屏 / 解锁恢复 | 暂停 / 恢复，不重复创建 | ⚠️ 探测逻辑实证（基线 S6 系列验证 OpenInputDesktop 判定），自动化锁屏需输入密码，留人工清单 | 手工清单 tests/video_wallpaper/README.md |
 | 快速重复锁屏解锁 | 幂等（reasons 位掩码去重，无重复创建） | ⚠️ 代码审查：evaluateSuspend 每 1s 重算 reasons，播放中重复暂停/恢复不创建对象；留人工 | 同上 |
-| Explorer 重启 | ≤10s 重挂载 | ✅ **真实重启实测（2026-09-13）**：用户报告"恢复默认(卸载)后视频壁纸消失"——根因为 explorer 重启销毁跨进程挂载的原生窗口，Qt 侧陈旧句柄使重挂载静默失败。修复：重挂载前检测 `IsWindow`，句柄已死则经 `QWindow::destroy()+winId()` 重建原生窗口再挂载；探测失败(重启中)不再重置节流。实测 explorer 两次重启均在数秒内自动恢复（诊断日志 `重建后重挂`×2，见 22:32/22:40 取证） | `videowallpaper.cpp remountOutputs/scheduleMountFix` |
+| Explorer 重启 | ≤10s 重挂载 | ✅ **真实重启实测（2026-09-13）**：用户报告"恢复默认(卸载)后视频壁纸消失"——根因为 explorer 重启销毁跨进程挂载的原生窗口，Qt 侧陈旧句柄使重挂载静默失败。修复 v1：重挂载前检测 `IsWindow` 重建原生窗口——实测播放器恢复但画面仍不显示（QVideoWidget 的 D3D 交换链呈现面随旧窗口失效，帧进不了新窗口）。修复 v2（最终）：句柄死亡时**更换全新 QVideoWidget 并重新绑定视频输出**（`setVideoOutput`），呈现面从零建立。像素级验证：explorer 重启后两张相隔 1.2s 的桌面截图画面明显不同=视频真实播放（tools/recovery_a|b.png + 诊断日志 `更换视频窗口并重绑输出`）。探测失败(重启中)不再重置节流。 | `videowallpaper.cpp remountOutputs/scheduleMountFix` |
 | 拔出/接入副显示器、改主屏分辨率、改缩放 | 重建布局，无黑屏/残留 | ⚠️ 单屏机器无法复现多屏场景（见 MULTI_MONITOR_VIDEO_RESOURCE_ANALYSIS.md）；单屏改分辨率/缩放走同一 scheduleRelayout 路径，编译运行无回归 | 手工清单（双屏） |
 | 全屏应用暂停/恢复 | GPU→0，退出后 <1s 恢复 | ✅ 上一阶段 S6'' 实测 | docs/perf/perf-comparison.md |
 
