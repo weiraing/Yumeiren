@@ -94,9 +94,14 @@ void runComboSelfTest(QWidget *window);
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 {
     setWindowTitle(appinfo::windowTitle()); // 原生标题=Yumeiren(窗口行); 品牌名在自绘标题栏
-    resize(990, 780);
-    // 最小尺寸保证图片浏览/调整参数等模块不被挤压隐藏
     setMinimumSize(880, 680);
+    // 初始尺寸自适应屏幕：首选 1120×900，限制在可用工作区的 94% 内(不低于最小
+    // 尺寸，Qt 会自动收敛)。此前固定 990×780 在多数屏幕上会把图片背景页底部的
+    // 按钮行裁掉一半，需要滚动才能看到。
+    {
+        const QRect avail = QGuiApplication::primaryScreen()->availableGeometry();
+        resize(QSize(1120, 900).boundedTo(avail.size() * 0.94));
+    }
     // 标题栏自绘方案：保留 WS_THICKFRAME(圆角/阴影/贴边由 DWM 提供)，
     // 通过 WM_NCCALCSIZE 隐藏系统标题栏，WM_NCHITTEST 实现边缘缩放与标题拖动。
 
