@@ -20,3 +20,4 @@ tools/perf/results/*.mp4
 loop_ydif*.csv
 
 tools/.cmsg.txt
+dist/
