@@ -6,6 +6,7 @@
 
 #include "appinfo.h"
 #include "mainwindow.h"
+#include "videowallpaper.h"
 
 int main(int argc, char *argv[])
 {
@@ -33,5 +34,13 @@ int main(int argc, char *argv[])
 
     MainWindow w;
     w.show();
+
+    // 自动化内存实验探针(第二阶段)：loadSettings 已在 MainWindow 构造中把播放列表
+    // 写入 VideoWallpaper，此处再按 YUMEIREN_PROBE_STAGE 建立受控媒体栈状态。
+    // 正常运行不设置该环境变量，本分支不执行。
+    if (const QString probeStage = qEnvironmentVariable("YUMEIREN_PROBE_STAGE");
+        !probeStage.isEmpty())
+        VideoWallpaper::instance().runProbeStage(probeStage);
+
     return app.exec();
 }

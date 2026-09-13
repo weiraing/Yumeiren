@@ -60,6 +60,15 @@ VideoWallpaper::VideoWallpaper(QObject *parent) : QObject(parent)
     });
     m_reclaimTimer->start();
 
+    // 关闭/重载实验驱动(仅自动化测试使用)：定时调用 stopAll/startPlaying，
+    // 用于验证“停止→等待→重载”后内存回落并复现同一基线(排查 deleteLater 残留)。
+    if (const int stopMs = qEnvironmentVariableIntValue("YUMEIREN_AUTO_STOP_MS");
+        stopMs > 0)
+        QTimer::singleShot(stopMs, this, &VideoWallpaper::stopAll);
+    if (const int startMs = qEnvironmentVariableIntValue("YUMEIREN_AUTO_START_MS");
+        startMs > 0)
+        QTimer::singleShot(startMs, this, [this] { startPlaying(nullptr); });
+
     // 分辨率/DPI/显示器热插拔变化 → 防抖后重建布局(仅播放中有效)。
     // QScreen 没有 devicePixelRatioChanged 信号；DPI 变化会同时触发 geometryChanged。
     const auto screens = QGuiApplication::screens();
@@ -624,6 +633,41 @@ void VideoWallpaper::setReclaimMemory(bool on)
 void VideoWallpaper::trimMemory()
 {
     fbswin::trimProcessMemory();
+}
+
+// 内存归因探针：把内存增量拆分到“创建播放器/设置媒体源/开始解码/创建呈现表面”
+// 四个阶段。对象独立于 m_outputs(不进状态机、不触发回收定时器的判断)，进程即测
+// 即弃；正常发布路径不会设置 YUMEIREN_PROBE_STAGE，此函数不执行。
+void VideoWallpaper::runProbeStage(const QString &stage)
+{
+    if (stage == QLatin1String("B") || stage == QLatin1String("C")
+        || stage == QLatin1String("D") || stage == QLatin1String("E")) {
+        m_probePlayer = new QMediaPlayer(this);
+        m_probeAudio = new QAudioOutput(this);
+        m_probeAudio->setMuted(true);
+        m_probePlayer->setAudioOutput(m_probeAudio);
+    }
+    if (stage == QLatin1String("B"))
+        return;
+    const QStringList files = appinfo::settings()
+                                  .value(QStringLiteral("video/playlist")).toStringList();
+    if (files.isEmpty())
+        return;
+    const QUrl url = QUrl::fromLocalFile(files.first());
+    if (stage == QLatin1String("E")) {
+        m_probeWidget = new QVideoWidget;
+        m_probeWidget->setAspectRatioMode(Qt::IgnoreAspectRatio);
+        m_probeWidget->setWindowFlags(Qt::FramelessWindowHint | Qt::Tool
+                                      | Qt::WindowTransparentForInput);
+        m_probePlayer->setVideoOutput(m_probeWidget);
+        const QRect g = QGuiApplication::primaryScreen()->geometry();
+        m_probeWidget->setGeometry(g);
+        m_probeWidget->show();
+        fbswin::mountBehindIcons(m_probeWidget, g);
+    }
+    m_probePlayer->setSource(url);
+    if (stage == QLatin1String("D"))
+        m_probePlayer->play(); // 无 QVideoWidget：测纯解码开销，不建呈现表面
 }
 
 void VideoWallpaper::emitTrackState()

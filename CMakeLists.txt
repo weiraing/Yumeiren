@@ -69,3 +69,9 @@ qt_add_resources(YumeirenTest app_res
     BASE resources
     FILES ${APP_RESOURCES}
 )
+
+# QVideoSink A/B 实验探针(第二阶段内存归因；非产品组件，可整体删除)。
+qt_add_executable(SinkProbe WIN32
+    tools/sinkprobe/main.cpp
+)
+target_link_libraries(SinkProbe PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::MultimediaWidgets)

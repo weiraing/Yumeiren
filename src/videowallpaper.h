@@ -46,6 +46,10 @@ public:
     void setTargetFps(int fps);
     bool isStarted() const { return m_started; }
     void evaluateSuspend();
+    // 自动化内存实验探针(仅 YUMEIREN_PROBE_STAGE 环境变量驱动，正常运行不触发)：
+    // B=仅创建 QMediaPlayer+QAudioOutput / C=B+设置媒体源 / D=C+play()(无视频窗口) /
+    // E=C+创建并挂载 QVideoWidget(不播放)。用于把内存增量归因到具体阶段。
+    void runProbeStage(const QString &stage);
 
 signals:
     void playbackStateChanged(const QString &text);
@@ -123,6 +127,11 @@ private:
     QList<VideoOutput> m_outputs;
     QTimer *m_fullscreenTimer = nullptr;
     QTimer *m_reclaimTimer = nullptr;
+
+    // 探针专用对象(独立于 m_outputs，不参与状态机；由父对象持有至进程退出)
+    QMediaPlayer *m_probePlayer = nullptr;
+    QAudioOutput *m_probeAudio = nullptr;
+    QVideoWidget *m_probeWidget = nullptr;
 };
 
 #endif // VIDEOWALLPAPER_H
