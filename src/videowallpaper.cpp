@@ -715,6 +715,12 @@ void VideoWallpaper::applyLoopPolicy(QMediaPlayer *player)
         return;
     const bool seamlessLoop = m_autoLoop && !m_random && m_playlist.size() == 1;
     player->setLoops(seamlessLoop ? QMediaPlayer::Infinite : QMediaPlayer::Once);
+    videodiag::log(videodiag::Level::Debug,
+        QStringLiteral("setLoops(%1) player=%2 widget=%3 source=%4")
+            .arg(seamlessLoop ? QStringLiteral("Infinite") : QStringLiteral("Once"))
+            .arg(quintptr(player), 0, 16)
+            .arg(quintptr(player->videoOutput()), 0, 16)
+            .arg(player->source().toString()));
 }
 
 void VideoWallpaper::setAutoLoop(bool on)
