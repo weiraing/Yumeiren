@@ -260,13 +260,18 @@ bool activateExistingInstanceWindow(const QString &mainWindowTitle, QString *rea
             *reason = r;
         return false;
     };
-    // 1) 找到同 exe 的已运行实例(排除本进程)
-    wchar_t selfPath[MAX_PATH] = {};
-    GetModuleFileNameW(nullptr, selfPath, MAX_PATH);
-    const wchar_t *selfBase = selfPath;
-    for (const wchar_t *p = selfPath; *p; ++p)
-        if (*p == L'\\' || *p == L'/')
-            selfBase = p + 1;
+    // 1) 找到本产品任一二进制的已运行实例(排除本进程)。互斥锁是全产品共享的
+    //    (Yumeiren.single-instance)，运行中的可能是 Yumeiren.exe 也可能是
+    //    YumeirenTest.exe——只按自身 exe 名找会漏配(实测复现：跨 exe 二次启动弹"已在运行")。
+    const QString selfExe = [] {
+        wchar_t buf[MAX_PATH] = {};
+        GetModuleFileNameW(nullptr, buf, MAX_PATH);
+        return QString::fromWCharArray(buf);
+    }();
+    const QString selfName = selfExe.section(QLatin1Char('\\'), -1).toLower();
+    const QStringList productExes = { QStringLiteral("yumeiren.exe"),
+                                      QStringLiteral("yumeirentest.exe") };
+    Q_UNUSED(selfName);
     DWORD targetPid = 0;
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snap != INVALID_HANDLE_VALUE) {
@@ -274,7 +279,9 @@ bool activateExistingInstanceWindow(const QString &mainWindowTitle, QString *rea
         pe.dwSize = sizeof(pe);
         if (Process32FirstW(snap, &pe)) {
             do {
-                if (_wcsicmp(pe.szExeFile, selfBase) == 0
+                const QString exe =
+                    QString::fromWCharArray(pe.szExeFile).toLower();
+                if (productExes.contains(exe)
                     && pe.th32ProcessID != GetCurrentProcessId()) {
                     targetPid = pe.th32ProcessID;
                     break;
@@ -284,7 +291,7 @@ bool activateExistingInstanceWindow(const QString &mainWindowTitle, QString *rea
         CloseHandle(snap);
     }
     if (!targetPid)
-        return fail(QStringLiteral("未找到已运行的同名进程"));
+        return fail(QStringLiteral("未找到已运行的产品进程"));
 
     // 2) 该实例的可见顶层主窗口：标题精确匹配(壁纸窗口无标题，不会误中)
     const std::wstring wantTitle = mainWindowTitle.toStdWString();
