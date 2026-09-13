@@ -16,7 +16,8 @@ inline constexpr const char kId[] = "Yumeiren";
 inline constexpr const char kLegacyId[] = "FolderBgStudio";
 
 QString id();          // "Yumeiren"
-QString displayName(); // text shown in the title bar and the sidebar
+QString displayName(); // 品牌名(侧边栏/自绘标题栏): "虞美人"
+QString windowTitle(); // 原生窗口标题(任务管理器窗口行/单实例唤起匹配): "Yumeiren"
 
 QString localAppDataDir();
 QString dataRoot();        // %LOCALAPPDATA%\Yumeiren

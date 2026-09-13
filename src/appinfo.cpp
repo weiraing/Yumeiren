@@ -52,6 +52,13 @@ QString displayName()
     return QStringLiteral("虞美人");
 }
 
+// 原生窗口标题(任务栏/Alt-Tab/任务管理器窗口行显示的就是它)。
+// 与品牌名分离：管理器里进程行显示 FileDescription"虞美人"、窗口行显示"Yumeiren"
+QString windowTitle()
+{
+    return QStringLiteral("Yumeiren");
+}
+
 QString localAppDataDir()
 {
     QString base = qEnvironmentVariable("LOCALAPPDATA");

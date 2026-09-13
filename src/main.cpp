@@ -49,7 +49,7 @@ int main(int argc, char *argv[])
                 why.clear();
             }
             activated =
-                fbswin::activateExistingInstanceWindow(appinfo::displayName(), &why);
+                fbswin::activateExistingInstanceWindow(appinfo::windowTitle(), &why);
         }
         // 守卫结果写按 PID 独立文件：主日志可能被已运行实例锁定
         {

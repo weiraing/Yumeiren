@@ -93,7 +93,7 @@ void runComboSelfTest(QWidget *window);
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 {
-    setWindowTitle(appinfo::displayName());
+    setWindowTitle(appinfo::windowTitle()); // 原生标题=Yumeiren(窗口行); 品牌名在自绘标题栏
     resize(990, 780);
     // 最小尺寸保证图片浏览/调整参数等模块不被挤压隐藏
     setMinimumSize(880, 680);

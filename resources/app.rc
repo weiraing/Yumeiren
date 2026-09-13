@@ -15,7 +15,7 @@ BEGIN
     BEGIN
         BLOCK "080404b0"
         BEGIN
-            VALUE "FileDescription", "虞美人 - 文件夹美化与动态壁纸工具"
+            VALUE "FileDescription", "虞美人"
             VALUE "FileVersion", "1.0.0.0"
             VALUE "ProductName", "Yumeiren"
             VALUE "ProductVersion", "1.0.0.0"
