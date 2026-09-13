@@ -54,6 +54,7 @@ protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
     bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
     void changeEvent(QEvent *event) override;
+    void closeEvent(QCloseEvent *event) override; // 保存窗口几何到统一配置
 
 private:
     // UI builders

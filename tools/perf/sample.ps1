@@ -1,4 +1,4 @@
-# Phase2 baseline sampler: per-interval process + GPU metrics for one PID -> CSV.
+﻿# Phase2 baseline sampler: per-interval process + GPU metrics for one PID -> CSV.
 # CPU% is normalized by logical core count (matches Task Manager semantics).
 # GPU% is the SUM over all GPU engine instances of this PID (multi-engine, may exceed 100).
 param(

@@ -6,6 +6,8 @@
 #include <QStyleFactory>
 
 #include "appinfo.h"
+#include "config/AppConfig.h"
+#include "config/ConfigKeys.h"
 #include "mainwindow.h"
 #include "platform/windows/desktopmount.h"
 #include "videodiag.h"
@@ -24,12 +26,14 @@ int main(int argc, char *argv[])
     // 真有另一实例在跑时重试依旧失败，提示不变。
     videodiag::init(); // 守卫阶段即可记录诊断(幂等)
 
+    AppConfig::instance().load(); // 统一配置: 主窗口创建前加载(目录创建/迁移/校验)
+
     // 资源友好模式(默认开)：限制进程到前 4 个逻辑核。解码线程数跟随
     // QThread::idealThreadCount(受亲和性掩码影响)，实测(32核机,1080p30)
     // 内存 -27%、显存 -36%、CPU 不变。在 QApplication 构造后立即设置，
     // 使全部后续线程继承掩码；设置 video/affinityLimit=false 关闭。
-    if (appinfo::settings()
-            .value(QStringLiteral("video/affinityLimit"), true).toBool()) {
+    if (AppConfig::instance()
+            .value(ConfigKeys::Video::AffinityLimit, true).toBool()) {
         if (fbswin::applyProcessAffinityLimit(4))
             videodiag::log(videodiag::Level::Info,
                 QStringLiteral("资源友好模式: 进程已限制到 4 个逻辑核"));

@@ -24,6 +24,7 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets)
 set(YUMEIREN_SOURCES
     src/main.cpp
     src/appinfo.cpp
+    src/config/AppConfig.cpp
     src/mainwindow.cpp
     src/imageprocess.cpp
     src/engine.cpp

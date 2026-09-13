@@ -1,33 +1,88 @@
-2026-09-13 19:19:16.884 [I] ==== 视频壁纸模块启动 (diag=on) ====
-2026-09-13 19:19:16.884 [I] VideoWallpaper 初始化完成
-2026-09-13 19:19:16.884 [I] session=1 play index=1/1 file=inv_1080p30.mp4 resumePos=-1
-2026-09-13 19:19:17.079 [D] 创建输出: players=1/0 widgets=1/0 audios=1/0
-2026-09-13 19:19:17.126 [D] session=1 mediaStatus=1 file=inv_1080p30.mp4
-2026-09-13 19:19:17.126 [D] setLoops(Infinite) player=1bb630b4390 widget=1bb630a2c70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/inv_1080p30.mp4
-2026-09-13 19:19:17.126 [D] setPlaybackRate(1)
-2026-09-13 19:19:18.119 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-13 19:19:18.119 [D] setPlaybackRate(1)
-2026-09-13 19:19:18.119 [D] setPlaybackRate(1)
-2026-09-13 19:19:18.119 [D] setLoops(Infinite) player=1bb630b4390 widget=1bb630a2c70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/inv_1080p30.mp4
-2026-09-13 19:19:18.119 [D] setLoops(Infinite) player=1bb630b4390 widget=1bb630a2c70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/inv_1080p30.mp4
-2026-09-13 19:19:18.119 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-13 19:19:18.408 [D] session=1 metaDataChanged file=inv_1080p30.mp4
-2026-09-13 19:19:18.408 [D] setPlaybackRate(1)
-2026-09-13 19:19:18.408 [D] session=1 mediaStatus=2 file=inv_1080p30.mp4
-2026-09-13 19:19:18.502 [D] session=1 mediaStatus=4 file=inv_1080p30.mp4
-2026-09-13 19:19:18.662 [D] session=1 mediaStatus=5 file=inv_1080p30.mp4
-2026-09-13 19:20:16.876 [D] session=1 mediaStatus=2 file=inv_1080p30.mp4
-2026-09-13 19:20:16.882 [I] teardown n=1 累计 players=1/1 widgets=1/1 audios=1/1
-2026-09-13 19:20:16.904 [I] stopAll: 管线已卸载 session=1
-2026-09-13 19:20:46.875 [I] session=2 play index=1/1 file=inv_1080p30.mp4 resumePos=-1
-2026-09-13 19:20:46.875 [D] 创建输出: players=2/1 widgets=2/1 audios=2/1
-2026-09-13 19:20:46.896 [D] session=2 mediaStatus=1 file=inv_1080p30.mp4
-2026-09-13 19:20:46.896 [D] setLoops(Infinite) player=1bb29064830 widget=1bb201e91f0 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/inv/inv_1080p30.mp4
-2026-09-13 19:20:46.896 [D] setPlaybackRate(1)
-2026-09-13 19:20:46.956 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-13 19:20:46.958 [D] session=2 metaDataChanged file=inv_1080p30.mp4
-2026-09-13 19:20:46.958 [D] setPlaybackRate(1)
-2026-09-13 19:20:46.958 [D] session=2 mediaStatus=2 file=inv_1080p30.mp4
-2026-09-13 19:20:47.000 [D] session=2 mediaStatus=4 file=inv_1080p30.mp4
-2026-09-13 19:20:47.019 [D] session=2 mediaStatus=5 file=inv_1080p30.mp4
-2026-09-13 19:21:56.002 [D] session=2 mediaStatus=2 file=inv_1080p30.mp4
+2026-09-14 02:57:04.077 [I] ==== 视频壁纸模块启动 (diag=on) ====
+2026-09-14 02:57:04.078 [I] 配置读取: path=C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/config/.ini exists=1 size=18568 keys=41 wasPlaying=0
+2026-09-14 02:57:04.079 [I] 配置校验: 补齐缺失 0 项, 修复非法 16 项
+2026-09-14 02:57:04.090 [I] 配置已加载: C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/config/.ini
+2026-09-14 02:57:04.090 [I] 资源友好模式: 进程已限制到 4 个逻辑核
+2026-09-14 02:57:04.092 [I] VideoWallpaper 初始化完成
+2026-09-14 02:57:04.092 [I] session=1 play index=1/1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4 resumePos=-1
+2026-09-14 02:57:04.355 [D] 创建输出: players=1/0 widgets=1/0 audios=1/0
+2026-09-14 02:57:04.411 [D] session=1 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
+2026-09-14 02:57:04.411 [D] setLoops(Infinite) player=222cd8a8e90 widget=222cd8b68b0 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonvnv_1080p30.mp4
+2026-09-14 02:57:04.411 [D] setPlaybackRate(1)
+2026-09-14 02:57:05.152 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-14 02:57:05.152 [D] setPlaybackRate(1)
+2026-09-14 02:57:05.152 [D] setPlaybackRate(1)
+2026-09-14 02:57:05.152 [D] setLoops(Infinite) player=222cd8a8e90 widget=222cd8b68b0 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonvnv_1080p30.mp4
+2026-09-14 02:57:05.152 [D] setLoops(Infinite) player=222cd8a8e90 widget=222cd8b68b0 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonvnv_1080p30.mp4
+2026-09-14 02:57:05.152 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-14 02:57:05.330 [W] session=1 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4 reason=格式不支持 detail=Could not open file
+2026-09-14 02:57:05.330 [D] session=1 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
+2026-09-14 02:57:05.330 [D] setPlaybackRate(1)
+2026-09-14 02:57:05.330 [D] session=1 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
+2026-09-14 02:57:05.442 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-14 02:57:05.830 [D] session=1 metaDataChanged file=
+2026-09-14 02:57:05.830 [D] setPlaybackRate(1)
+2026-09-14 02:57:05.830 [D] session=1 mediaStatus=0 file=
+2026-09-14 02:57:05.830 [I] session=2 play index=1/1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4 resumePos=-1
+2026-09-14 02:57:05.835 [D] session=2 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
+2026-09-14 02:57:05.835 [D] setLoops(Infinite) player=222cd8a8e90 widget=222cd8b68b0 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonvnv_1080p30.mp4
+2026-09-14 02:57:05.835 [D] setPlaybackRate(1)
+2026-09-14 02:57:05.836 [W] session=2 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4 reason=格式不支持 detail=Could not open file
+2026-09-14 02:57:05.836 [D] session=2 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
+2026-09-14 02:57:05.836 [D] setPlaybackRate(1)
+2026-09-14 02:57:05.836 [D] session=2 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
+2026-09-14 02:57:06.091 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-14 02:57:07.100 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-14 02:57:07.336 [D] session=2 metaDataChanged file=
+2026-09-14 02:57:07.336 [D] setPlaybackRate(1)
+2026-09-14 02:57:07.336 [D] session=2 mediaStatus=0 file=
+2026-09-14 02:57:07.336 [I] session=3 play index=1/1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4 resumePos=-1
+2026-09-14 02:57:07.338 [D] session=3 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
+2026-09-14 02:57:07.338 [D] setLoops(Infinite) player=222cd8a8e90 widget=222cd8b68b0 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonvnv_1080p30.mp4
+2026-09-14 02:57:07.338 [D] setPlaybackRate(1)
+2026-09-14 02:57:07.339 [W] session=3 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4 reason=格式不支持 detail=Could not open file
+2026-09-14 02:57:07.339 [W] session=3 曲目不可播 track=1 fails=1 dead=1 reason=格式不支持
+2026-09-14 02:57:07.344 [I] teardown n=1 累计 players=1/1 widgets=1/1 audios=1/1
+2026-09-14 02:57:07.358 [I] stopAll: 管线已卸载 session=3
+2026-09-14 02:57:07.359 [D] session=3 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
+2026-09-14 02:57:07.359 [D] setPlaybackRate(1)
+2026-09-14 02:57:07.359 [D] session=3 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
+2026-09-14 02:58:04.096 [I] stopAll: 管线已卸载 session=3
+2026-09-14 02:58:34.094 [I] session=4 play index=1/1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4 resumePos=-1
+2026-09-14 02:58:34.095 [D] 创建输出: players=2/1 widgets=2/1 audios=2/1
+2026-09-14 02:58:34.136 [D] session=4 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
+2026-09-14 02:58:34.137 [D] setLoops(Infinite) player=222cd8b0e30 widget=222fa6888a0 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonvnv_1080p30.mp4
+2026-09-14 02:58:34.137 [D] setPlaybackRate(1)
+2026-09-14 02:58:34.211 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-14 02:58:34.212 [W] session=4 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4 reason=格式不支持 detail=Could not open file
+2026-09-14 02:58:34.212 [D] session=4 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
+2026-09-14 02:58:34.212 [D] setPlaybackRate(1)
+2026-09-14 02:58:34.212 [D] session=4 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
+2026-09-14 02:58:34.721 [D] session=4 metaDataChanged file=
+2026-09-14 02:58:34.721 [D] setPlaybackRate(1)
+2026-09-14 02:58:34.721 [D] session=4 mediaStatus=0 file=
+2026-09-14 02:58:34.721 [I] session=5 play index=1/1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4 resumePos=-1
+2026-09-14 02:58:34.723 [D] session=5 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
+2026-09-14 02:58:34.723 [D] setLoops(Infinite) player=222cd8b0e30 widget=222fa6888a0 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonvnv_1080p30.mp4
+2026-09-14 02:58:34.723 [D] setPlaybackRate(1)
+2026-09-14 02:58:34.723 [W] session=5 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4 reason=格式不支持 detail=Could not open file
+2026-09-14 02:58:34.723 [D] session=5 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
+2026-09-14 02:58:34.723 [D] setPlaybackRate(1)
+2026-09-14 02:58:34.723 [D] session=5 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
+2026-09-14 02:58:35.094 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-14 02:58:36.095 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-14 02:58:36.227 [D] session=5 metaDataChanged file=
+2026-09-14 02:58:36.227 [D] setPlaybackRate(1)
+2026-09-14 02:58:36.227 [D] session=5 mediaStatus=0 file=
+2026-09-14 02:58:36.227 [I] session=6 play index=1/1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4 resumePos=-1
+2026-09-14 02:58:36.231 [D] session=6 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
+2026-09-14 02:58:36.231 [D] setLoops(Infinite) player=222cd8b0e30 widget=222fa6888a0 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonvnv_1080p30.mp4
+2026-09-14 02:58:36.231 [D] setPlaybackRate(1)
+2026-09-14 02:58:36.233 [W] session=6 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4 reason=格式不支持 detail=Could not open file
+2026-09-14 02:58:36.233 [W] session=6 曲目不可播 track=1 fails=1 dead=1 reason=格式不支持
+2026-09-14 02:58:36.240 [I] teardown n=1 累计 players=2/2 widgets=2/2 audios=2/2
+2026-09-14 02:58:36.252 [I] stopAll: 管线已卸载 session=6
+2026-09-14 02:58:36.254 [D] session=6 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
+2026-09-14 02:58:36.254 [D] setPlaybackRate(1)
+2026-09-14 02:58:36.254 [D] session=6 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
+2026-09-14 02:59:43.419 [I] stopAll: 管线已卸载 session=6

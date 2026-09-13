@@ -23,7 +23,6 @@ QString localAppDataDir();
 QString dataRoot();        // %LOCALAPPDATA%\Yumeiren
 QString legacyDataRoot();  // %LOCALAPPDATA%\FolderBgStudio (migration only)
 
-QSettings settings();      // HKCU\Software\Yumeiren\Yumeiren
 
 // "Run at logon" entry in HKCU\...\CurrentVersion\Run.
 void setAutostart(bool on);

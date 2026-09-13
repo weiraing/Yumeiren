@@ -1,4 +1,4 @@
-# 临时调试助手(不提交)：提权环境下执行双启动流程, 诊断日志记录唤起结果
+﻿# 临时调试助手(不提交)：提权环境下执行双启动流程, 诊断日志记录唤起结果
 # 用法: Start-Process powershell -Verb RunAs -ArgumentList '-ExecutionPolicy Bypass -File <this>'
 param([switch]$LaunchPair, [switch]$RebuildPair)
 if ($RebuildPair) {

@@ -7,8 +7,10 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QMutex>
-#include <QSettings>
 #include <QTimer>
+
+#include "config/AppConfig.h"
+#include "config/ConfigKeys.h"
 
 #include <windows.h>
 #include <psapi.h>
@@ -99,8 +101,8 @@ void init()
     // 诊断开关：环境变量优先，其次 HKCU video/diag
     g_diag = qEnvironmentVariableIntValue("YUMEIREN_DIAG") != 0;
     if (!g_diag)
-        g_diag = QSettings(QStringLiteral("Yumeiren"), QStringLiteral("Yumeiren"))
-                     .value(QStringLiteral("video/diag"), false).toBool();
+        g_diag = AppConfig::instance()
+                     .value(ConfigKeys::Video::Diag, false).toBool();
 
     QString path = logPath();
     QDir().mkpath(QFileInfo(path).absolutePath());

@@ -1,4 +1,4 @@
-# Fine-grained GPU utilization sampling to find render-start latency.
+﻿# Fine-grained GPU utilization sampling to find render-start latency.
 param(
     [Parameter(Mandatory=$true)][int]$ProcId,
     [int]$DurationSec = 15,

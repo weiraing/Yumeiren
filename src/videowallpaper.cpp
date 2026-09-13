@@ -1,6 +1,8 @@
 #include "videowallpaper.h"
 
 #include "appinfo.h"
+#include "config/AppConfig.h"
+#include "config/ConfigKeys.h"
 #include "platform/windows/desktopmount.h"
 #include "videodiag.h"
 
@@ -910,8 +912,8 @@ void VideoWallpaper::runProbeStage(const QString &stage)
     }
     if (stage == QLatin1String("B"))
         return;
-    const QStringList files = appinfo::settings()
-                                  .value(QStringLiteral("video/playlist")).toStringList();
+    const QStringList files = AppConfig::instance()
+        .value(ConfigKeys::Video::Playlist).toStringList();
     if (files.isEmpty())
         return;
     const QUrl url = QUrl::fromLocalFile(files.first());

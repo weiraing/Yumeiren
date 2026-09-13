@@ -1,5 +1,7 @@
 #include "appinfo.h"
 
+#include "config/AppConfig.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -77,11 +79,6 @@ QString legacyDataRoot()
     return localAppDataDir() + QLatin1Char('/') + QString::fromLatin1(kLegacyId);
 }
 
-QSettings settings()
-{
-    return QSettings(id(), id());
-}
-
 void setAutostart(bool on)
 {
     const QString exe = QCoreApplication::applicationFilePath();
@@ -118,15 +115,15 @@ QStringList migrateLegacy()
     QStringList notes;
     const QString legacyId = QString::fromLatin1(kLegacyId);
 
-    // 1) preferences: HKCU\Software\FolderBgStudio -> HKCU\Software\Yumeiren.
+    // 1) preferences: HKCU\Software\FolderBgStudio -> 统一配置(config/.ini)。
     //    The old keys stay in place so an older build still works.
     QSettings legacy(legacyId, legacyId);
     const QStringList keys = legacy.allKeys();
-    QSettings current = settings();
+    AppConfig &current = AppConfig::instance();
     if (!keys.isEmpty() && current.allKeys().isEmpty()) {
         for (const QString &key : keys)
             current.setValue(key, legacy.value(key));
-        current.sync();
+        current.save();
         notes << QStringLiteral("已导入旧版 %1 的 %2 项设置。").arg(legacyId).arg(keys.size());
     }
 

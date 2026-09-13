@@ -1,0 +1,318 @@
+#include "AppConfig.h"
+#include "ConfigKeys.h"
+
+#include <QApplication>
+#include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QRegularExpression>
+#include <QTimer>
+
+#include <videodiag.h>
+
+#include <windows.h>
+
+namespace {
+
+// 迁移源: 旧版配置(HKCU 注册表)。迁移后保留原键不删除——回滚旧版仍可读，
+// 任务书只要求"不再写入"。
+constexpr wchar_t kLegacyRegistryKey[] =
+    L"HKEY_CURRENT_USER\\Software\\Yumeiren\\Yumeiren";
+
+constexpr int kCurrentConfigVersion = 1;
+constexpr int kSaveDebounceMs = 500;
+
+struct NumericRule {
+    const char *key;
+    QVariant defaultValue;
+    int lo;
+    int hi;
+};
+
+// 数值类配置的默认值与合法区间(任务书 §十一)：缺失补默认，越界收敛到边界
+const NumericRule kNumericRules[] = {
+    {ConfigKeys::Ui::Theme, 0, 0, 2},
+    {ConfigKeys::Image::Rotate, 0, -180, 180},
+    {ConfigKeys::Image::Scale, 100, 10, 150},
+    {ConfigKeys::Image::Brightness, 100, 20, 200},
+    {ConfigKeys::Image::Contrast, 100, 50, 150},
+    {ConfigKeys::Image::Blur, 0, 0, 20},
+    {ConfigKeys::Image::Opacity, 255, 30, 255},
+    {ConfigKeys::Image::PosType, 6, 0, 6},
+    {ConfigKeys::Effect::Type, 1, 0, 4},
+    {ConfigKeys::Effect::LightAlpha, 200, 0, 255},
+    {ConfigKeys::Effect::DarkAlpha, 120, 0, 255},
+    {ConfigKeys::Video::Volume, 0, 0, 100},
+    {ConfigKeys::Video::TargetFps, 24, 0, 240},
+    {ConfigKeys::Video::ScreenMode, 0, 0, 2},
+};
+
+const char *kBoolRules[] = {
+    ConfigKeys::Image::FolderExt,
+    ConfigKeys::Image::ComboEffect,
+    ConfigKeys::Effect::ClearAddress,
+    ConfigKeys::Effect::ClearBarBg,
+    ConfigKeys::Effect::ClearWinUIBg,
+    ConfigKeys::Effect::ShowLine,
+    ConfigKeys::Effect::KeepImage,
+    ConfigKeys::Video::WasPlaying,
+    ConfigKeys::Video::AutoLoop,
+    ConfigKeys::Video::Random,
+    ConfigKeys::Video::PauseFullscreen,
+    ConfigKeys::Video::PauseBattery,
+    ConfigKeys::Video::Reclaim,
+    ConfigKeys::Video::AffinityLimit,
+    ConfigKeys::Video::Diag,
+    ConfigKeys::Window::Maximized,
+};
+
+// INI 中一切值都是字符串: "true"/"1" 视为真, "false"/"0" 视为假
+bool normalizeBool(const QVariant &v)
+{
+    const QString s = v.toString().trimmed().toLower();
+    return s == "true" || s == "1";
+}
+
+bool isValidBool(const QVariant &v)
+{
+    if (v.type() == QVariant::Bool)
+        return true;
+    const QString s = v.toString().trimmed().toLower();
+    return s == "true" || s == "false" || s == "1" || s == "0";
+}
+
+bool isValidColor(const QVariant &v)
+{
+    static const QRegularExpression re(QStringLiteral("^#[0-9A-Fa-f]{6}$"));
+    return re.match(v.toString()).hasMatch();
+}
+
+} // namespace
+
+AppConfig &AppConfig::instance()
+{
+    static AppConfig c;
+    return c;
+}
+
+AppConfig::AppConfig(QObject *parent)
+    : QObject(parent)
+{
+    const QString path = QDir(QCoreApplication::applicationDirPath())
+                             .filePath(QStringLiteral("config/.ini"));
+    m_settings = new QSettings(path, QSettings::IniFormat, this);
+    m_saveTimer = new QTimer(this);
+    m_saveTimer->setSingleShot(true);
+    m_saveTimer->setInterval(kSaveDebounceMs);
+    connect(m_saveTimer, &QTimer::timeout, this, &AppConfig::save);
+}
+
+AppConfig::~AppConfig()
+{
+    if (m_loaded)
+        save();
+}
+
+QString AppConfig::configFilePath() const
+{
+    return m_settings->fileName();
+}
+
+QString AppConfig::configDirectory() const
+{
+    return QFileInfo(configFilePath()).absolutePath();
+}
+
+bool AppConfig::load()
+{
+    if (m_loaded)
+        return true;
+    m_loaded = true;
+
+    // 0) 读取诊断: 文件是否存在/大小/键数(排查"读不到配置"类问题)
+    {
+        QFileInfo fi(configFilePath());
+        videodiag::log(videodiag::Level::Info,
+            QStringLiteral("配置读取: path=%1 exists=%2 size=%3 keys=%4 wasPlaying=%5")
+                .arg(fi.absoluteFilePath()).arg(fi.exists())
+                .arg(fi.size()).arg(m_settings->allKeys().size())
+                .arg(m_settings->value(ConfigKeys::Video::WasPlaying, -1).toInt()));
+    }
+
+    // 1) 配置目录(不存在则创建)；目录不可写时以内存默认值继续运行
+    const QString dir = configDirectory();
+    if (!QDir().mkpath(dir)) {
+        videodiag::log(videodiag::Level::Error,
+            QStringLiteral("配置目录创建失败: %1 (将以默认配置运行)").arg(dir));
+    }
+
+    // 2) 旧注册表配置一次性迁入(仅当 INI 尚无用户键)
+    migrateFromRegistry();
+
+    // 3) 补齐缺失配置 + 修复非法值 + 写入版本号
+    ensureDefaultsAndFix();
+    if (!m_settings->contains(ConfigKeys::Meta::ConfigVersion))
+        m_settings->setValue(ConfigKeys::Meta::ConfigVersion, kCurrentConfigVersion);
+
+    save();
+    videodiag::log(videodiag::Level::Info,
+        QStringLiteral("配置已加载: %1%2")
+            .arg(configFilePath(),
+                 m_migrated ? QStringLiteral(" (已从注册表迁移旧配置)")
+                            : QString()));
+    return true;
+}
+
+void AppConfig::migrateFromRegistry()
+{
+    QSettings legacy(QString::fromWCharArray(kLegacyRegistryKey), QSettings::NativeFormat);
+    const QStringList keys = legacy.allKeys();
+    if (keys.isEmpty())
+        return;
+    int copied = 0;
+    for (const QString &k : keys) {
+        if (m_settings->contains(k))
+            continue; // INI 已有的键不覆盖
+        m_settings->setValue(k, legacy.value(k));
+        ++copied;
+    }
+    if (copied > 0) {
+        m_migrated = true;
+        videodiag::log(videodiag::Level::Info,
+            QStringLiteral("已从旧注册表配置迁移 %1 项设置(原键保留未删除)").arg(copied));
+    }
+}
+
+void AppConfig::ensureDefaultsAndFix()
+{
+    int missing = 0;
+    int fixed = 0;
+
+    // 数值类: 缺失补默认 / 越界收敛
+    for (const NumericRule &rule : kNumericRules) {
+        if (!m_settings->contains(rule.key)) {
+            m_settings->setValue(rule.key, rule.defaultValue);
+            ++missing;
+            continue;
+        }
+        bool ok = false;
+        const int n = m_settings->value(rule.key).toInt(&ok);
+        if (!ok) {
+            m_settings->setValue(rule.key, rule.defaultValue);
+            ++fixed;
+        } else if (n < rule.lo || n > rule.hi) {
+            m_settings->setValue(rule.key, qBound(rule.lo, n, rule.hi));
+            ++fixed;
+        }
+    }
+    // 布尔类
+    for (const char *key : kBoolRules) {
+        if (!m_settings->contains(key)) {
+            m_settings->setValue(key,
+                strcmp(key, ConfigKeys::Video::AutoLoop) == 0
+                    || strcmp(key, ConfigKeys::Video::PauseFullscreen) == 0
+                    || strcmp(key, ConfigKeys::Video::Reclaim) == 0
+                    || strcmp(key, ConfigKeys::Video::AffinityLimit) == 0
+                    || strcmp(key, ConfigKeys::Image::ComboEffect) == 0
+                    || strcmp(key, ConfigKeys::Effect::ClearAddress) == 0
+                    || strcmp(key, ConfigKeys::Effect::ClearBarBg) == 0
+                    || strcmp(key, ConfigKeys::Effect::ClearWinUIBg) == 0);
+            ++missing;
+        } else {
+            // 字符串形态的布尔规范化保存(保留用户原值而非盲目改 false)
+            m_settings->setValue(key, normalizeBool(m_settings->value(key)));
+            ++fixed;
+        }
+    }
+    // 颜色类
+    const struct { const char *key; const char *def; } colors[] = {
+        {ConfigKeys::Effect::LightColor, "#ffffff"},
+        {ConfigKeys::Effect::DarkColor, "#000000"},
+    };
+    for (const auto &c : colors) {
+        if (!m_settings->contains(c.key)) {
+            m_settings->setValue(c.key, QString::fromLatin1(c.def));
+            ++missing;
+        } else if (!isValidColor(m_settings->value(c.key))) {
+            m_settings->setValue(c.key, QString::fromLatin1(c.def));
+            ++fixed;
+        }
+    }
+    // 列表类
+    if (!m_settings->contains(ConfigKeys::Video::Playlist)) {
+        m_settings->setValue(ConfigKeys::Video::Playlist, QStringList());
+        ++missing;
+    }
+    // 字符串类
+    const struct { const char *key; const char *def; } strings[] = {
+        {ConfigKeys::Image::CustomPath, ""},
+        {ConfigKeys::Effect::ShowLine, "false"},
+    };
+    for (const auto &s : strings) {
+        if (!m_settings->contains(s.key)) {
+            m_settings->setValue(s.key, QString::fromLatin1(s.def));
+            ++missing;
+        }
+    }
+
+    if (missing + fixed > 0)
+        videodiag::log(videodiag::Level::Info,
+            QStringLiteral("配置校验: 补齐缺失 %1 项, 修复非法 %2 项").arg(missing).arg(fixed));
+}
+
+bool AppConfig::save()
+{
+    m_settings->sync();
+    if (m_settings->status() != QSettings::NoError) {
+        videodiag::log(videodiag::Level::Error,
+            QStringLiteral("配置保存失败: %1 status=%2")
+                .arg(configFilePath()).arg(int(m_settings->status())));
+        return false;
+    }
+    return true;
+}
+
+void AppConfig::reload()
+{
+    m_settings->sync();
+    m_settings->sync(); // 重新读取: Reread
+    m_settings->sync();
+    // QSettings 无显式 reread, sync 后再次读取即为最新内容
+    ensureDefaultsAndFix();
+}
+
+QVariant AppConfig::value(const QString &key, const QVariant &defaultValue) const
+{
+    return m_settings->value(key, defaultValue);
+}
+
+void AppConfig::setValue(const QString &key, const QVariant &value)
+{
+    if (m_settings->value(key) == value)
+        return;
+    m_settings->setValue(key, value);
+    emit settingChanged(key, value);
+    scheduleSave();
+}
+
+bool AppConfig::contains(const QString &key) const
+{
+    return m_settings->contains(key);
+}
+
+QStringList AppConfig::allKeys() const
+{
+    return m_settings->allKeys();
+}
+
+void AppConfig::remove(const QString &key)
+{
+    m_settings->remove(key);
+    scheduleSave();
+}
+
+void AppConfig::scheduleSave()
+{
+    if (m_saveTimer && !m_saveTimer->isActive())
+        m_saveTimer->start();
+}

@@ -1,4 +1,4 @@
-# Dump the bytes right after the UTF-16LE "FileDescription" key in a .res file.
+﻿# Dump the bytes right after the UTF-16LE "FileDescription" key in a .res file.
 param([Parameter(Mandatory=$true)][string]$Path)
 $b = [IO.File]::ReadAllBytes($Path)
 $pat = [Text.Encoding]::Unicode.GetBytes('FileDescription')

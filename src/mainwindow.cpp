@@ -1,11 +1,14 @@
 #include "mainwindow.h"
 
 #include "appinfo.h"
+#include "config/AppConfig.h"
+#include "config/ConfigKeys.h"
 #include "videodiag.h"
 #include "videowallpaper.h"
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QCloseEvent>
 #include <QColorDialog>
 #include <QComboBox>
 #include <QCryptographicHash>
@@ -95,12 +98,27 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 {
     setWindowTitle(appinfo::windowTitle()); // 原生标题=Yumeiren(窗口行); 品牌名在自绘标题栏
     setMinimumSize(880, 680);
-    // 初始尺寸自适应屏幕：首选 1120×900，限制在可用工作区的 94% 内(不低于最小
-    // 尺寸，Qt 会自动收敛)。此前固定 990×780 在多数屏幕上会把图片背景页底部的
-    // 按钮行裁掉一半，需要滚动才能看到。
+    // 初始窗口几何：优先恢复上次保存的尺寸位置(钳制在可用工作区 94% 内；越界
+    // 自动拉回主屏)，无保存记录时用自适应首选 1120×900。此前固定 990×780 在
+    // 多数屏幕上会把图片背景页底部按钮行裁掉一半。
     {
         const QRect avail = QGuiApplication::primaryScreen()->availableGeometry();
-        resize(QSize(1120, 900).boundedTo(avail.size() * 0.94));
+        auto &cfg = AppConfig::instance();
+        const int cw = cfg.value(ConfigKeys::Window::Width, 0).toInt();
+        const int ch = cfg.value(ConfigKeys::Window::Height, 0).toInt();
+        if (cw >= 880 && ch >= 680) {
+            QSize want(cw, ch);
+            want = want.boundedTo(avail.size() * 0.94);
+            resize(want);
+            const int x = cfg.value(ConfigKeys::Window::X, avail.left()).toInt();
+            const int y = cfg.value(ConfigKeys::Window::Y, avail.top()).toInt();
+            move(qBound(avail.left(), x, qMax(avail.left(), avail.right() - width())),
+                 qBound(avail.top(), y, qMax(avail.top(), avail.bottom() - height())));
+            if (cfg.value(ConfigKeys::Window::Maximized, false).toBool())
+                setWindowState(Qt::WindowMaximized);
+        } else {
+            resize(QSize(1120, 900).boundedTo(avail.size() * 0.94));
+        }
     }
     // 标题栏自绘方案：保留 WS_THICKFRAME(圆角/阴影/贴边由 DWM 提供)，
     // 通过 WM_NCCALCSIZE 隐藏系统标题栏，WM_NCHITTEST 实现边缘缩放与标题拖动。
@@ -109,11 +127,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     // 界面构建(图片库缩略图等)之前起跑，否则壁纸要多等近一秒才出现。
     // 失败提示延迟到事件循环启动(日志控件就绪)后再补发。
     {
-        QSettings early = appinfo::settings();
+        AppConfig &early = AppConfig::instance();
         const QStringList earlyPlaylist =
-            early.value(QStringLiteral("video/playlist")).toStringList();
+            early.value(ConfigKeys::Video::Playlist).toStringList();
         const bool earlyWasPlaying =
-            early.value(QStringLiteral("video/wasPlaying"), false).toBool();
+            early.value(ConfigKeys::Video::WasPlaying, false).toBool();
         if (!earlyPlaylist.isEmpty() && earlyWasPlaying) {
             VideoWallpaper::instance().setPlaylist(earlyPlaylist);
             QString err;
@@ -317,8 +335,8 @@ QWidget *MainWindow::buildSidebar()
     m_themeCombo->addItems({QStringLiteral("跟随系统"), QStringLiteral("亮色"), QStringLiteral("深色")});
     styleCombo(m_themeCombo);
     connect(m_themeCombo, &QComboBox::currentIndexChanged, this, [this](int idx) {
-        QSettings st = appinfo::settings();
-        st.setValue(QStringLiteral("ui/theme"), idx);
+        AppConfig &st = AppConfig::instance();
+        st.setValue(ConfigKeys::Ui::Theme, idx);
         applyTheme(idx);
     });
     themeRow->addWidget(m_themeCombo, 1);
@@ -1001,8 +1019,8 @@ QWidget *MainWindow::buildVideoWallpaperPage()
         "(实测 1080p 内存 -27%、显存 -36%，CPU 不变)。更改后重启生效。"));
     leftLay->addWidget(m_affinityBox);
     connect(m_affinityBox, &QCheckBox::toggled, this, [this](bool on) {
-        QSettings st = appinfo::settings();
-        st.setValue(QStringLiteral("video/affinityLimit"), on);
+        AppConfig &st = AppConfig::instance();
+        st.setValue(ConfigKeys::Video::AffinityLimit, on);
     });
     m_autostartBox = new QCheckBox(QStringLiteral("开机自动启动"), leftCard);
     m_autostartBox->setChecked(VideoWallpaper::instance().autostartEnabled());
@@ -1032,8 +1050,8 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     connect(m_fpsBox, &QComboBox::currentIndexChanged, this, [this](int index) {
         static const int fpsValues[] = {0, 15, 24, 30, 60};
         VideoWallpaper::instance().setTargetFps(fpsValues[qBound(0, index, 4)]);
-        QSettings st = appinfo::settings();
-        st.setValue(QStringLiteral("video/targetFps"), fpsValues[qBound(0, index, 4)]);
+        AppConfig &st = AppConfig::instance();
+        st.setValue(ConfigKeys::Video::TargetFps, fpsValues[qBound(0, index, 4)]);
     });
     fpsRow->addWidget(m_fpsBox, 1);
     leftLay->addLayout(fpsRow);
@@ -1098,33 +1116,33 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     // option changes apply immediately
     connect(m_autoLoopBox, &QCheckBox::toggled, this, [this](bool on) {
         VideoWallpaper::instance().setAutoLoop(on);
-        QSettings st = appinfo::settings();
-        st.setValue(QStringLiteral("video/autoLoop"), on);
+        AppConfig &st = AppConfig::instance();
+        st.setValue(ConfigKeys::Video::AutoLoop, on);
     });
     connect(m_randomBox, &QCheckBox::toggled, this, [this](bool on) {
         VideoWallpaper::instance().setRandom(on);
-        QSettings st = appinfo::settings();
-        st.setValue(QStringLiteral("video/random"), on);
+        AppConfig &st = AppConfig::instance();
+        st.setValue(ConfigKeys::Video::Random, on);
     });
     connect(m_fullscreenPauseBox, &QCheckBox::toggled, this, [this](bool on) {
         VideoWallpaper::instance().setPauseOnFullscreen(on);
-        QSettings st = appinfo::settings();
-        st.setValue(QStringLiteral("video/pauseFullscreen"), on);
+        AppConfig &st = AppConfig::instance();
+        st.setValue(ConfigKeys::Video::PauseFullscreen, on);
     });
     connect(m_batteryBox, &QCheckBox::toggled, this, [this](bool on) {
         VideoWallpaper::instance().setPauseOnBattery(on);
-        QSettings st = appinfo::settings();
-        st.setValue(QStringLiteral("video/pauseBattery"), on);
+        AppConfig &st = AppConfig::instance();
+        st.setValue(ConfigKeys::Video::PauseBattery, on);
     });
     connect(m_screenModeCombo, &QComboBox::currentIndexChanged, this, [this](int idx) {
         VideoWallpaper::instance().setScreenMode(idx);
-        QSettings st = appinfo::settings();
-        st.setValue(QStringLiteral("video/screenMode"), idx);
+        AppConfig &st = AppConfig::instance();
+        st.setValue(ConfigKeys::Video::ScreenMode, idx);
     });
     connect(m_reclaimBox, &QCheckBox::toggled, this, [this](bool on) {
         VideoWallpaper::instance().setReclaimMemory(on);
-        QSettings st = appinfo::settings();
-        st.setValue(QStringLiteral("video/reclaim"), on);
+        AppConfig &st = AppConfig::instance();
+        st.setValue(ConfigKeys::Video::Reclaim, on);
     });
     connect(m_autostartBox, &QCheckBox::toggled, this, [this](bool on) {
         VideoWallpaper::instance().setAutostart(on);
@@ -2022,25 +2040,25 @@ Engine::EffectConfig MainWindow::currentEffectConfig() const
 
 void MainWindow::loadSettings()
 {
-    QSettings s = appinfo::settings();
-    m_themeCombo->setCurrentIndex(s.value(QStringLiteral("ui/theme"), 0).toInt());
-    m_rotate->setValue(s.value(QStringLiteral("image/rotate"), 0).toInt());
-    m_scale->setValue(s.value(QStringLiteral("image/scale"), 100).toInt());
-    m_brightness->setValue(s.value(QStringLiteral("image/brightness"), 100).toInt());
-    m_contrast->setValue(s.value(QStringLiteral("image/contrast"), 100).toInt());
-    m_blur->setValue(s.value(QStringLiteral("image/blur"), 0).toInt());
-    m_opacity->setValue(s.value(QStringLiteral("image/opacity"), 255).toInt());
-    m_posMode = qBound(0, s.value(QStringLiteral("image/posType"), 6).toInt(), 6);
+    AppConfig &s = AppConfig::instance();
+    m_themeCombo->setCurrentIndex(s.value(ConfigKeys::Ui::Theme, 0).toInt());
+    m_rotate->setValue(s.value(ConfigKeys::Image::Rotate, 0).toInt());
+    m_scale->setValue(s.value(ConfigKeys::Image::Scale, 100).toInt());
+    m_brightness->setValue(s.value(ConfigKeys::Image::Brightness, 100).toInt());
+    m_contrast->setValue(s.value(ConfigKeys::Image::Contrast, 100).toInt());
+    m_blur->setValue(s.value(ConfigKeys::Image::Blur, 0).toInt());
+    m_opacity->setValue(s.value(ConfigKeys::Image::Opacity, 255).toInt());
+    m_posMode = qBound(0, s.value(ConfigKeys::Image::PosType, 6).toInt(), 6);
     setPosMode(m_posMode);
-    m_folderExt->setChecked(s.value(QStringLiteral("image/folderExt"), false).toBool());
-    m_comboEffect->setChecked(s.value(QStringLiteral("image/comboEffect"), true).toBool());
-    m_keepImage->setChecked(s.value(QStringLiteral("effect/keepImage"), false).toBool());
+    m_folderExt->setChecked(s.value(ConfigKeys::Image::FolderExt, false).toBool());
+    m_comboEffect->setChecked(s.value(ConfigKeys::Image::ComboEffect, true).toBool());
+    m_keepImage->setChecked(s.value(ConfigKeys::Effect::KeepImage, false).toBool());
     // 图片浏览目录：软件所在目录/media/image，每次启动默认打开(不存在则创建)
     m_presetDir = QCoreApplication::applicationDirPath() + QStringLiteral("/media/image");
     QDir().mkpath(m_presetDir);
     rebuildGallery();
-    m_selectedPreset = s.value(QStringLiteral("image/preset"), 0).toInt();
-    m_customImage = s.value(QStringLiteral("image/customPath")).toString();
+    m_selectedPreset = s.value(ConfigKeys::Image::Preset, 0).toInt();
+    m_customImage = s.value(ConfigKeys::Image::CustomPath).toString();
     if (m_selectedPreset >= 0 && m_selectedPreset < m_presets.size()) {
         selectPreset(m_selectedPreset);
     } else if (!m_customImage.isEmpty() && QFileInfo::exists(m_customImage)) {
@@ -2053,15 +2071,15 @@ void MainWindow::loadSettings()
         selectPreset(0);
     }
     // effect custom values
-    m_effectCombo->setCurrentIndex(s.value(QStringLiteral("effect/type"), 1).toInt());
-    m_lightColor = QColor(s.value(QStringLiteral("effect/lightColor"), QStringLiteral("#ffffff")).toString());
-    m_darkColor = QColor(s.value(QStringLiteral("effect/darkColor"), QStringLiteral("#000000")).toString());
-    m_lightAlpha->setValue(s.value(QStringLiteral("effect/lightAlpha"), 200).toInt());
-    m_darkAlpha->setValue(s.value(QStringLiteral("effect/darkAlpha"), 120).toInt());
-    m_clearAddress->setChecked(s.value(QStringLiteral("effect/clearAddress"), true).toBool());
-    m_clearBarBg->setChecked(s.value(QStringLiteral("effect/clearBarBg"), true).toBool());
-    m_clearWinUIBg->setChecked(s.value(QStringLiteral("effect/clearWinUIBg"), true).toBool());
-    m_showLine->setChecked(s.value(QStringLiteral("effect/showLine"), false).toBool());
+    m_effectCombo->setCurrentIndex(s.value(ConfigKeys::Effect::Type, 1).toInt());
+    m_lightColor = QColor(s.value(ConfigKeys::Effect::LightColor, QStringLiteral("#ffffff")).toString());
+    m_darkColor = QColor(s.value(ConfigKeys::Effect::DarkColor, QStringLiteral("#000000")).toString());
+    m_lightAlpha->setValue(s.value(ConfigKeys::Effect::LightAlpha, 200).toInt());
+    m_darkAlpha->setValue(s.value(ConfigKeys::Effect::DarkAlpha, 120).toInt());
+    m_clearAddress->setChecked(s.value(ConfigKeys::Effect::ClearAddress, true).toBool());
+    m_clearBarBg->setChecked(s.value(ConfigKeys::Effect::ClearBarBg, true).toBool());
+    m_clearWinUIBg->setChecked(s.value(ConfigKeys::Effect::ClearWinUIBg, true).toBool());
+    m_showLine->setChecked(s.value(ConfigKeys::Effect::ShowLine, false).toBool());
     m_lightColorBtn->setStyleSheet(
         QStringLiteral("QPushButton{background:%1;border:1px solid #3a3b44;border-radius:8px;}")
             .arg(m_lightColor.name()));
@@ -2069,16 +2087,16 @@ void MainWindow::loadSettings()
         QStringLiteral("QPushButton{background:%1;border:1px solid #3a3b44;border-radius:8px;}")
             .arg(m_darkColor.name()));
     // video wallpaper settings
-    const QStringList playlist = s.value(QStringLiteral("video/playlist")).toStringList();
+    const QStringList playlist = s.value(ConfigKeys::Video::Playlist).toStringList();
     VideoWallpaper::instance().setPlaylist(playlist);
     refreshVideoList();
-    m_videoVolume->setValue(s.value(QStringLiteral("video/volume"), 0).toInt());
-    m_autoLoopBox->setChecked(s.value(QStringLiteral("video/autoLoop"), true).toBool());
-    m_randomBox->setChecked(s.value(QStringLiteral("video/random"), false).toBool());
-    m_fullscreenPauseBox->setChecked(s.value(QStringLiteral("video/pauseFullscreen"), true).toBool());
-    m_batteryBox->setChecked(s.value(QStringLiteral("video/pauseBattery"), false).toBool());
+    m_videoVolume->setValue(s.value(ConfigKeys::Video::Volume, 0).toInt());
+    m_autoLoopBox->setChecked(s.value(ConfigKeys::Video::AutoLoop, true).toBool());
+    m_randomBox->setChecked(s.value(ConfigKeys::Video::Random, false).toBool());
+    m_fullscreenPauseBox->setChecked(s.value(ConfigKeys::Video::PauseFullscreen, true).toBool());
+    m_batteryBox->setChecked(s.value(ConfigKeys::Video::PauseBattery, false).toBool());
     {
-        const int targetFps = s.value(QStringLiteral("video/targetFps"), 24).toInt();
+        const int targetFps = s.value(ConfigKeys::Video::TargetFps, 24).toInt();
         static const int fpsValues[] = {0, 15, 24, 30, 60};
         for (int i = 0; i < 5; ++i)
             if (fpsValues[i] == targetFps) {
@@ -2087,9 +2105,9 @@ void MainWindow::loadSettings()
             }
         VideoWallpaper::instance().setTargetFps(targetFps);
     }
-    m_reclaimBox->setChecked(s.value(QStringLiteral("video/reclaim"), true).toBool());
-    m_affinityBox->setChecked(s.value(QStringLiteral("video/affinityLimit"), true).toBool());
-    m_screenModeCombo->setCurrentIndex(s.value(QStringLiteral("video/screenMode"), 0).toInt());
+    m_reclaimBox->setChecked(s.value(ConfigKeys::Video::Reclaim, true).toBool());
+    m_affinityBox->setChecked(s.value(ConfigKeys::Video::AffinityLimit, true).toBool());
+    m_screenModeCombo->setCurrentIndex(s.value(ConfigKeys::Video::ScreenMode, 0).toInt());
     VideoWallpaper::instance().setAutoLoop(m_autoLoopBox->isChecked());
     VideoWallpaper::instance().setRandom(m_randomBox->isChecked());
     VideoWallpaper::instance().setPauseOnFullscreen(m_fullscreenPauseBox->isChecked());
@@ -2100,33 +2118,33 @@ void MainWindow::loadSettings()
 
 void MainWindow::saveImageSettings()
 {
-    QSettings s = appinfo::settings();
-    s.setValue(QStringLiteral("image/rotate"), m_rotate->value());
-    s.setValue(QStringLiteral("image/scale"), m_scale->value());
-    s.setValue(QStringLiteral("image/brightness"), m_brightness->value());
-    s.setValue(QStringLiteral("image/contrast"), m_contrast->value());
-    s.setValue(QStringLiteral("image/blur"), m_blur->value());
-    s.setValue(QStringLiteral("image/opacity"), m_opacity->value());
-    s.setValue(QStringLiteral("image/posType"), m_posMode);
-    s.setValue(QStringLiteral("image/folderExt"), m_folderExt->isChecked());
-    s.setValue(QStringLiteral("image/comboEffect"), m_comboEffect->isChecked());
-    s.setValue(QStringLiteral("image/preset"), m_selectedPreset);
-    s.setValue(QStringLiteral("image/customPath"), m_customImage);
+    AppConfig &s = AppConfig::instance();
+    s.setValue(ConfigKeys::Image::Rotate, m_rotate->value());
+    s.setValue(ConfigKeys::Image::Scale, m_scale->value());
+    s.setValue(ConfigKeys::Image::Brightness, m_brightness->value());
+    s.setValue(ConfigKeys::Image::Contrast, m_contrast->value());
+    s.setValue(ConfigKeys::Image::Blur, m_blur->value());
+    s.setValue(ConfigKeys::Image::Opacity, m_opacity->value());
+    s.setValue(ConfigKeys::Image::PosType, m_posMode);
+    s.setValue(ConfigKeys::Image::FolderExt, m_folderExt->isChecked());
+    s.setValue(ConfigKeys::Image::ComboEffect, m_comboEffect->isChecked());
+    s.setValue(ConfigKeys::Image::Preset, m_selectedPreset);
+    s.setValue(ConfigKeys::Image::CustomPath, m_customImage);
 }
 
 void MainWindow::saveEffectSettings()
 {
-    QSettings s = appinfo::settings();
-    s.setValue(QStringLiteral("effect/type"), m_effectCombo->currentIndex());
-    s.setValue(QStringLiteral("effect/lightColor"), m_lightColor.name());
-    s.setValue(QStringLiteral("effect/darkColor"), m_darkColor.name());
-    s.setValue(QStringLiteral("effect/lightAlpha"), m_lightAlpha->value());
-    s.setValue(QStringLiteral("effect/darkAlpha"), m_darkAlpha->value());
-    s.setValue(QStringLiteral("effect/clearAddress"), m_clearAddress->isChecked());
-    s.setValue(QStringLiteral("effect/clearBarBg"), m_clearBarBg->isChecked());
-    s.setValue(QStringLiteral("effect/clearWinUIBg"), m_clearWinUIBg->isChecked());
-    s.setValue(QStringLiteral("effect/showLine"), m_showLine->isChecked());
-    s.setValue(QStringLiteral("effect/keepImage"), m_keepImage->isChecked());
+    AppConfig &s = AppConfig::instance();
+    s.setValue(ConfigKeys::Effect::Type, m_effectCombo->currentIndex());
+    s.setValue(ConfigKeys::Effect::LightColor, m_lightColor.name());
+    s.setValue(ConfigKeys::Effect::DarkColor, m_darkColor.name());
+    s.setValue(ConfigKeys::Effect::LightAlpha, m_lightAlpha->value());
+    s.setValue(ConfigKeys::Effect::DarkAlpha, m_darkAlpha->value());
+    s.setValue(ConfigKeys::Effect::ClearAddress, m_clearAddress->isChecked());
+    s.setValue(ConfigKeys::Effect::ClearBarBg, m_clearBarBg->isChecked());
+    s.setValue(ConfigKeys::Effect::ClearWinUIBg, m_clearWinUIBg->isChecked());
+    s.setValue(ConfigKeys::Effect::ShowLine, m_showLine->isChecked());
+    s.setValue(ConfigKeys::Effect::KeepImage, m_keepImage->isChecked());
 }
 
 void MainWindow::applyImage()
@@ -2245,11 +2263,11 @@ void MainWindow::applyEffect()
         const QString img = Engine::processedImagePath();
         if (QFileInfo::exists(img)) {
             static const int posMap[] = {6, 4, 5, 0, 1, 2, 3};
-            QSettings s = appinfo::settings();
+            AppConfig &s = AppConfig::instance();
             if (!Engine::instance().writeImageConfig(
-                    img, posMap[qBound(0, s.value(QStringLiteral("image/posType"), 0).toInt(), 6)],
-                    s.value(QStringLiteral("image/opacity"), 255).toInt(),
-                    s.value(QStringLiteral("image/folderExt"), false).toBool(), &err)
+                    img, posMap[qBound(0, s.value(ConfigKeys::Image::PosType, 0).toInt(), 6)],
+                    s.value(ConfigKeys::Image::Opacity, 255).toInt(),
+                    s.value(ConfigKeys::Image::FolderExt, false).toBool(), &err)
                 || !Engine::instance().registerImageDll(&err)) {
                 setLog(QStringLiteral("效果已注册，但叠加图片失败：%1").arg(err), true);
             }
@@ -2280,8 +2298,8 @@ void MainWindow::addVideos()
         if (!list.contains(f))
             list.append(f);
     VideoWallpaper::instance().setPlaylist(list);
-    QSettings st = appinfo::settings();
-    st.setValue(QStringLiteral("video/playlist"), list);
+    AppConfig &st = AppConfig::instance();
+    st.setValue(ConfigKeys::Video::Playlist, list);
     refreshVideoList();
 }
 
@@ -2312,8 +2330,8 @@ void MainWindow::scanVideoDir()
         return;
     }
     VideoWallpaper::instance().setPlaylist(list);
-    QSettings st = appinfo::settings();
-    st.setValue(QStringLiteral("video/playlist"), list);
+    AppConfig &st = AppConfig::instance();
+    st.setValue(ConfigKeys::Video::Playlist, list);
     refreshVideoList();
     setLog(QStringLiteral("扫描完成：新增 %1 个视频(共 %2 个)")
                .arg(added).arg(list.size()), false);
@@ -2342,8 +2360,8 @@ void MainWindow::removeSelectedVideos()
         delete m_videoList->takeItem(row);
     }
     VideoWallpaper::instance().setPlaylist(list);
-    QSettings st = appinfo::settings();
-    st.setValue(QStringLiteral("video/playlist"), list);
+    AppConfig &st = AppConfig::instance();
+    st.setValue(ConfigKeys::Video::Playlist, list);
     // 选中迁移到同位置(删的是末项则为新的末项)；scrollToItem 对已可见行不动滚动
     const int target = qMin(firstRow, m_videoList->count() - 1);
     if (target >= 0) {
@@ -2364,8 +2382,8 @@ void MainWindow::removeSelectedVideos()
 void MainWindow::clearVideos()
 {
     VideoWallpaper::instance().clearPlaylist();
-    QSettings st = appinfo::settings();
-    st.remove(QStringLiteral("video/playlist"));
+    AppConfig &st = AppConfig::instance();
+    st.remove(ConfigKeys::Video::Playlist);
     refreshVideoList();
     setLog(QStringLiteral("已清空视频播放列表。"), false);
 }
@@ -2379,16 +2397,16 @@ void MainWindow::startVideo()
         setLog(err.isEmpty() ? QStringLiteral("视频壁纸启动失败") : err, true);
         return;
     }
-    QSettings st = appinfo::settings();
-    st.setValue(QStringLiteral("video/wasPlaying"), true);
+    AppConfig &st = AppConfig::instance();
+    st.setValue(ConfigKeys::Video::WasPlaying, true);
     setLog(QStringLiteral("视频壁纸运行中：画面在桌面图标之后，保持程序运行即可。"), false);
 }
 
 void MainWindow::stopVideo()
 {
     VideoWallpaper::instance().stopAll();
-    QSettings st = appinfo::settings();
-    st.setValue(QStringLiteral("video/wasPlaying"), false);
+    AppConfig &st = AppConfig::instance();
+    st.setValue(ConfigKeys::Video::WasPlaying, false);
     refreshVideoList();
     setLog(QStringLiteral("视频壁纸已取消。"), false);
 }
@@ -2476,6 +2494,21 @@ void MainWindow::updateVideoButtons()
         m_pauseBtn->setText(VideoWallpaper::instance().isManualPaused()
                                 ? QStringLiteral("继续") : QStringLiteral("暂停"));
     }
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    // 窗口几何持久化(统一配置)：退出时保存尺寸/位置/最大化状态
+    auto &cfg = AppConfig::instance();
+    cfg.setValue(ConfigKeys::Window::Maximized, isMaximized());
+    if (!isMaximized()) {
+        cfg.setValue(ConfigKeys::Window::Width, width());
+        cfg.setValue(ConfigKeys::Window::Height, height());
+        cfg.setValue(ConfigKeys::Window::X, x());
+        cfg.setValue(ConfigKeys::Window::Y, y());
+    }
+    cfg.save();
+    QMainWindow::closeEvent(event);
 }
 
 void MainWindow::uninstallAll()

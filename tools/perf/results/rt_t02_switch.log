@@ -1,438 +1,183 @@
-2026-09-13 19:15:54.181 [I] ==== 视频壁纸模块启动 (diag=on) ====
-2026-09-13 19:15:54.184 [I] VideoWallpaper 初始化完成
-2026-09-13 19:15:54.184 [I] session=1 play index=1/5 file=perf_switch1.mp4 resumePos=-1
-2026-09-13 19:15:54.431 [D] 创建输出: players=1/0 widgets=1/0 audios=1/0
-2026-09-13 19:15:54.488 [D] session=1 mediaStatus=1 file=perf_switch1.mp4
-2026-09-13 19:15:54.488 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch1.mp4
-2026-09-13 19:15:54.488 [D] setPlaybackRate(1)
-2026-09-13 19:15:55.483 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-13 19:15:55.484 [D] setPlaybackRate(1)
-2026-09-13 19:15:55.484 [D] setPlaybackRate(1)
-2026-09-13 19:15:55.484 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch1.mp4
-2026-09-13 19:15:55.484 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch1.mp4
-2026-09-13 19:15:55.484 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-13 19:15:55.744 [D] session=1 metaDataChanged file=perf_switch1.mp4
-2026-09-13 19:15:55.744 [D] setPlaybackRate(1)
-2026-09-13 19:15:55.744 [D] session=1 mediaStatus=2 file=perf_switch1.mp4
-2026-09-13 19:15:55.818 [D] session=1 mediaStatus=4 file=perf_switch1.mp4
-2026-09-13 19:15:55.928 [D] session=1 mediaStatus=5 file=perf_switch1.mp4
-2026-09-13 19:16:00.934 [D] session=1 mediaStatus=6 file=perf_switch1.mp4
-2026-09-13 19:16:00.934 [I] session=2 play index=2/5 file=perf_switch2.mp4 resumePos=-1
-2026-09-13 19:16:00.936 [D] session=2 mediaStatus=2 file=perf_switch1.mp4
-2026-09-13 19:16:00.943 [D] session=2 mediaStatus=1 file=perf_switch2.mp4
-2026-09-13 19:16:00.943 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch2.mp4
-2026-09-13 19:16:00.943 [D] setPlaybackRate(1)
-2026-09-13 19:16:00.961 [D] session=2 metaDataChanged file=perf_switch2.mp4
-2026-09-13 19:16:00.961 [D] setPlaybackRate(1)
-2026-09-13 19:16:00.961 [D] session=2 mediaStatus=2 file=perf_switch2.mp4
-2026-09-13 19:16:01.012 [D] session=2 mediaStatus=4 file=perf_switch2.mp4
-2026-09-13 19:16:01.027 [D] session=2 mediaStatus=5 file=perf_switch2.mp4
-2026-09-13 19:16:06.031 [D] session=2 mediaStatus=6 file=perf_switch2.mp4
-2026-09-13 19:16:06.031 [I] session=3 play index=3/5 file=perf_switch3.mp4 resumePos=-1
-2026-09-13 19:16:06.036 [D] session=3 mediaStatus=2 file=perf_switch2.mp4
-2026-09-13 19:16:06.045 [D] session=3 mediaStatus=1 file=perf_switch3.mp4
-2026-09-13 19:16:06.045 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch3.mp4
-2026-09-13 19:16:06.045 [D] setPlaybackRate(1)
-2026-09-13 19:16:06.061 [D] session=3 metaDataChanged file=perf_switch3.mp4
-2026-09-13 19:16:06.061 [D] setPlaybackRate(1)
-2026-09-13 19:16:06.061 [D] session=3 mediaStatus=2 file=perf_switch3.mp4
-2026-09-13 19:16:06.104 [D] session=3 mediaStatus=4 file=perf_switch3.mp4
-2026-09-13 19:16:06.110 [D] session=3 mediaStatus=5 file=perf_switch3.mp4
-2026-09-13 19:16:11.113 [D] session=3 mediaStatus=6 file=perf_switch3.mp4
-2026-09-13 19:16:11.113 [I] session=4 play index=4/5 file=perf_switch4.mp4 resumePos=-1
-2026-09-13 19:16:11.115 [D] session=4 mediaStatus=2 file=perf_switch3.mp4
-2026-09-13 19:16:11.125 [D] session=4 mediaStatus=1 file=perf_switch4.mp4
-2026-09-13 19:16:11.125 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch4.mp4
-2026-09-13 19:16:11.125 [D] setPlaybackRate(1)
-2026-09-13 19:16:11.140 [D] session=4 metaDataChanged file=perf_switch4.mp4
-2026-09-13 19:16:11.140 [D] setPlaybackRate(1)
-2026-09-13 19:16:11.140 [D] session=4 mediaStatus=2 file=perf_switch4.mp4
-2026-09-13 19:16:11.181 [D] session=4 mediaStatus=4 file=perf_switch4.mp4
-2026-09-13 19:16:11.189 [D] session=4 mediaStatus=5 file=perf_switch4.mp4
-2026-09-13 19:16:16.190 [D] session=4 mediaStatus=6 file=perf_switch4.mp4
-2026-09-13 19:16:16.190 [I] session=5 play index=5/5 file=perf_switch5.mp4 resumePos=-1
-2026-09-13 19:16:16.194 [D] session=5 mediaStatus=2 file=perf_switch4.mp4
-2026-09-13 19:16:16.202 [D] session=5 mediaStatus=1 file=perf_switch5.mp4
-2026-09-13 19:16:16.202 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch5.mp4
-2026-09-13 19:16:16.202 [D] setPlaybackRate(1)
-2026-09-13 19:16:16.221 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-13 19:16:16.222 [D] session=5 metaDataChanged file=perf_switch5.mp4
-2026-09-13 19:16:16.222 [D] setPlaybackRate(1)
-2026-09-13 19:16:16.222 [D] session=5 mediaStatus=2 file=perf_switch5.mp4
-2026-09-13 19:16:16.253 [D] session=5 mediaStatus=4 file=perf_switch5.mp4
-2026-09-13 19:16:16.270 [D] session=5 mediaStatus=5 file=perf_switch5.mp4
-2026-09-13 19:16:20.768 [D] session=5 mediaStatus=6 file=perf_switch5.mp4
-2026-09-13 19:16:20.768 [I] session=6 play index=1/5 file=perf_switch1.mp4 resumePos=-1
-2026-09-13 19:16:20.772 [D] session=6 mediaStatus=2 file=perf_switch5.mp4
-2026-09-13 19:16:20.782 [D] session=6 mediaStatus=1 file=perf_switch1.mp4
-2026-09-13 19:16:20.782 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch1.mp4
-2026-09-13 19:16:20.782 [D] setPlaybackRate(1)
-2026-09-13 19:16:20.801 [D] session=6 metaDataChanged file=perf_switch1.mp4
-2026-09-13 19:16:20.801 [D] setPlaybackRate(1)
-2026-09-13 19:16:20.801 [D] session=6 mediaStatus=2 file=perf_switch1.mp4
-2026-09-13 19:16:20.855 [D] session=6 mediaStatus=4 file=perf_switch1.mp4
-2026-09-13 19:16:20.865 [D] session=6 mediaStatus=5 file=perf_switch1.mp4
-2026-09-13 19:16:25.863 [D] session=6 mediaStatus=6 file=perf_switch1.mp4
-2026-09-13 19:16:25.863 [I] session=7 play index=2/5 file=perf_switch2.mp4 resumePos=-1
-2026-09-13 19:16:25.863 [D] session=7 mediaStatus=2 file=perf_switch1.mp4
-2026-09-13 19:16:25.877 [D] session=7 mediaStatus=1 file=perf_switch2.mp4
-2026-09-13 19:16:25.877 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch2.mp4
-2026-09-13 19:16:25.877 [D] setPlaybackRate(1)
-2026-09-13 19:16:25.893 [D] session=7 metaDataChanged file=perf_switch2.mp4
-2026-09-13 19:16:25.893 [D] setPlaybackRate(1)
-2026-09-13 19:16:25.893 [D] session=7 mediaStatus=2 file=perf_switch2.mp4
-2026-09-13 19:16:25.937 [D] session=7 mediaStatus=4 file=perf_switch2.mp4
-2026-09-13 19:16:25.947 [D] session=7 mediaStatus=5 file=perf_switch2.mp4
-2026-09-13 19:16:30.946 [D] session=7 mediaStatus=6 file=perf_switch2.mp4
-2026-09-13 19:16:30.946 [I] session=8 play index=3/5 file=perf_switch3.mp4 resumePos=-1
-2026-09-13 19:16:30.946 [D] session=8 mediaStatus=2 file=perf_switch2.mp4
-2026-09-13 19:16:30.958 [D] session=8 mediaStatus=1 file=perf_switch3.mp4
-2026-09-13 19:16:30.958 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch3.mp4
-2026-09-13 19:16:30.958 [D] setPlaybackRate(1)
-2026-09-13 19:16:30.972 [D] session=8 metaDataChanged file=perf_switch3.mp4
-2026-09-13 19:16:30.972 [D] setPlaybackRate(1)
-2026-09-13 19:16:30.972 [D] session=8 mediaStatus=2 file=perf_switch3.mp4
-2026-09-13 19:16:31.016 [D] session=8 mediaStatus=4 file=perf_switch3.mp4
-2026-09-13 19:16:31.025 [D] session=8 mediaStatus=5 file=perf_switch3.mp4
-2026-09-13 19:16:36.022 [D] session=8 mediaStatus=6 file=perf_switch3.mp4
-2026-09-13 19:16:36.022 [I] session=9 play index=4/5 file=perf_switch4.mp4 resumePos=-1
-2026-09-13 19:16:36.027 [D] session=9 mediaStatus=2 file=perf_switch3.mp4
-2026-09-13 19:16:36.033 [D] session=9 mediaStatus=1 file=perf_switch4.mp4
-2026-09-13 19:16:36.033 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch4.mp4
-2026-09-13 19:16:36.033 [D] setPlaybackRate(1)
-2026-09-13 19:16:36.051 [D] session=9 metaDataChanged file=perf_switch4.mp4
-2026-09-13 19:16:36.051 [D] setPlaybackRate(1)
-2026-09-13 19:16:36.051 [D] session=9 mediaStatus=2 file=perf_switch4.mp4
-2026-09-13 19:16:36.096 [D] session=9 mediaStatus=4 file=perf_switch4.mp4
-2026-09-13 19:16:36.101 [D] session=9 mediaStatus=5 file=perf_switch4.mp4
-2026-09-13 19:16:41.097 [D] session=9 mediaStatus=6 file=perf_switch4.mp4
-2026-09-13 19:16:41.097 [I] session=10 play index=5/5 file=perf_switch5.mp4 resumePos=-1
-2026-09-13 19:16:41.097 [D] session=10 mediaStatus=2 file=perf_switch4.mp4
-2026-09-13 19:16:41.110 [D] session=10 mediaStatus=1 file=perf_switch5.mp4
-2026-09-13 19:16:41.110 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch5.mp4
-2026-09-13 19:16:41.110 [D] setPlaybackRate(1)
-2026-09-13 19:16:41.127 [D] session=10 metaDataChanged file=perf_switch5.mp4
-2026-09-13 19:16:41.127 [D] setPlaybackRate(1)
-2026-09-13 19:16:41.127 [D] session=10 mediaStatus=2 file=perf_switch5.mp4
-2026-09-13 19:16:41.171 [D] session=10 mediaStatus=4 file=perf_switch5.mp4
-2026-09-13 19:16:41.180 [D] session=10 mediaStatus=5 file=perf_switch5.mp4
-2026-09-13 19:16:45.682 [D] session=10 mediaStatus=6 file=perf_switch5.mp4
-2026-09-13 19:16:45.682 [I] session=11 play index=1/5 file=perf_switch1.mp4 resumePos=-1
-2026-09-13 19:16:45.682 [D] session=11 mediaStatus=2 file=perf_switch5.mp4
-2026-09-13 19:16:45.695 [D] session=11 mediaStatus=1 file=perf_switch1.mp4
-2026-09-13 19:16:45.695 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch1.mp4
-2026-09-13 19:16:45.695 [D] setPlaybackRate(1)
-2026-09-13 19:16:45.711 [D] session=11 metaDataChanged file=perf_switch1.mp4
-2026-09-13 19:16:45.711 [D] setPlaybackRate(1)
-2026-09-13 19:16:45.711 [D] session=11 mediaStatus=2 file=perf_switch1.mp4
-2026-09-13 19:16:45.749 [D] session=11 mediaStatus=4 file=perf_switch1.mp4
-2026-09-13 19:16:45.754 [D] session=11 mediaStatus=5 file=perf_switch1.mp4
-2026-09-13 19:16:50.761 [D] session=11 mediaStatus=6 file=perf_switch1.mp4
-2026-09-13 19:16:50.761 [I] session=12 play index=2/5 file=perf_switch2.mp4 resumePos=-1
-2026-09-13 19:16:50.765 [D] session=12 mediaStatus=2 file=perf_switch1.mp4
-2026-09-13 19:16:50.775 [D] session=12 mediaStatus=1 file=perf_switch2.mp4
-2026-09-13 19:16:50.775 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch2.mp4
-2026-09-13 19:16:50.775 [D] setPlaybackRate(1)
-2026-09-13 19:16:50.790 [D] session=12 metaDataChanged file=perf_switch2.mp4
-2026-09-13 19:16:50.790 [D] setPlaybackRate(1)
-2026-09-13 19:16:50.790 [D] session=12 mediaStatus=2 file=perf_switch2.mp4
-2026-09-13 19:16:50.835 [D] session=12 mediaStatus=4 file=perf_switch2.mp4
-2026-09-13 19:16:50.845 [D] session=12 mediaStatus=5 file=perf_switch2.mp4
-2026-09-13 19:16:55.841 [D] session=12 mediaStatus=6 file=perf_switch2.mp4
-2026-09-13 19:16:55.841 [I] session=13 play index=3/5 file=perf_switch3.mp4 resumePos=-1
-2026-09-13 19:16:55.841 [D] session=13 mediaStatus=2 file=perf_switch2.mp4
-2026-09-13 19:16:55.853 [D] session=13 mediaStatus=1 file=perf_switch3.mp4
-2026-09-13 19:16:55.853 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch3.mp4
-2026-09-13 19:16:55.853 [D] setPlaybackRate(1)
-2026-09-13 19:16:55.864 [D] session=13 metaDataChanged file=perf_switch3.mp4
-2026-09-13 19:16:55.864 [D] setPlaybackRate(1)
-2026-09-13 19:16:55.864 [D] session=13 mediaStatus=2 file=perf_switch3.mp4
-2026-09-13 19:16:55.913 [D] session=13 mediaStatus=4 file=perf_switch3.mp4
-2026-09-13 19:16:55.921 [D] session=13 mediaStatus=5 file=perf_switch3.mp4
-2026-09-13 19:17:00.923 [D] session=13 mediaStatus=6 file=perf_switch3.mp4
-2026-09-13 19:17:00.923 [I] session=14 play index=4/5 file=perf_switch4.mp4 resumePos=-1
-2026-09-13 19:17:00.923 [D] session=14 mediaStatus=2 file=perf_switch3.mp4
-2026-09-13 19:17:00.935 [D] session=14 mediaStatus=1 file=perf_switch4.mp4
-2026-09-13 19:17:00.935 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch4.mp4
-2026-09-13 19:17:00.935 [D] setPlaybackRate(1)
-2026-09-13 19:17:00.947 [D] session=14 metaDataChanged file=perf_switch4.mp4
-2026-09-13 19:17:00.947 [D] setPlaybackRate(1)
-2026-09-13 19:17:00.947 [D] session=14 mediaStatus=2 file=perf_switch4.mp4
-2026-09-13 19:17:00.996 [D] session=14 mediaStatus=4 file=perf_switch4.mp4
-2026-09-13 19:17:01.002 [D] session=14 mediaStatus=5 file=perf_switch4.mp4
-2026-09-13 19:17:06.004 [D] session=14 mediaStatus=6 file=perf_switch4.mp4
-2026-09-13 19:17:06.004 [I] session=15 play index=5/5 file=perf_switch5.mp4 resumePos=-1
-2026-09-13 19:17:06.008 [D] session=15 mediaStatus=2 file=perf_switch4.mp4
-2026-09-13 19:17:06.019 [D] session=15 mediaStatus=1 file=perf_switch5.mp4
-2026-09-13 19:17:06.019 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch5.mp4
-2026-09-13 19:17:06.019 [D] setPlaybackRate(1)
-2026-09-13 19:17:06.047 [D] session=15 metaDataChanged file=perf_switch5.mp4
-2026-09-13 19:17:06.047 [D] setPlaybackRate(1)
-2026-09-13 19:17:06.047 [D] session=15 mediaStatus=2 file=perf_switch5.mp4
-2026-09-13 19:17:06.142 [D] session=15 mediaStatus=4 file=perf_switch5.mp4
-2026-09-13 19:17:06.157 [D] session=15 mediaStatus=5 file=perf_switch5.mp4
-2026-09-13 19:17:10.650 [D] session=15 mediaStatus=6 file=perf_switch5.mp4
-2026-09-13 19:17:10.650 [I] session=16 play index=1/5 file=perf_switch1.mp4 resumePos=-1
-2026-09-13 19:17:10.650 [D] session=16 mediaStatus=2 file=perf_switch5.mp4
-2026-09-13 19:17:10.664 [D] session=16 mediaStatus=1 file=perf_switch1.mp4
-2026-09-13 19:17:10.664 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch1.mp4
-2026-09-13 19:17:10.664 [D] setPlaybackRate(1)
-2026-09-13 19:17:10.678 [D] session=16 metaDataChanged file=perf_switch1.mp4
-2026-09-13 19:17:10.678 [D] setPlaybackRate(1)
-2026-09-13 19:17:10.678 [D] session=16 mediaStatus=2 file=perf_switch1.mp4
-2026-09-13 19:17:10.719 [D] session=16 mediaStatus=4 file=perf_switch1.mp4
-2026-09-13 19:17:10.723 [D] session=16 mediaStatus=5 file=perf_switch1.mp4
-2026-09-13 19:17:15.727 [D] session=16 mediaStatus=6 file=perf_switch1.mp4
-2026-09-13 19:17:15.727 [I] session=17 play index=2/5 file=perf_switch2.mp4 resumePos=-1
-2026-09-13 19:17:15.727 [D] session=17 mediaStatus=2 file=perf_switch1.mp4
-2026-09-13 19:17:15.738 [D] session=17 mediaStatus=1 file=perf_switch2.mp4
-2026-09-13 19:17:15.738 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch2.mp4
-2026-09-13 19:17:15.738 [D] setPlaybackRate(1)
-2026-09-13 19:17:15.751 [D] session=17 metaDataChanged file=perf_switch2.mp4
-2026-09-13 19:17:15.751 [D] setPlaybackRate(1)
-2026-09-13 19:17:15.751 [D] session=17 mediaStatus=2 file=perf_switch2.mp4
-2026-09-13 19:17:15.802 [D] session=17 mediaStatus=4 file=perf_switch2.mp4
-2026-09-13 19:17:15.812 [D] session=17 mediaStatus=5 file=perf_switch2.mp4
-2026-09-13 19:17:20.809 [D] session=17 mediaStatus=6 file=perf_switch2.mp4
-2026-09-13 19:17:20.809 [I] session=18 play index=3/5 file=perf_switch3.mp4 resumePos=-1
-2026-09-13 19:17:20.809 [D] session=18 mediaStatus=2 file=perf_switch2.mp4
-2026-09-13 19:17:20.823 [D] session=18 mediaStatus=1 file=perf_switch3.mp4
-2026-09-13 19:17:20.823 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch3.mp4
-2026-09-13 19:17:20.823 [D] setPlaybackRate(1)
-2026-09-13 19:17:20.841 [D] session=18 metaDataChanged file=perf_switch3.mp4
-2026-09-13 19:17:20.841 [D] setPlaybackRate(1)
-2026-09-13 19:17:20.841 [D] session=18 mediaStatus=2 file=perf_switch3.mp4
-2026-09-13 19:17:20.885 [D] session=18 mediaStatus=4 file=perf_switch3.mp4
-2026-09-13 19:17:20.894 [D] session=18 mediaStatus=5 file=perf_switch3.mp4
-2026-09-13 19:17:25.891 [D] session=18 mediaStatus=6 file=perf_switch3.mp4
-2026-09-13 19:17:25.891 [I] session=19 play index=4/5 file=perf_switch4.mp4 resumePos=-1
-2026-09-13 19:17:25.893 [D] session=19 mediaStatus=2 file=perf_switch3.mp4
-2026-09-13 19:17:25.903 [D] session=19 mediaStatus=1 file=perf_switch4.mp4
-2026-09-13 19:17:25.903 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch4.mp4
-2026-09-13 19:17:25.903 [D] setPlaybackRate(1)
-2026-09-13 19:17:25.917 [D] session=19 metaDataChanged file=perf_switch4.mp4
-2026-09-13 19:17:25.917 [D] setPlaybackRate(1)
-2026-09-13 19:17:25.917 [D] session=19 mediaStatus=2 file=perf_switch4.mp4
-2026-09-13 19:17:25.964 [D] session=19 mediaStatus=4 file=perf_switch4.mp4
-2026-09-13 19:17:25.970 [D] session=19 mediaStatus=5 file=perf_switch4.mp4
-2026-09-13 19:17:30.968 [D] session=19 mediaStatus=6 file=perf_switch4.mp4
-2026-09-13 19:17:30.968 [I] session=20 play index=5/5 file=perf_switch5.mp4 resumePos=-1
-2026-09-13 19:17:30.971 [D] session=20 mediaStatus=2 file=perf_switch4.mp4
-2026-09-13 19:17:30.984 [D] session=20 mediaStatus=1 file=perf_switch5.mp4
-2026-09-13 19:17:30.984 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch5.mp4
-2026-09-13 19:17:30.984 [D] setPlaybackRate(1)
-2026-09-13 19:17:30.998 [D] session=20 metaDataChanged file=perf_switch5.mp4
-2026-09-13 19:17:30.998 [D] setPlaybackRate(1)
-2026-09-13 19:17:30.998 [D] session=20 mediaStatus=2 file=perf_switch5.mp4
-2026-09-13 19:17:31.043 [D] session=20 mediaStatus=4 file=perf_switch5.mp4
-2026-09-13 19:17:31.053 [D] session=20 mediaStatus=5 file=perf_switch5.mp4
-2026-09-13 19:17:35.558 [D] session=20 mediaStatus=6 file=perf_switch5.mp4
-2026-09-13 19:17:35.558 [I] session=21 play index=1/5 file=perf_switch1.mp4 resumePos=-1
-2026-09-13 19:17:35.560 [D] session=21 mediaStatus=2 file=perf_switch5.mp4
-2026-09-13 19:17:35.570 [D] session=21 mediaStatus=1 file=perf_switch1.mp4
-2026-09-13 19:17:35.570 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch1.mp4
-2026-09-13 19:17:35.570 [D] setPlaybackRate(1)
-2026-09-13 19:17:35.585 [D] session=21 metaDataChanged file=perf_switch1.mp4
-2026-09-13 19:17:35.585 [D] setPlaybackRate(1)
-2026-09-13 19:17:35.585 [D] session=21 mediaStatus=2 file=perf_switch1.mp4
-2026-09-13 19:17:35.625 [D] session=21 mediaStatus=4 file=perf_switch1.mp4
-2026-09-13 19:17:35.634 [D] session=21 mediaStatus=5 file=perf_switch1.mp4
-2026-09-13 19:17:40.634 [D] session=21 mediaStatus=6 file=perf_switch1.mp4
-2026-09-13 19:17:40.634 [I] session=22 play index=2/5 file=perf_switch2.mp4 resumePos=-1
-2026-09-13 19:17:40.637 [D] session=22 mediaStatus=2 file=perf_switch1.mp4
-2026-09-13 19:17:40.648 [D] session=22 mediaStatus=1 file=perf_switch2.mp4
-2026-09-13 19:17:40.648 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch2.mp4
-2026-09-13 19:17:40.648 [D] setPlaybackRate(1)
-2026-09-13 19:17:40.663 [D] session=22 metaDataChanged file=perf_switch2.mp4
-2026-09-13 19:17:40.663 [D] setPlaybackRate(1)
-2026-09-13 19:17:40.663 [D] session=22 mediaStatus=2 file=perf_switch2.mp4
-2026-09-13 19:17:40.705 [D] session=22 mediaStatus=4 file=perf_switch2.mp4
-2026-09-13 19:17:40.715 [D] session=22 mediaStatus=5 file=perf_switch2.mp4
-2026-09-13 19:17:45.711 [D] session=22 mediaStatus=6 file=perf_switch2.mp4
-2026-09-13 19:17:45.711 [I] session=23 play index=3/5 file=perf_switch3.mp4 resumePos=-1
-2026-09-13 19:17:45.712 [D] session=23 mediaStatus=2 file=perf_switch2.mp4
-2026-09-13 19:17:45.723 [D] session=23 mediaStatus=1 file=perf_switch3.mp4
-2026-09-13 19:17:45.723 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch3.mp4
-2026-09-13 19:17:45.723 [D] setPlaybackRate(1)
-2026-09-13 19:17:45.738 [D] session=23 metaDataChanged file=perf_switch3.mp4
-2026-09-13 19:17:45.738 [D] setPlaybackRate(1)
-2026-09-13 19:17:45.738 [D] session=23 mediaStatus=2 file=perf_switch3.mp4
-2026-09-13 19:17:45.790 [D] session=23 mediaStatus=4 file=perf_switch3.mp4
-2026-09-13 19:17:45.796 [D] session=23 mediaStatus=5 file=perf_switch3.mp4
-2026-09-13 19:17:50.799 [D] session=23 mediaStatus=6 file=perf_switch3.mp4
-2026-09-13 19:17:50.799 [I] session=24 play index=4/5 file=perf_switch4.mp4 resumePos=-1
-2026-09-13 19:17:50.799 [D] session=24 mediaStatus=2 file=perf_switch3.mp4
-2026-09-13 19:17:50.811 [D] session=24 mediaStatus=1 file=perf_switch4.mp4
-2026-09-13 19:17:50.811 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch4.mp4
-2026-09-13 19:17:50.811 [D] setPlaybackRate(1)
-2026-09-13 19:17:50.823 [D] session=24 metaDataChanged file=perf_switch4.mp4
-2026-09-13 19:17:50.823 [D] setPlaybackRate(1)
-2026-09-13 19:17:50.823 [D] session=24 mediaStatus=2 file=perf_switch4.mp4
-2026-09-13 19:17:50.867 [D] session=24 mediaStatus=4 file=perf_switch4.mp4
-2026-09-13 19:17:50.879 [D] session=24 mediaStatus=5 file=perf_switch4.mp4
-2026-09-13 19:17:55.881 [D] session=24 mediaStatus=6 file=perf_switch4.mp4
-2026-09-13 19:17:55.881 [I] session=25 play index=5/5 file=perf_switch5.mp4 resumePos=-1
-2026-09-13 19:17:55.884 [D] session=25 mediaStatus=2 file=perf_switch4.mp4
-2026-09-13 19:17:55.894 [D] session=25 mediaStatus=1 file=perf_switch5.mp4
-2026-09-13 19:17:55.894 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch5.mp4
-2026-09-13 19:17:55.894 [D] setPlaybackRate(1)
-2026-09-13 19:17:55.908 [D] session=25 metaDataChanged file=perf_switch5.mp4
-2026-09-13 19:17:55.908 [D] setPlaybackRate(1)
-2026-09-13 19:17:55.908 [D] session=25 mediaStatus=2 file=perf_switch5.mp4
-2026-09-13 19:17:55.951 [D] session=25 mediaStatus=4 file=perf_switch5.mp4
-2026-09-13 19:17:55.957 [D] session=25 mediaStatus=5 file=perf_switch5.mp4
-2026-09-13 19:18:00.454 [D] session=25 mediaStatus=6 file=perf_switch5.mp4
-2026-09-13 19:18:00.454 [I] session=26 play index=1/5 file=perf_switch1.mp4 resumePos=-1
-2026-09-13 19:18:00.454 [D] session=26 mediaStatus=2 file=perf_switch5.mp4
-2026-09-13 19:18:00.466 [D] session=26 mediaStatus=1 file=perf_switch1.mp4
-2026-09-13 19:18:00.466 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch1.mp4
-2026-09-13 19:18:00.466 [D] setPlaybackRate(1)
-2026-09-13 19:18:00.481 [D] session=26 metaDataChanged file=perf_switch1.mp4
-2026-09-13 19:18:00.481 [D] setPlaybackRate(1)
-2026-09-13 19:18:00.481 [D] session=26 mediaStatus=2 file=perf_switch1.mp4
-2026-09-13 19:18:00.530 [D] session=26 mediaStatus=4 file=perf_switch1.mp4
-2026-09-13 19:18:00.538 [D] session=26 mediaStatus=5 file=perf_switch1.mp4
-2026-09-13 19:18:05.536 [D] session=26 mediaStatus=6 file=perf_switch1.mp4
-2026-09-13 19:18:05.536 [I] session=27 play index=2/5 file=perf_switch2.mp4 resumePos=-1
-2026-09-13 19:18:05.536 [D] session=27 mediaStatus=2 file=perf_switch1.mp4
-2026-09-13 19:18:05.549 [D] session=27 mediaStatus=1 file=perf_switch2.mp4
-2026-09-13 19:18:05.549 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch2.mp4
-2026-09-13 19:18:05.549 [D] setPlaybackRate(1)
-2026-09-13 19:18:05.566 [D] session=27 metaDataChanged file=perf_switch2.mp4
-2026-09-13 19:18:05.566 [D] setPlaybackRate(1)
-2026-09-13 19:18:05.566 [D] session=27 mediaStatus=2 file=perf_switch2.mp4
-2026-09-13 19:18:05.609 [D] session=27 mediaStatus=4 file=perf_switch2.mp4
-2026-09-13 19:18:05.617 [D] session=27 mediaStatus=5 file=perf_switch2.mp4
-2026-09-13 19:18:10.617 [D] session=27 mediaStatus=6 file=perf_switch2.mp4
-2026-09-13 19:18:10.617 [I] session=28 play index=3/5 file=perf_switch3.mp4 resumePos=-1
-2026-09-13 19:18:10.618 [D] session=28 mediaStatus=2 file=perf_switch2.mp4
-2026-09-13 19:18:10.627 [D] session=28 mediaStatus=1 file=perf_switch3.mp4
-2026-09-13 19:18:10.627 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch3.mp4
-2026-09-13 19:18:10.627 [D] setPlaybackRate(1)
-2026-09-13 19:18:10.642 [D] session=28 metaDataChanged file=perf_switch3.mp4
-2026-09-13 19:18:10.642 [D] setPlaybackRate(1)
-2026-09-13 19:18:10.642 [D] session=28 mediaStatus=2 file=perf_switch3.mp4
-2026-09-13 19:18:10.699 [D] session=28 mediaStatus=4 file=perf_switch3.mp4
-2026-09-13 19:18:10.709 [D] session=28 mediaStatus=5 file=perf_switch3.mp4
-2026-09-13 19:18:15.707 [D] session=28 mediaStatus=6 file=perf_switch3.mp4
-2026-09-13 19:18:15.707 [I] session=29 play index=4/5 file=perf_switch4.mp4 resumePos=-1
-2026-09-13 19:18:15.708 [D] session=29 mediaStatus=2 file=perf_switch3.mp4
-2026-09-13 19:18:15.716 [D] session=29 mediaStatus=1 file=perf_switch4.mp4
-2026-09-13 19:18:15.716 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch4.mp4
-2026-09-13 19:18:15.716 [D] setPlaybackRate(1)
-2026-09-13 19:18:15.732 [D] session=29 metaDataChanged file=perf_switch4.mp4
-2026-09-13 19:18:15.732 [D] setPlaybackRate(1)
-2026-09-13 19:18:15.732 [D] session=29 mediaStatus=2 file=perf_switch4.mp4
-2026-09-13 19:18:15.774 [D] session=29 mediaStatus=4 file=perf_switch4.mp4
-2026-09-13 19:18:15.780 [D] session=29 mediaStatus=5 file=perf_switch4.mp4
-2026-09-13 19:18:20.777 [D] session=29 mediaStatus=6 file=perf_switch4.mp4
-2026-09-13 19:18:20.777 [I] session=30 play index=5/5 file=perf_switch5.mp4 resumePos=-1
-2026-09-13 19:18:20.780 [D] session=30 mediaStatus=2 file=perf_switch4.mp4
-2026-09-13 19:18:20.792 [D] session=30 mediaStatus=1 file=perf_switch5.mp4
-2026-09-13 19:18:20.792 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch5.mp4
-2026-09-13 19:18:20.792 [D] setPlaybackRate(1)
-2026-09-13 19:18:20.809 [D] session=30 metaDataChanged file=perf_switch5.mp4
-2026-09-13 19:18:20.809 [D] setPlaybackRate(1)
-2026-09-13 19:18:20.809 [D] session=30 mediaStatus=2 file=perf_switch5.mp4
-2026-09-13 19:18:20.851 [D] session=30 mediaStatus=4 file=perf_switch5.mp4
-2026-09-13 19:18:20.862 [D] session=30 mediaStatus=5 file=perf_switch5.mp4
-2026-09-13 19:18:25.356 [D] session=30 mediaStatus=6 file=perf_switch5.mp4
-2026-09-13 19:18:25.356 [I] session=31 play index=1/5 file=perf_switch1.mp4 resumePos=-1
-2026-09-13 19:18:25.362 [D] session=31 mediaStatus=2 file=perf_switch5.mp4
-2026-09-13 19:18:25.374 [D] session=31 mediaStatus=1 file=perf_switch1.mp4
-2026-09-13 19:18:25.374 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch1.mp4
-2026-09-13 19:18:25.374 [D] setPlaybackRate(1)
-2026-09-13 19:18:25.407 [D] session=31 metaDataChanged file=perf_switch1.mp4
-2026-09-13 19:18:25.407 [D] setPlaybackRate(1)
-2026-09-13 19:18:25.407 [D] session=31 mediaStatus=2 file=perf_switch1.mp4
-2026-09-13 19:18:25.492 [D] session=31 mediaStatus=4 file=perf_switch1.mp4
-2026-09-13 19:18:25.509 [D] session=31 mediaStatus=5 file=perf_switch1.mp4
-2026-09-13 19:18:30.499 [D] session=31 mediaStatus=6 file=perf_switch1.mp4
-2026-09-13 19:18:30.499 [I] session=32 play index=2/5 file=perf_switch2.mp4 resumePos=-1
-2026-09-13 19:18:30.505 [D] session=32 mediaStatus=2 file=perf_switch1.mp4
-2026-09-13 19:18:30.516 [D] session=32 mediaStatus=1 file=perf_switch2.mp4
-2026-09-13 19:18:30.517 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch2.mp4
-2026-09-13 19:18:30.517 [D] setPlaybackRate(1)
-2026-09-13 19:18:30.544 [D] session=32 metaDataChanged file=perf_switch2.mp4
-2026-09-13 19:18:30.544 [D] setPlaybackRate(1)
-2026-09-13 19:18:30.544 [D] session=32 mediaStatus=2 file=perf_switch2.mp4
-2026-09-13 19:18:30.632 [D] session=32 mediaStatus=4 file=perf_switch2.mp4
-2026-09-13 19:18:30.644 [D] session=32 mediaStatus=5 file=perf_switch2.mp4
-2026-09-13 19:18:35.642 [D] session=32 mediaStatus=6 file=perf_switch2.mp4
-2026-09-13 19:18:35.642 [I] session=33 play index=3/5 file=perf_switch3.mp4 resumePos=-1
-2026-09-13 19:18:35.642 [D] session=33 mediaStatus=2 file=perf_switch2.mp4
-2026-09-13 19:18:35.649 [D] session=33 mediaStatus=1 file=perf_switch3.mp4
-2026-09-13 19:18:35.649 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch3.mp4
-2026-09-13 19:18:35.649 [D] setPlaybackRate(1)
-2026-09-13 19:18:35.666 [D] session=33 metaDataChanged file=perf_switch3.mp4
-2026-09-13 19:18:35.666 [D] setPlaybackRate(1)
-2026-09-13 19:18:35.666 [D] session=33 mediaStatus=2 file=perf_switch3.mp4
-2026-09-13 19:18:35.710 [D] session=33 mediaStatus=4 file=perf_switch3.mp4
-2026-09-13 19:18:35.716 [D] session=33 mediaStatus=5 file=perf_switch3.mp4
-2026-09-13 19:18:40.724 [D] session=33 mediaStatus=6 file=perf_switch3.mp4
-2026-09-13 19:18:40.724 [I] session=34 play index=4/5 file=perf_switch4.mp4 resumePos=-1
-2026-09-13 19:18:40.726 [D] session=34 mediaStatus=2 file=perf_switch3.mp4
-2026-09-13 19:18:40.731 [D] session=34 mediaStatus=1 file=perf_switch4.mp4
-2026-09-13 19:18:40.732 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch4.mp4
-2026-09-13 19:18:40.732 [D] setPlaybackRate(1)
-2026-09-13 19:18:40.750 [D] session=34 metaDataChanged file=perf_switch4.mp4
-2026-09-13 19:18:40.750 [D] setPlaybackRate(1)
-2026-09-13 19:18:40.750 [D] session=34 mediaStatus=2 file=perf_switch4.mp4
-2026-09-13 19:18:40.791 [D] session=34 mediaStatus=4 file=perf_switch4.mp4
-2026-09-13 19:18:40.798 [D] session=34 mediaStatus=5 file=perf_switch4.mp4
-2026-09-13 19:18:45.794 [D] session=34 mediaStatus=6 file=perf_switch4.mp4
-2026-09-13 19:18:45.794 [I] session=35 play index=5/5 file=perf_switch5.mp4 resumePos=-1
-2026-09-13 19:18:45.794 [D] session=35 mediaStatus=2 file=perf_switch4.mp4
-2026-09-13 19:18:45.806 [D] session=35 mediaStatus=1 file=perf_switch5.mp4
-2026-09-13 19:18:45.806 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch5.mp4
-2026-09-13 19:18:45.806 [D] setPlaybackRate(1)
-2026-09-13 19:18:45.823 [D] session=35 metaDataChanged file=perf_switch5.mp4
-2026-09-13 19:18:45.823 [D] setPlaybackRate(1)
-2026-09-13 19:18:45.823 [D] session=35 mediaStatus=2 file=perf_switch5.mp4
-2026-09-13 19:18:45.867 [D] session=35 mediaStatus=4 file=perf_switch5.mp4
-2026-09-13 19:18:45.878 [D] session=35 mediaStatus=5 file=perf_switch5.mp4
-2026-09-13 19:18:50.373 [D] session=35 mediaStatus=6 file=perf_switch5.mp4
-2026-09-13 19:18:50.373 [I] session=36 play index=1/5 file=perf_switch1.mp4 resumePos=-1
-2026-09-13 19:18:50.373 [D] session=36 mediaStatus=2 file=perf_switch5.mp4
-2026-09-13 19:18:50.380 [D] session=36 mediaStatus=1 file=perf_switch1.mp4
-2026-09-13 19:18:50.380 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch1.mp4
-2026-09-13 19:18:50.380 [D] setPlaybackRate(1)
-2026-09-13 19:18:50.397 [D] session=36 metaDataChanged file=perf_switch1.mp4
-2026-09-13 19:18:50.397 [D] setPlaybackRate(1)
-2026-09-13 19:18:50.397 [D] session=36 mediaStatus=2 file=perf_switch1.mp4
-2026-09-13 19:18:50.440 [D] session=36 mediaStatus=4 file=perf_switch1.mp4
-2026-09-13 19:18:50.447 [D] session=36 mediaStatus=5 file=perf_switch1.mp4
-2026-09-13 19:18:55.453 [D] session=36 mediaStatus=6 file=perf_switch1.mp4
-2026-09-13 19:18:55.453 [I] session=37 play index=2/5 file=perf_switch2.mp4 resumePos=-1
-2026-09-13 19:18:55.456 [D] session=37 mediaStatus=2 file=perf_switch1.mp4
-2026-09-13 19:18:55.461 [D] session=37 mediaStatus=1 file=perf_switch2.mp4
-2026-09-13 19:18:55.461 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch2.mp4
-2026-09-13 19:18:55.461 [D] setPlaybackRate(1)
-2026-09-13 19:18:55.477 [D] session=37 metaDataChanged file=perf_switch2.mp4
-2026-09-13 19:18:55.477 [D] setPlaybackRate(1)
-2026-09-13 19:18:55.477 [D] session=37 mediaStatus=2 file=perf_switch2.mp4
-2026-09-13 19:18:55.515 [D] session=37 mediaStatus=4 file=perf_switch2.mp4
-2026-09-13 19:18:55.523 [D] session=37 mediaStatus=5 file=perf_switch2.mp4
-2026-09-13 19:19:00.520 [D] session=37 mediaStatus=6 file=perf_switch2.mp4
-2026-09-13 19:19:00.520 [I] session=38 play index=3/5 file=perf_switch3.mp4 resumePos=-1
-2026-09-13 19:19:00.523 [D] session=38 mediaStatus=2 file=perf_switch2.mp4
-2026-09-13 19:19:00.529 [D] session=38 mediaStatus=1 file=perf_switch3.mp4
-2026-09-13 19:19:00.529 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch3.mp4
-2026-09-13 19:19:00.529 [D] setPlaybackRate(1)
-2026-09-13 19:19:00.547 [D] session=38 metaDataChanged file=perf_switch3.mp4
-2026-09-13 19:19:00.547 [D] setPlaybackRate(1)
-2026-09-13 19:19:00.547 [D] session=38 mediaStatus=2 file=perf_switch3.mp4
-2026-09-13 19:19:00.589 [D] session=38 mediaStatus=4 file=perf_switch3.mp4
-2026-09-13 19:19:00.597 [D] session=38 mediaStatus=5 file=perf_switch3.mp4
-2026-09-13 19:19:05.593 [D] session=38 mediaStatus=6 file=perf_switch3.mp4
-2026-09-13 19:19:05.593 [I] session=39 play index=4/5 file=perf_switch4.mp4 resumePos=-1
-2026-09-13 19:19:05.597 [D] session=39 mediaStatus=2 file=perf_switch3.mp4
-2026-09-13 19:19:05.602 [D] session=39 mediaStatus=1 file=perf_switch4.mp4
-2026-09-13 19:19:05.602 [D] setLoops(Once) player=1b2e5329540 widget=1b2e5315f70 source=file:///C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/media/video/perf/perf_switch4.mp4
-2026-09-13 19:19:05.602 [D] setPlaybackRate(1)
-2026-09-13 19:19:05.619 [D] session=39 metaDataChanged file=perf_switch4.mp4
-2026-09-13 19:19:05.619 [D] setPlaybackRate(1)
-2026-09-13 19:19:05.619 [D] session=39 mediaStatus=2 file=perf_switch4.mp4
-2026-09-13 19:19:05.671 [D] session=39 mediaStatus=4 file=perf_switch4.mp4
-2026-09-13 19:19:05.681 [D] session=39 mediaStatus=5 file=perf_switch4.mp4
-2026-09-13 19:19:08.288 [D] session=39 mediaStatus=2 file=perf_switch4.mp4
+2026-09-14 02:53:49.104 [I] ==== 视频壁纸模块启动 (diag=on) ====
+2026-09-14 02:53:49.106 [I] 配置读取: path=C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/config/.ini exists=1 size=2654 keys=41 wasPlaying=0
+2026-09-14 02:53:49.106 [I] 配置校验: 补齐缺失 0 项, 修复非法 16 项
+2026-09-14 02:53:49.146 [I] 配置已加载: C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/config/.ini
+2026-09-14 02:53:49.146 [I] 资源友好模式: 进程已限制到 4 个逻辑核
+2026-09-14 02:53:49.148 [I] VideoWallpaper 初始化完成
+2026-09-14 02:53:49.148 [I] session=1 play index=1/5 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch1.mp4 resumePos=-1
+2026-09-14 02:53:49.420 [D] 创建输出: players=1/0 widgets=1/0 audios=1/0
+2026-09-14 02:53:49.477 [D] session=1 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch1.mp4
+2026-09-14 02:53:49.477 [D] setLoops(Once) player=14fe27f5ef0 widget=14fe2814640 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideoerferf_switch1.mp4
+2026-09-14 02:53:49.477 [D] setPlaybackRate(1)
+2026-09-14 02:53:50.236 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-14 02:53:50.236 [D] setPlaybackRate(1)
+2026-09-14 02:53:50.236 [D] setPlaybackRate(1)
+2026-09-14 02:53:50.236 [D] setLoops(Once) player=14fe27f5ef0 widget=14fe2814640 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideoerferf_switch1.mp4
+2026-09-14 02:53:50.236 [D] setLoops(Once) player=14fe27f5ef0 widget=14fe2814640 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideoerferf_switch1.mp4
+2026-09-14 02:53:50.236 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-14 02:53:50.396 [W] session=1 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch1.mp4 reason=格式不支持 detail=Could not open file
+2026-09-14 02:53:50.396 [D] session=1 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch1.mp4
+2026-09-14 02:53:50.396 [D] setPlaybackRate(1)
+2026-09-14 02:53:50.396 [D] session=1 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch1.mp4
+2026-09-14 02:53:50.509 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-14 02:53:50.897 [D] session=1 metaDataChanged file=
+2026-09-14 02:53:50.897 [D] setPlaybackRate(1)
+2026-09-14 02:53:50.897 [D] session=1 mediaStatus=0 file=
+2026-09-14 02:53:50.897 [I] session=2 play index=1/5 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch1.mp4 resumePos=-1
+2026-09-14 02:53:50.900 [D] session=2 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch1.mp4
+2026-09-14 02:53:50.900 [D] setLoops(Once) player=14fe27f5ef0 widget=14fe2814640 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideoerferf_switch1.mp4
+2026-09-14 02:53:50.900 [D] setPlaybackRate(1)
+2026-09-14 02:53:50.901 [W] session=2 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch1.mp4 reason=格式不支持 detail=Could not open file
+2026-09-14 02:53:50.901 [D] session=2 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch1.mp4
+2026-09-14 02:53:50.901 [D] setPlaybackRate(1)
+2026-09-14 02:53:50.901 [D] session=2 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch1.mp4
+2026-09-14 02:53:51.135 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-14 02:53:52.143 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-14 02:53:52.402 [D] session=2 metaDataChanged file=
+2026-09-14 02:53:52.402 [D] setPlaybackRate(1)
+2026-09-14 02:53:52.402 [D] session=2 mediaStatus=0 file=
+2026-09-14 02:53:52.402 [I] session=3 play index=1/5 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch1.mp4 resumePos=-1
+2026-09-14 02:53:52.405 [D] session=3 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch1.mp4
+2026-09-14 02:53:52.405 [D] setLoops(Once) player=14fe27f5ef0 widget=14fe2814640 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideoerferf_switch1.mp4
+2026-09-14 02:53:52.405 [D] setPlaybackRate(1)
+2026-09-14 02:53:52.406 [W] session=3 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch1.mp4 reason=格式不支持 detail=Could not open file
+2026-09-14 02:53:52.406 [W] session=3 曲目不可播 track=1 fails=1 dead=1 reason=格式不支持
+2026-09-14 02:53:52.406 [D] session=3 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch1.mp4
+2026-09-14 02:53:52.406 [D] setPlaybackRate(1)
+2026-09-14 02:53:52.406 [D] session=3 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch1.mp4
+2026-09-14 02:53:52.612 [I] session=4 play index=2/5 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch2.mp4 resumePos=-1
+2026-09-14 02:53:52.615 [D] session=4 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch2.mp4
+2026-09-14 02:53:52.615 [D] setLoops(Once) player=14fe27f5ef0 widget=14fe2814640 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideoerferf_switch2.mp4
+2026-09-14 02:53:52.615 [D] setPlaybackRate(1)
+2026-09-14 02:53:52.615 [W] session=4 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch2.mp4 reason=格式不支持 detail=Could not open file
+2026-09-14 02:53:52.615 [D] session=4 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch2.mp4
+2026-09-14 02:53:52.615 [D] setPlaybackRate(1)
+2026-09-14 02:53:52.615 [D] session=4 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch2.mp4
+2026-09-14 02:53:53.125 [D] session=4 metaDataChanged file=
+2026-09-14 02:53:53.125 [D] setPlaybackRate(1)
+2026-09-14 02:53:53.125 [D] session=4 mediaStatus=0 file=
+2026-09-14 02:53:53.125 [I] session=5 play index=2/5 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch2.mp4 resumePos=-1
+2026-09-14 02:53:53.128 [D] session=5 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch2.mp4
+2026-09-14 02:53:53.128 [D] setLoops(Once) player=14fe27f5ef0 widget=14fe2814640 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideoerferf_switch2.mp4
+2026-09-14 02:53:53.128 [D] setPlaybackRate(1)
+2026-09-14 02:53:53.128 [W] session=5 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch2.mp4 reason=格式不支持 detail=Could not open file
+2026-09-14 02:53:53.128 [D] session=5 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch2.mp4
+2026-09-14 02:53:53.128 [D] setPlaybackRate(1)
+2026-09-14 02:53:53.128 [D] session=5 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch2.mp4
+2026-09-14 02:53:53.135 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-14 02:53:54.138 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-14 02:53:54.636 [D] session=5 metaDataChanged file=
+2026-09-14 02:53:54.636 [D] setPlaybackRate(1)
+2026-09-14 02:53:54.636 [D] session=5 mediaStatus=0 file=
+2026-09-14 02:53:54.636 [I] session=6 play index=2/5 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch2.mp4 resumePos=-1
+2026-09-14 02:53:54.640 [D] session=6 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch2.mp4
+2026-09-14 02:53:54.640 [D] setLoops(Once) player=14fe27f5ef0 widget=14fe2814640 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideoerferf_switch2.mp4
+2026-09-14 02:53:54.640 [D] setPlaybackRate(1)
+2026-09-14 02:53:54.641 [W] session=6 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch2.mp4 reason=格式不支持 detail=Could not open file
+2026-09-14 02:53:54.641 [W] session=6 曲目不可播 track=2 fails=1 dead=2 reason=格式不支持
+2026-09-14 02:53:54.641 [D] session=6 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch2.mp4
+2026-09-14 02:53:54.641 [D] setPlaybackRate(1)
+2026-09-14 02:53:54.641 [D] session=6 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch2.mp4
+2026-09-14 02:53:54.852 [I] session=7 play index=3/5 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch3.mp4 resumePos=-1
+2026-09-14 02:53:54.855 [D] session=7 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch3.mp4
+2026-09-14 02:53:54.855 [D] setLoops(Once) player=14fe27f5ef0 widget=14fe2814640 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideoerferf_switch3.mp4
+2026-09-14 02:53:54.855 [D] setPlaybackRate(1)
+2026-09-14 02:53:54.856 [W] session=7 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch3.mp4 reason=格式不支持 detail=Could not open file
+2026-09-14 02:53:54.856 [D] session=7 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch3.mp4
+2026-09-14 02:53:54.856 [D] setPlaybackRate(1)
+2026-09-14 02:53:54.856 [D] session=7 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch3.mp4
+2026-09-14 02:53:55.135 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-14 02:53:55.369 [D] session=7 metaDataChanged file=
+2026-09-14 02:53:55.369 [D] setPlaybackRate(1)
+2026-09-14 02:53:55.369 [D] session=7 mediaStatus=0 file=
+2026-09-14 02:53:55.369 [I] session=8 play index=3/5 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch3.mp4 resumePos=-1
+2026-09-14 02:53:55.374 [D] session=8 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch3.mp4
+2026-09-14 02:53:55.374 [D] setLoops(Once) player=14fe27f5ef0 widget=14fe2814640 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideoerferf_switch3.mp4
+2026-09-14 02:53:55.374 [D] setPlaybackRate(1)
+2026-09-14 02:53:55.374 [W] session=8 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch3.mp4 reason=格式不支持 detail=Could not open file
+2026-09-14 02:53:55.374 [D] session=8 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch3.mp4
+2026-09-14 02:53:55.374 [D] setPlaybackRate(1)
+2026-09-14 02:53:55.374 [D] session=8 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch3.mp4
+2026-09-14 02:53:56.142 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-14 02:53:56.886 [D] session=8 metaDataChanged file=
+2026-09-14 02:53:56.886 [D] setPlaybackRate(1)
+2026-09-14 02:53:56.886 [D] session=8 mediaStatus=0 file=
+2026-09-14 02:53:56.886 [I] session=9 play index=3/5 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch3.mp4 resumePos=-1
+2026-09-14 02:53:56.888 [D] session=9 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch3.mp4
+2026-09-14 02:53:56.888 [D] setLoops(Once) player=14fe27f5ef0 widget=14fe2814640 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideoerferf_switch3.mp4
+2026-09-14 02:53:56.888 [D] setPlaybackRate(1)
+2026-09-14 02:53:56.889 [W] session=9 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch3.mp4 reason=格式不支持 detail=Could not open file
+2026-09-14 02:53:56.889 [W] session=9 曲目不可播 track=3 fails=1 dead=3 reason=格式不支持
+2026-09-14 02:53:56.889 [D] session=9 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch3.mp4
+2026-09-14 02:53:56.889 [D] setPlaybackRate(1)
+2026-09-14 02:53:56.889 [D] session=9 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch3.mp4
+2026-09-14 02:53:57.102 [I] session=10 play index=4/5 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch4.mp4 resumePos=-1
+2026-09-14 02:53:57.105 [D] session=10 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch4.mp4
+2026-09-14 02:53:57.105 [D] setLoops(Once) player=14fe27f5ef0 widget=14fe2814640 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideoerferf_switch4.mp4
+2026-09-14 02:53:57.105 [D] setPlaybackRate(1)
+2026-09-14 02:53:57.107 [W] session=10 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch4.mp4 reason=格式不支持 detail=Could not open file
+2026-09-14 02:53:57.107 [D] session=10 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch4.mp4
+2026-09-14 02:53:57.107 [D] setPlaybackRate(1)
+2026-09-14 02:53:57.107 [D] session=10 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch4.mp4
+2026-09-14 02:53:57.135 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-14 02:53:57.615 [D] session=10 metaDataChanged file=
+2026-09-14 02:53:57.615 [D] setPlaybackRate(1)
+2026-09-14 02:53:57.615 [D] session=10 mediaStatus=0 file=
+2026-09-14 02:53:57.615 [I] session=11 play index=4/5 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch4.mp4 resumePos=-1
+2026-09-14 02:53:57.618 [D] session=11 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch4.mp4
+2026-09-14 02:53:57.618 [D] setLoops(Once) player=14fe27f5ef0 widget=14fe2814640 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideoerferf_switch4.mp4
+2026-09-14 02:53:57.618 [D] setPlaybackRate(1)
+2026-09-14 02:53:57.618 [W] session=11 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch4.mp4 reason=格式不支持 detail=Could not open file
+2026-09-14 02:53:57.618 [D] session=11 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch4.mp4
+2026-09-14 02:53:57.619 [D] setPlaybackRate(1)
+2026-09-14 02:53:57.619 [D] session=11 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch4.mp4
+2026-09-14 02:53:58.143 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-14 02:53:59.127 [D] session=11 metaDataChanged file=
+2026-09-14 02:53:59.127 [D] setPlaybackRate(1)
+2026-09-14 02:53:59.127 [D] session=11 mediaStatus=0 file=
+2026-09-14 02:53:59.127 [I] session=12 play index=4/5 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch4.mp4 resumePos=-1
+2026-09-14 02:53:59.128 [D] session=12 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch4.mp4
+2026-09-14 02:53:59.129 [D] setLoops(Once) player=14fe27f5ef0 widget=14fe2814640 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideoerferf_switch4.mp4
+2026-09-14 02:53:59.129 [D] setPlaybackRate(1)
+2026-09-14 02:53:59.129 [W] session=12 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch4.mp4 reason=格式不支持 detail=Could not open file
+2026-09-14 02:53:59.129 [W] session=12 曲目不可播 track=4 fails=1 dead=4 reason=格式不支持
+2026-09-14 02:53:59.129 [D] session=12 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch4.mp4
+2026-09-14 02:53:59.129 [D] setPlaybackRate(1)
+2026-09-14 02:53:59.129 [D] session=12 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch4.mp4
+2026-09-14 02:53:59.134 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-14 02:53:59.330 [I] session=13 play index=5/5 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch5.mp4 resumePos=-1
+2026-09-14 02:53:59.333 [D] session=13 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch5.mp4
+2026-09-14 02:53:59.333 [D] setLoops(Once) player=14fe27f5ef0 widget=14fe2814640 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideoerferf_switch5.mp4
+2026-09-14 02:53:59.333 [D] setPlaybackRate(1)
+2026-09-14 02:53:59.333 [W] session=13 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch5.mp4 reason=格式不支持 detail=Could not open file
+2026-09-14 02:53:59.333 [D] session=13 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch5.mp4
+2026-09-14 02:53:59.333 [D] setPlaybackRate(1)
+2026-09-14 02:53:59.333 [D] session=13 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch5.mp4
+2026-09-14 02:53:59.843 [D] session=13 metaDataChanged file=
+2026-09-14 02:53:59.843 [D] setPlaybackRate(1)
+2026-09-14 02:53:59.843 [D] session=13 mediaStatus=0 file=
+2026-09-14 02:53:59.843 [I] session=14 play index=5/5 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch5.mp4 resumePos=-1
+2026-09-14 02:53:59.846 [D] session=14 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch5.mp4
+2026-09-14 02:53:59.846 [D] setLoops(Once) player=14fe27f5ef0 widget=14fe2814640 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideoerferf_switch5.mp4
+2026-09-14 02:53:59.846 [D] setPlaybackRate(1)
+2026-09-14 02:53:59.847 [W] session=14 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch5.mp4 reason=格式不支持 detail=Could not open file
+2026-09-14 02:53:59.847 [D] session=14 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch5.mp4
+2026-09-14 02:53:59.847 [D] setPlaybackRate(1)
+2026-09-14 02:53:59.847 [D] session=14 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch5.mp4
+2026-09-14 02:54:00.142 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-14 02:54:01.134 [I] 恢复播放: reasons=0 manualPaused=0
+2026-09-14 02:54:01.350 [D] session=14 metaDataChanged file=
+2026-09-14 02:54:01.350 [D] setPlaybackRate(1)
+2026-09-14 02:54:01.350 [D] session=14 mediaStatus=0 file=
+2026-09-14 02:54:01.350 [I] session=15 play index=5/5 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch5.mp4 resumePos=-1
+2026-09-14 02:54:01.352 [D] session=15 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch5.mp4
+2026-09-14 02:54:01.352 [D] setLoops(Once) player=14fe27f5ef0 widget=14fe2814640 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideoerferf_switch5.mp4
+2026-09-14 02:54:01.352 [D] setPlaybackRate(1)
+2026-09-14 02:54:01.353 [W] session=15 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch5.mp4 reason=格式不支持 detail=Could not open file
+2026-09-14 02:54:01.353 [W] session=15 曲目不可播 track=5 fails=1 dead=5 reason=格式不支持
+2026-09-14 02:54:01.356 [I] teardown n=1 累计 players=1/1 widgets=1/1 audios=1/1
+2026-09-14 02:54:01.371 [I] stopAll: 管线已卸载 session=15
+2026-09-14 02:54:01.371 [D] session=15 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch5.mp4
+2026-09-14 02:54:01.371 [D] setPlaybackRate(1)
+2026-09-14 02:54:01.371 [D] session=15 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideoerferf_switch5.mp4
+2026-09-14 02:56:58.520 [I] stopAll: 管线已卸载 session=15

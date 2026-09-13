@@ -1,4 +1,4 @@
-# Wake the display, hold ES_DISPLAY_REQUIRED while a scenario runs, then release.
+﻿# Wake the display, hold ES_DISPLAY_REQUIRED while a scenario runs, then release.
 # Rationale: unattended long batches can hit the idle display-off timer; a monitor-off
 # event pauses the wallpaper pipeline (by design) and would invalidate playback scenarios.
 param(

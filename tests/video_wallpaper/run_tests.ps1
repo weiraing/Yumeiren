@@ -76,9 +76,15 @@ Write-Host "== T02 switch x30 (5 clips, 3 min) =="
 $csv = Join-Path $OutDir "rt_t02_switch.csv"
 Invoke-Scenario -Playlist $switchClips -OutCsv $csv -DurationSec 185 -PauseFullscreen "false"
 $switches = 0
-if (Test-Path $DiagLog) {
-    $switches = (Select-String -Path $DiagLog -Pattern "session=\d+ play index=" -AllMatches).Count
+# 主日志可能被其他实例锁定而回退到按 PID 独立文件: 主+回退一并统计
+$diagFiles = @($DiagLog)
+$diagFiles += @(Get-ChildItem (Split-Path $DiagLog) -Filter "videowallpaper.log.*" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+foreach ($f in $diagFiles) {
+    if (Test-Path $f) {
+        $switches += (Select-String -Path $f -Pattern "session=\d+ play index=" -AllMatches).Count
+    }
 }
+$diagFiles | ForEach-Object { if (Test-Path $_) { Clear-Content $_ -ErrorAction SilentlyContinue } }
 $gpu = Get-Mean -Csv $csv -Column "gpu_ded_mb" -From 30
 Assert-Test "T02 switch-30" $csv ($switches -ge 30 -and $gpu -gt 100) "switches=$switches gpu_ded=$gpu MB"
 

@@ -1,4 +1,4 @@
-# Phase4 memory-attribution sampler (extends sample.ps1):
+﻿# Phase4 memory-attribution sampler (extends sample.ps1):
 #   - gpu_ded_mb  = \GPU Process Memory(pid_*)\Local Usage   (GPU dedicated memory)
 #   - gpu_shared_mb = \GPU Process Memory(pid_*)\Shared Usage (GPU shared/aperture memory)
 #   - private_mb  = PrivateMemorySize64 = private committed bytes; for this process
