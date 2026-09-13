@@ -2,6 +2,9 @@
 
 #include "appinfo.h"
 #include "platform/windows/desktopmount.h"
+#include "videodiag.h"
+
+#include <QFileInfo>
 
 #include <QAudioOutput>
 #include <QElapsedTimer>
@@ -99,6 +102,10 @@ VideoWallpaper::VideoWallpaper(QObject *parent) : QObject(parent)
         connect(s, &QScreen::geometryChanged, this, &VideoWallpaper::scheduleRelayout);
     connect(qGuiApp, &QGuiApplication::screenAdded, this, &VideoWallpaper::scheduleRelayout);
     connect(qGuiApp, &QGuiApplication::screenRemoved, this, &VideoWallpaper::scheduleRelayout);
+
+    // 阶段7 诊断：采样器仅诊断模式生效(默认 no-op)
+    videodiag::startDiagSampling();
+    videodiag::log(videodiag::Level::Info, QStringLiteral("VideoWallpaper 初始化完成"));
 }
 
 void VideoWallpaper::setPlaylist(const QStringList &files)
@@ -145,6 +152,11 @@ void VideoWallpaper::layoutOutputs()
         ++m_playersCreated;
         ++m_widgetsCreated;
         ++m_audiosCreated;
+        videodiag::log(videodiag::Level::Debug,
+            QStringLiteral("创建输出: players=%1/%2 widgets=%3/%4 audios=%5/%6")
+                .arg(m_playersCreated).arg(m_playersDestroyed)
+                .arg(m_widgetsCreated).arg(m_widgetsDestroyed)
+                .arg(m_audiosCreated).arg(m_audiosDestroyed));
         out.audio->setMuted(true);
         out.player->setAudioOutput(out.audio);
         out.player->setVideoOutput(out.widget);
@@ -225,6 +237,13 @@ void VideoWallpaper::layoutOutputs()
                 || out.player != m_outputs.first().player)
                 return;
             const QString reason = mediaErrorText(err, msg);
+            videodiag::log(videodiag::Level::Warning,
+                QStringLiteral("session=%1 媒体错误 file=%2 reason=%3 detail=%4")
+                    .arg(m_playbackSessionId)
+                    .arg(m_index >= 0 && m_index < m_playlist.size()
+                             ? QFileInfo(m_playlist[m_index]).fileName()
+                             : QStringLiteral("?"))
+                    .arg(reason).arg(msg));
             // 有限重试(阶段3)：第1次失败 500ms 后原地重试，第2次 1500ms，
             // 第3次放弃跳曲。重试不推进列表；退避递增，杜绝高频重建。
             // 注意：错误态的播放器对同一 source 不会再发 errorOccurred，
@@ -329,6 +348,7 @@ void VideoWallpaper::scheduleRelayout()
 
 void VideoWallpaper::teardownOutputs()
 {
+    const int torn = m_outputs.size();
     for (const VideoOutput &out : std::as_const(m_outputs)) {
         if (out.player)
             out.player->stop();
@@ -346,6 +366,13 @@ void VideoWallpaper::teardownOutputs()
         ++m_audiosDestroyed;
     }
     m_outputs.clear();
+    if (torn > 0)
+        videodiag::log(videodiag::Level::Info,
+            QStringLiteral("teardown n=%1 累计 players=%2/%3 widgets=%4/%5 audios=%6/%7")
+                .arg(torn)
+                .arg(m_playersCreated).arg(m_playersDestroyed)
+                .arg(m_widgetsCreated).arg(m_widgetsDestroyed)
+                .arg(m_audiosCreated).arg(m_audiosDestroyed));
 }
 
 bool VideoWallpaper::ensureOutputs(QString *error)
@@ -372,8 +399,15 @@ void VideoWallpaper::playIndex(int index, qint64 resumePos)
         m_fileRetries = 0; // 换曲重置单文件重试额度；同 index 的重试调用保留计数
     m_index = qBound(0, index, m_playlist.size() - 1);
     m_resumePosMs = resumePos;   // LoadedMedia 时消费；普通换曲传 -1 即无跳转
+    videodiag::log(videodiag::Level::Info,
+        QStringLiteral("session=%1 play index=%2/%3 file=%4 resumePos=%5")
+            .arg(m_playbackSessionId).arg(m_index + 1).arg(m_playlist.size())
+            .arg(QFileInfo(m_playlist[m_index]).fileName()).arg(resumePos));
     QString err;
     if (!ensureOutputs(&err)) {
+        videodiag::log(videodiag::Level::Warning,
+            QStringLiteral("session=%1 获取桌面挂载点失败: %2")
+                .arg(m_playbackSessionId).arg(err));
         emit playbackStateChanged(err);
         return;
     }
@@ -465,6 +499,10 @@ void VideoWallpaper::handleUnplayable(const QString &reason)
 {
     m_fileRetries = 0;
     const int fails = ++m_trackFails[m_index];
+    videodiag::log(videodiag::Level::Warning,
+        QStringLiteral("session=%1 曲目不可播 track=%2 fails=%3 dead=%4 reason=%5")
+            .arg(m_playbackSessionId).arg(m_index + 1).arg(fails)
+            .arg(m_deadTracks.size()).arg(reason));
     if (fails >= 2)
         m_deadTracks.insert(m_index);
     if (m_deadTracks.size() >= m_playlist.size()) {
@@ -539,6 +577,8 @@ void VideoWallpaper::stopAll()
     m_resumePosMs = -1;
     if (m_reclaimMemory)
         trimMemory(); // 停止后立即把解码器释放后的内存还给系统，不等下一个回收周期
+    videodiag::log(videodiag::Level::Info,
+        QStringLiteral("stopAll: 管线已卸载 session=%1").arg(m_playbackSessionId));
     emit playbackStateChanged(QStringLiteral("已停止"));
 }
 
@@ -709,6 +749,8 @@ void VideoWallpaper::evaluateSuspend()
     }
 
     if (shouldPlay && !wasPlaying) {
+        videodiag::log(videodiag::Level::Info,
+            QStringLiteral("恢复播放: reasons=0 manualPaused=%1").arg(m_manualPaused));
         for (const VideoOutput &out : std::as_const(m_outputs))
             out.player->play();
         emitTrackState();
@@ -751,6 +793,8 @@ void VideoWallpaper::evaluateSuspend()
                 emit playbackStateChanged(QStringLiteral("显示器已关闭，已自动暂停"));
             else if (reasons & SuspendBattery)
                 emit playbackStateChanged(QStringLiteral("电池模式，已自动暂停"));
+            videodiag::log(videodiag::Level::Info,
+                QStringLiteral("自动挂起: reasons=0x%1").arg(reasons, 0, 16));
         }
     }
     m_lastEmittedReasons = reasons;
@@ -825,6 +869,8 @@ void VideoWallpaper::longSuspendRelease()
         }
     }
     m_resumePosMs = pos;
+    videodiag::log(videodiag::Level::Info,
+        QStringLiteral("长挂起释放管线: resumePos=%1").arg(pos));
     teardownOutputs();
     if (m_reclaimMemory)
         trimMemory(); // 立刻把释放后的页还给系统

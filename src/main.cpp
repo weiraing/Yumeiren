@@ -6,6 +6,7 @@
 
 #include "appinfo.h"
 #include "mainwindow.h"
+#include "videodiag.h"
 #include "videowallpaper.h"
 
 int main(int argc, char *argv[])
@@ -25,6 +26,9 @@ int main(int argc, char *argv[])
 
     // one-shot import of the settings left behind by the FolderBgStudio builds
     appinfo::migrateLegacy();
+
+    // 阶段7 诊断日志尽早初始化(幂等)：默认 Info+，诊断模式经 YUMEIREN_DIAG=1 开启
+    videodiag::init();
 
     app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
 

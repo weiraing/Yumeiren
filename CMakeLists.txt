@@ -28,6 +28,7 @@ set(YUMEIREN_SOURCES
     src/imageprocess.cpp
     src/engine.cpp
     src/videowallpaper.cpp
+    src/videodiag.cpp
     src/platform/windows/desktopmount.cpp
 )
 
@@ -38,7 +39,7 @@ qt_add_executable(Yumeiren WIN32
 
 target_include_directories(Yumeiren PRIVATE src)
 
-target_link_libraries(Yumeiren PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::MultimediaWidgets dwmapi)
+target_link_libraries(Yumeiren PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::MultimediaWidgets dwmapi psapi)
 
 set_target_properties(Yumeiren PROPERTIES
     OUTPUT_NAME "Yumeiren"
@@ -49,7 +50,7 @@ qt_add_executable(YumeirenTest WIN32
     ${YUMEIREN_SOURCES}
 )
 target_include_directories(YumeirenTest PRIVATE src)
-target_link_libraries(YumeirenTest PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::MultimediaWidgets dwmapi)
+target_link_libraries(YumeirenTest PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::MultimediaWidgets dwmapi psapi)
 
 set(APP_RESOURCES
     resources/style.qss
