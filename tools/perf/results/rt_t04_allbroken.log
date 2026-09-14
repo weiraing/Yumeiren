@@ -1,84 +1,101 @@
-2026-09-14 02:59:48.983 [I] ==== 视频壁纸模块启动 (diag=on) ====
-2026-09-14 02:59:48.985 [I] 配置读取: path=C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/config/.ini exists=1 size=205122 keys=41 wasPlaying=0
-2026-09-14 02:59:48.986 [I] 配置校验: 补齐缺失 0 项, 修复非法 16 项
-2026-09-14 02:59:48.995 [I] 配置已加载: C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/config/.ini
-2026-09-14 02:59:48.995 [I] 资源友好模式: 进程已限制到 4 个逻辑核
-2026-09-14 02:59:48.997 [I] VideoWallpaper 初始化完成
-2026-09-14 02:59:48.997 [I] session=1 play index=1/2 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4 resumePos=-1
-2026-09-14 02:59:49.274 [D] 创建输出: players=1/0 widgets=1/0 audios=1/0
-2026-09-14 02:59:49.334 [D] session=1 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4
-2026-09-14 02:59:49.334 [D] setLoops(Once) player=24e99e0f720 widget=24e99e2fb70 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonv%08ad_truncated.mp4
-2026-09-14 02:59:49.334 [D] setPlaybackRate(1)
-2026-09-14 02:59:50.490 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-14 02:59:50.490 [D] setPlaybackRate(1)
-2026-09-14 02:59:50.490 [D] setPlaybackRate(1)
-2026-09-14 02:59:50.490 [D] setLoops(Once) player=24e99e0f720 widget=24e99e2fb70 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonv%08ad_truncated.mp4
-2026-09-14 02:59:50.490 [D] setLoops(Once) player=24e99e0f720 widget=24e99e2fb70 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonv%08ad_truncated.mp4
-2026-09-14 02:59:50.490 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-14 02:59:50.807 [W] session=1 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4 reason=格式不支持 detail=Could not open file
-2026-09-14 02:59:50.807 [D] session=1 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4
-2026-09-14 02:59:50.807 [D] setPlaybackRate(1)
-2026-09-14 02:59:50.807 [D] session=1 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4
-2026-09-14 02:59:50.973 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-14 02:59:50.997 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-14 02:59:51.308 [D] session=1 metaDataChanged file=
-2026-09-14 02:59:51.308 [D] setPlaybackRate(1)
-2026-09-14 02:59:51.308 [D] session=1 mediaStatus=0 file=
-2026-09-14 02:59:51.308 [I] session=2 play index=1/2 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4 resumePos=-1
-2026-09-14 02:59:51.313 [D] session=2 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4
-2026-09-14 02:59:51.313 [D] setLoops(Once) player=24e99e0f720 widget=24e99e2fb70 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonv%08ad_truncated.mp4
-2026-09-14 02:59:51.313 [D] setPlaybackRate(1)
-2026-09-14 02:59:51.315 [W] session=2 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4 reason=格式不支持 detail=Could not open file
-2026-09-14 02:59:51.315 [D] session=2 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4
-2026-09-14 02:59:51.315 [D] setPlaybackRate(1)
-2026-09-14 02:59:51.315 [D] session=2 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4
-2026-09-14 02:59:51.994 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-14 02:59:52.816 [D] session=2 metaDataChanged file=
-2026-09-14 02:59:52.816 [D] setPlaybackRate(1)
-2026-09-14 02:59:52.816 [D] session=2 mediaStatus=0 file=
-2026-09-14 02:59:52.816 [I] session=3 play index=1/2 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4 resumePos=-1
-2026-09-14 02:59:52.819 [D] session=3 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4
-2026-09-14 02:59:52.819 [D] setLoops(Once) player=24e99e0f720 widget=24e99e2fb70 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonv%08ad_truncated.mp4
-2026-09-14 02:59:52.819 [D] setPlaybackRate(1)
-2026-09-14 02:59:52.819 [W] session=3 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4 reason=格式不支持 detail=Could not open file
-2026-09-14 02:59:52.820 [W] session=3 曲目不可播 track=1 fails=1 dead=1 reason=格式不支持
-2026-09-14 02:59:52.820 [D] session=3 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4
-2026-09-14 02:59:52.820 [D] setPlaybackRate(1)
-2026-09-14 02:59:52.820 [D] session=3 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4
-2026-09-14 02:59:53.006 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-14 02:59:53.022 [I] session=4 play index=2/2 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4 resumePos=-1
-2026-09-14 02:59:53.026 [D] session=4 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4
-2026-09-14 02:59:53.026 [D] setLoops(Once) player=24e99e0f720 widget=24e99e2fb70 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonv%08ad_fake.mp4
-2026-09-14 02:59:53.026 [D] setPlaybackRate(1)
-2026-09-14 02:59:53.027 [W] session=4 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4 reason=格式不支持 detail=Could not open file
-2026-09-14 02:59:53.027 [D] session=4 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4
-2026-09-14 02:59:53.027 [D] setPlaybackRate(1)
-2026-09-14 02:59:53.027 [D] session=4 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4
-2026-09-14 02:59:53.535 [D] session=4 metaDataChanged file=
-2026-09-14 02:59:53.535 [D] setPlaybackRate(1)
-2026-09-14 02:59:53.535 [D] session=4 mediaStatus=0 file=
-2026-09-14 02:59:53.535 [I] session=5 play index=2/2 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4 resumePos=-1
-2026-09-14 02:59:53.538 [D] session=5 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4
-2026-09-14 02:59:53.538 [D] setLoops(Once) player=24e99e0f720 widget=24e99e2fb70 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonv%08ad_fake.mp4
-2026-09-14 02:59:53.538 [D] setPlaybackRate(1)
-2026-09-14 02:59:53.539 [W] session=5 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4 reason=格式不支持 detail=Could not open file
-2026-09-14 02:59:53.539 [D] session=5 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4
-2026-09-14 02:59:53.539 [D] setPlaybackRate(1)
-2026-09-14 02:59:53.539 [D] session=5 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4
-2026-09-14 02:59:53.999 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-14 02:59:54.996 [I] 恢复播放: reasons=0 manualPaused=0
-2026-09-14 02:59:55.043 [D] session=5 metaDataChanged file=
-2026-09-14 02:59:55.043 [D] setPlaybackRate(1)
-2026-09-14 02:59:55.043 [D] session=5 mediaStatus=0 file=
-2026-09-14 02:59:55.043 [I] session=6 play index=2/2 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4 resumePos=-1
-2026-09-14 02:59:55.046 [D] session=6 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4
-2026-09-14 02:59:55.046 [D] setLoops(Once) player=24e99e0f720 widget=24e99e2fb70 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonv%08ad_fake.mp4
-2026-09-14 02:59:55.046 [D] setPlaybackRate(1)
-2026-09-14 02:59:55.046 [W] session=6 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4 reason=格式不支持 detail=Could not open file
-2026-09-14 02:59:55.046 [W] session=6 曲目不可播 track=2 fails=1 dead=2 reason=格式不支持
-2026-09-14 02:59:55.050 [I] teardown n=1 累计 players=1/1 widgets=1/1 audios=1/1
-2026-09-14 02:59:55.064 [I] stopAll: 管线已卸载 session=6
-2026-09-14 02:59:55.065 [D] session=6 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4
-2026-09-14 02:59:55.065 [D] setPlaybackRate(1)
-2026-09-14 02:59:55.065 [D] session=6 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4
-2026-09-14 03:00:56.897 [I] stopAll: 管线已卸载 session=6
+[16:36:39.129][INFO][tid=34056][App] ==== 进程启动 pid=35404 diag=on ver=1.0.0 ====
+[16:36:39.129][INFO][tid=34056][Startup] 阶段 进程启动→诊断初始化 用时 +40ms 累计 40ms
+[16:36:39.129][INFO][tid=34056][Startup] 阶段 Qt 应用对象创建 用时 +0ms 累计 40ms
+[16:36:39.130][INFO][tid=34056][Config] 配置读取: path=C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/config/.ini exists=1 size=205122 keys=41 wasPlaying=true
+[16:36:39.131][INFO][tid=34056][Config] 配置已加载: C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/config/.ini
+[16:36:39.131][INFO][tid=34056][Startup] 阶段 配置加载(含注册表迁移与校验) 用时 +2ms 累计 42ms
+[16:36:39.131][INFO][tid=34056][App] 资源友好模式: 进程已限制到 4 个逻辑核
+[16:36:39.132][INFO][tid=34056][Startup] 阶段 单实例守卫与旧配置导入 用时 +1ms 累计 43ms
+[16:36:39.132][INFO][tid=34056][Startup] 阶段 样式与内嵌资源加载 用时 +1ms 累计 44ms
+[16:36:39.133][INFO][tid=34056][Startup] VideoWallpaper 初始化完成 uptime=44ms
+[16:36:39.133][INFO][tid=34056][Startup] 阶段 视频壁纸单例初始化完成 用时 +1ms 累计 45ms
+[16:36:39.133][DEBUG][tid=34056][Lifecycle] timer-start QTimer=0x2a7356aea30 1000ms evaluateSuspend
+[16:36:39.133][DEBUG][tid=34056][Lifecycle] timer-start QTimer=0x2a7356ae830 30000ms trimMemory
+[16:36:39.133][INFO][tid=34056][VideoWallpaper] session=1 play index=1/2 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4 resumePos=-1
+[16:36:39.417][DEBUG][tid=34056][VideoWallpaper] 创建输出: players=1/0 widgets=1/0 audios=1/0
+[16:36:39.417][DEBUG][tid=34056][Lifecycle] create QMediaPlayer=0x2a7356aebd0 player widget=2a7356d5f70 audio=2a7356ae650
+[16:36:39.417][DEBUG][tid=34056][Lifecycle] bind QVideoWidget=0x2a7356d5f70 player=0x2a7356aebd0
+[16:36:39.472][DEBUG][tid=34056][VideoWallpaper] session=1 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4
+[16:36:39.472][DEBUG][tid=34056][VideoWallpaper] setLoops(Once) player=2a7356aebd0 widget=2a7356d5f70 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonv%08ad_truncated.mp4
+[16:36:39.472][DEBUG][tid=34056][VideoWallpaper] setPlaybackRate(1)
+[16:36:39.472][INFO][tid=34056][Startup] 阶段 壁纸状态恢复已发起(视频管线后台起跑) 用时 +338ms 累计 383ms
+[16:36:40.048][INFO][tid=34056][Startup] 阶段 主窗口控件树构建完成(UI 初始化) 用时 +576ms 累计 959ms
+[16:36:40.350][INFO][tid=34056][VideoWallpaper] 恢复播放: reasons=0 manualPaused=0
+[16:36:40.350][DEBUG][tid=34056][VideoWallpaper] setPlaybackRate(1)
+[16:36:40.350][DEBUG][tid=34056][VideoWallpaper] setPlaybackRate(1)
+[16:36:40.350][DEBUG][tid=34056][VideoWallpaper] setLoops(Once) player=2a7356aebd0 widget=2a7356d5f70 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonv%08ad_truncated.mp4
+[16:36:40.350][DEBUG][tid=34056][VideoWallpaper] setLoops(Once) player=2a7356aebd0 widget=2a7356d5f70 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonv%08ad_truncated.mp4
+[16:36:40.350][INFO][tid=34056][VideoWallpaper] 恢复播放: reasons=0 manualPaused=0
+[16:36:40.350][INFO][tid=34056][Startup] 阶段 设置回填完成(含图库与显示器枚举) 用时 +303ms 累计 1262ms
+[16:36:40.530][DEBUG][tid=34056][Lifecycle] create MainWindow=0xc2e73ff400 size=1079x995
+[16:36:40.531][INFO][tid=34056][Startup] 阶段 主窗口构造完成(含 UI 初始化) 用时 +180ms 累计 1442ms
+[16:36:40.539][INFO][tid=34056][Startup] 阶段 主窗口首次显示 用时 +9ms 累计 1451ms
+[16:36:40.540][WARNING][tid=34056][VideoWallpaper] session=1 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4 reason=格式不支持 detail=Could not open file
+[16:36:40.540][DEBUG][tid=34056][VideoWallpaper] session=1 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4
+[16:36:40.540][DEBUG][tid=34056][VideoWallpaper] setPlaybackRate(1)
+[16:36:40.540][DEBUG][tid=34056][VideoWallpaper] session=1 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4
+[16:36:40.659][INFO][tid=34056][VideoWallpaper] 恢复播放: reasons=0 manualPaused=0
+[16:36:41.040][DEBUG][tid=34056][VideoWallpaper] session=1 metaDataChanged file=
+[16:36:41.040][DEBUG][tid=34056][VideoWallpaper] setPlaybackRate(1)
+[16:36:41.040][DEBUG][tid=34056][VideoWallpaper] session=1 mediaStatus=0 file=
+[16:36:41.040][INFO][tid=34056][VideoWallpaper] session=2 play index=1/2 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4 resumePos=-1
+[16:36:41.044][DEBUG][tid=34056][VideoWallpaper] session=2 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4
+[16:36:41.044][DEBUG][tid=34056][VideoWallpaper] setLoops(Once) player=2a7356aebd0 widget=2a7356d5f70 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonv%08ad_truncated.mp4
+[16:36:41.044][DEBUG][tid=34056][VideoWallpaper] setPlaybackRate(1)
+[16:36:41.045][WARNING][tid=34056][VideoWallpaper] session=2 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4 reason=格式不支持 detail=Could not open file
+[16:36:41.045][DEBUG][tid=34056][VideoWallpaper] session=2 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4
+[16:36:41.045][DEBUG][tid=34056][VideoWallpaper] setPlaybackRate(1)
+[16:36:41.045][DEBUG][tid=34056][VideoWallpaper] session=2 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4
+[16:36:41.120][INFO][tid=34056][VideoWallpaper] 恢复播放: reasons=0 manualPaused=0
+[16:36:42.128][INFO][tid=34056][VideoWallpaper] 恢复播放: reasons=0 manualPaused=0
+[16:36:42.546][DEBUG][tid=34056][VideoWallpaper] session=2 metaDataChanged file=
+[16:36:42.546][DEBUG][tid=34056][VideoWallpaper] setPlaybackRate(1)
+[16:36:42.546][DEBUG][tid=34056][VideoWallpaper] session=2 mediaStatus=0 file=
+[16:36:42.546][INFO][tid=34056][VideoWallpaper] session=3 play index=1/2 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4 resumePos=-1
+[16:36:42.548][DEBUG][tid=34056][VideoWallpaper] session=3 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4
+[16:36:42.548][DEBUG][tid=34056][VideoWallpaper] setLoops(Once) player=2a7356aebd0 widget=2a7356d5f70 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonv%08ad_truncated.mp4
+[16:36:42.548][DEBUG][tid=34056][VideoWallpaper] setPlaybackRate(1)
+[16:36:42.548][WARNING][tid=34056][VideoWallpaper] session=3 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4 reason=格式不支持 detail=Could not open file
+[16:36:42.548][WARNING][tid=34056][VideoWallpaper] session=3 曲目不可播 track=1 fails=1 dead=1 reason=格式不支持
+[16:36:42.548][DEBUG][tid=34056][VideoWallpaper] session=3 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4
+[16:36:42.548][DEBUG][tid=34056][VideoWallpaper] setPlaybackRate(1)
+[16:36:42.548][DEBUG][tid=34056][VideoWallpaper] session=3 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_truncated.mp4
+[16:36:42.757][INFO][tid=34056][VideoWallpaper] session=4 play index=2/2 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4 resumePos=-1
+[16:36:42.759][DEBUG][tid=34056][VideoWallpaper] session=4 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4
+[16:36:42.760][DEBUG][tid=34056][VideoWallpaper] setLoops(Once) player=2a7356aebd0 widget=2a7356d5f70 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonv%08ad_fake.mp4
+[16:36:42.760][DEBUG][tid=34056][VideoWallpaper] setPlaybackRate(1)
+[16:36:42.761][WARNING][tid=34056][VideoWallpaper] session=4 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4 reason=格式不支持 detail=Could not open file
+[16:36:42.761][DEBUG][tid=34056][VideoWallpaper] session=4 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4
+[16:36:42.761][DEBUG][tid=34056][VideoWallpaper] setPlaybackRate(1)
+[16:36:42.761][DEBUG][tid=34056][VideoWallpaper] session=4 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4
+[16:36:43.120][INFO][tid=34056][VideoWallpaper] 恢复播放: reasons=0 manualPaused=0
+[16:36:43.272][DEBUG][tid=34056][VideoWallpaper] session=4 metaDataChanged file=
+[16:36:43.272][DEBUG][tid=34056][VideoWallpaper] setPlaybackRate(1)
+[16:36:43.272][DEBUG][tid=34056][VideoWallpaper] session=4 mediaStatus=0 file=
+[16:36:43.272][INFO][tid=34056][VideoWallpaper] session=5 play index=2/2 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4 resumePos=-1
+[16:36:43.275][DEBUG][tid=34056][VideoWallpaper] session=5 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4
+[16:36:43.275][DEBUG][tid=34056][VideoWallpaper] setLoops(Once) player=2a7356aebd0 widget=2a7356d5f70 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonv%08ad_fake.mp4
+[16:36:43.275][DEBUG][tid=34056][VideoWallpaper] setPlaybackRate(1)
+[16:36:43.275][WARNING][tid=34056][VideoWallpaper] session=5 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4 reason=格式不支持 detail=Could not open file
+[16:36:43.275][DEBUG][tid=34056][VideoWallpaper] session=5 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4
+[16:36:43.275][DEBUG][tid=34056][VideoWallpaper] setPlaybackRate(1)
+[16:36:43.275][DEBUG][tid=34056][VideoWallpaper] session=5 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4
+[16:36:44.127][INFO][tid=34056][VideoWallpaper] 恢复播放: reasons=0 manualPaused=0
+[16:36:44.785][DEBUG][tid=34056][VideoWallpaper] session=5 metaDataChanged file=
+[16:36:44.785][DEBUG][tid=34056][VideoWallpaper] setPlaybackRate(1)
+[16:36:44.785][DEBUG][tid=34056][VideoWallpaper] session=5 mediaStatus=0 file=
+[16:36:44.785][INFO][tid=34056][VideoWallpaper] session=6 play index=2/2 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4 resumePos=-1
+[16:36:44.787][DEBUG][tid=34056][VideoWallpaper] session=6 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4
+[16:36:44.787][DEBUG][tid=34056][VideoWallpaper] setLoops(Once) player=2a7356aebd0 widget=2a7356d5f70 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonv%08ad_fake.mp4
+[16:36:44.787][DEBUG][tid=34056][VideoWallpaper] setPlaybackRate(1)
+[16:36:44.787][WARNING][tid=34056][VideoWallpaper] session=6 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvad_fake.mp4 reason=格式不支持 detail=Could not open file
+[16:36:44.789][WARNING][tid=34056][VideoWallpaper] session=6 曲目不可播 track=2 fails=1 dead=2 reason=格式不支持
+[16:36:44.789][DEBUG][tid=34056][Lifecycle] timer-stop QTimer=0x2a7356aea30 
+[16:36:44.789][DEBUG][tid=34056][Lifecycle] timer-stop QTimer=0x2a7356ae830 
+[16:36:44.791][INFO][tid=34056][Lifecycle] 管线卸载 n=1 累计 players=1/1 widgets=1/1 audios=1/1
+[16:36:44.807][INFO][tid=34056][VideoWallpaper] stopAll: 管线已卸载 session=6
+[16:37:47.078][INFO][tid=34056][Lifecycle] 退出清理开始: outputs=0 session=6 uptime=67990ms
+[16:37:47.082][INFO][tid=34056][VideoWallpaper] stopAll: 管线已卸载 session=6
+[16:37:47.082][INFO][tid=34056][Lifecycle] 退出清理完成: players=1/1 widgets=1/1 audios=1/1
+[16:37:47.082][INFO][tid=34056][App] 事件循环结束 exit=0 uptime=67993ms 退出收口 cost=3ms
+[16:37:47.082][DEBUG][tid=34056][Lifecycle] destroy MainWindow=0xc2e73ff400 

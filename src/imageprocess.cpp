@@ -158,36 +158,48 @@ QImage ImageProcess::mockExplorerPreview(const QImage &processed, const QSize &n
 
     canvas.fill(toolbarBg);
 
+    // Scale factor: all UI chrome scales proportionally so the mock explorer
+    // content stays fully visible at any canvas size (ref width = 800 px).
+    const qreal s = qMax(0.4, qMin(2.0, W / 800.0));
+
     // Toolbar: nav dots + address pill
-    const int toolH = 36;
+    const int toolH = qRound(36 * s);
+    const int navY  = qRound(9 * s);
+    const int navS  = qRound(18 * s);
     p.setBrush(pillBg);
     p.setPen(Qt::NoPen);
-    p.drawRoundedRect(12, 9, 18, 18, 6, 6);
-    p.drawRoundedRect(34, 9, 18, 18, 6, 6);
+    p.drawRoundedRect(qRound(12 * s), navY, navS, navS, qRound(6 * s), qRound(6 * s));
+    p.drawRoundedRect(qRound(34 * s), navY, navS, navS, qRound(6 * s), qRound(6 * s));
     p.setPen(subText);
-    p.setFont(QFont(QStringLiteral("Segoe UI Symbol"), 8));
-    p.drawText(QRect(12, 9, 18, 18), Qt::AlignCenter, QChar(0x2190));
-    p.drawText(QRect(34, 9, 18, 18), Qt::AlignCenter, QChar(0x2192));
+    p.setFont(QFont(QStringLiteral("Segoe UI Symbol"), qMax(5, qRound(8 * s))));
+    p.drawText(QRect(qRound(12 * s), navY, navS, navS), Qt::AlignCenter, QChar(0x2190));
+    p.drawText(QRect(qRound(34 * s), navY, navS, navS), Qt::AlignCenter, QChar(0x2192));
 
+    const int pillX = qRound(60 * s);
+    const int pillH = qRound(20 * s);
     p.setBrush(pillBg);
-    p.drawRoundedRect(60, 8, W - 60 - 30, 20, 10, 10);
+    p.drawRoundedRect(pillX, qRound(8 * s), W - pillX - qRound(30 * s), pillH,
+                      qRound(10 * s), qRound(10 * s));
     p.setPen(textCol);
-    p.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), 8));
-    p.drawText(QRect(74, 8, W - 90, 20), Qt::AlignVCenter, QStringLiteral("文档"));
+    p.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), qMax(5, qRound(8 * s))));
+    p.drawText(QRect(pillX + qRound(14 * s), qRound(8 * s), W - pillX - qRound(30 * s), pillH),
+               Qt::AlignVCenter, QStringLiteral("文档"));
 
     p.setPen(Qt::NoPen);
     p.setBrush(pillBg);
-    p.drawRoundedRect(W - 26, 9, 16, 18, 5, 5);
+    p.drawRoundedRect(W - qRound(26 * s), qRound(9 * s), qRound(16 * s), qRound(18 * s),
+                      qRound(5 * s), qRound(5 * s));
     p.setPen(barLine);
     p.drawLine(0, toolH, W, toolH);
 
     // Command bar
-    const int cmdH = 26;
+    const int cmdH = qRound(26 * s);
     p.setPen(textCol);
-    p.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), 7.5));
-    p.drawText(QRect(14, toolH, 80, cmdH), Qt::AlignVCenter, QStringLiteral("＋ 新建"));
-    p.drawText(QRect(W - 80, toolH, 66, cmdH), Qt::AlignRight | Qt::AlignVCenter,
-               QStringLiteral("详细信息"));
+    p.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), qMax(5, qRound(7.5 * s))));
+    p.drawText(QRect(qRound(14 * s), toolH, qRound(80 * s), cmdH),
+               Qt::AlignVCenter, QStringLiteral("＋ 新建"));
+    p.drawText(QRect(W - qRound(80 * s), toolH, qRound(66 * s), cmdH),
+               Qt::AlignRight | Qt::AlignVCenter, QStringLiteral("详细信息"));
     p.setPen(barLine);
     p.drawLine(0, toolH + cmdH, W, toolH + cmdH);
 
@@ -243,41 +255,54 @@ QImage ImageProcess::mockExplorerPreview(const QImage &processed, const QSize &n
     }
 
     // Sidebar (with the combined effect it is a translucent acrylic tint)
-    const int sideW = 82;
+    const int sideW = qRound(82 * s);
     p.fillRect(0, contentTop, sideW, H - contentTop, sideTint);
     p.setPen(barLine);
     p.drawLine(sideW, contentTop, sideW, H);
-    p.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), 7.5));
+    p.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), qMax(5, qRound(7.5 * s))));
     const QStringList items = {QStringLiteral("主文件夹"), QStringLiteral("图库"),
                                QStringLiteral("桌面"), QStringLiteral("下载"), QStringLiteral("文档")};
+    const int sidePadY = qRound(12 * s);
+    const int sideItemH = qRound(30 * s);
+    const int sideIconW = qRound(15 * s);
+    const int sideIconH = qRound(12 * s);
+    const int sideTxtX = qRound(36 * s);
     for (int i = 0; i < items.size(); ++i) {
-        const int y = contentTop + 12 + i * 30;
-        if (y + 16 > H)
+        const int y = contentTop + sidePadY + i * sideItemH;
+        if (y + qRound(16 * s) > H)
             break;
         p.setPen(Qt::NoPen);
         p.setBrush(folder);
-        p.drawRoundedRect(14, y + 2, 15, 12, 2, 2);
+        p.drawRoundedRect(qRound(14 * s), y + qRound(2 * s), sideIconW, sideIconH, qRound(2 * s), qRound(2 * s));
         p.setPen(subText);
-        p.drawText(QRect(36, y, sideW - 42, 16), Qt::AlignVCenter, items[i]);
+        p.drawText(QRect(sideTxtX, y, sideW - sideTxtX - qRound(6 * s), qRound(16 * s)),
+                   Qt::AlignVCenter, items[i]);
     }
 
     // Folder items grid (columns adapt to the canvas width)
-    p.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), 7.5));
-    const int rows = contentH >= 150 ? 2 : 1;
+    p.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), qMax(5, qRound(7.5 * s))));
+    const int rows = contentH >= qRound(150 * s) ? 2 : 1;
     const int cols = 3;
-    const qreal cellW = qreal(W - sideW - 12) / cols;
+    const qreal cellW = qreal(W - sideW - qRound(12 * s)) / cols;
+    const int folderW = qRound(42 * s);
+    const int folderH = qRound(30 * s);
+    const int tabW = qRound(20 * s);
+    const int tabH = qRound(7 * s);
+    const int rowSpacing = qRound(88 * s);
+    const int gridPadY = qRound(22 * s);
+    const int gridPadX = qRound(6 * s);
     for (int r = 0; r < rows; ++r) {
         for (int c = 0; c < cols; ++c) {
-            const qreal x = sideW + 6 + c * cellW + (cellW - 42) / 2.0;
-            const int y = contentTop + 22 + r * 88;
+            const qreal x = sideW + gridPadX + c * cellW + (cellW - folderW) / 2.0;
+            const int y = contentTop + gridPadY + r * rowSpacing;
             QColor g1 = folder, g2 = folder.darker(112);
             p.setPen(Qt::NoPen);
             p.setBrush(g1);
-            p.drawRoundedRect(QRectF(x, y, 42, 30), 3, 3);
+            p.drawRoundedRect(QRectF(x, y, folderW, folderH), qRound(3 * s), qRound(3 * s));
             p.setBrush(g2);
-            p.drawRect(QRectF(x, y - 5, 20, 7));
+            p.drawRect(QRectF(x, y - qRound(5 * s), tabW, tabH));
             p.setPen(subText);
-            p.drawText(QRectF(sideW + 6 + c * cellW, y + 34, cellW, 14),
+            p.drawText(QRectF(sideW + gridPadX + c * cellW, y + qRound(34 * s), cellW, qRound(14 * s)),
                        Qt::AlignCenter, QStringLiteral("文件夹"));
         }
     }

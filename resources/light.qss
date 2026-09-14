@@ -604,3 +604,15 @@ QPushButton#ParamResetButton:hover {
     border: 1px solid #2f6fd6;
     color: #1c2b45;
 }
+
+/* ---------- 悬浮提示(QToolTip) ----------
+   默认提示沿用系统黄色气泡，与浅色卡片完全不搭；这里统一成与下拉浮层同源的白色浮层。
+   QToolTip 的窗口尺寸不含边框，故用 padding 让出 1px 边界，避免文字被裁。 */
+QToolTip {
+    background-color: #ffffff;
+    color: #3a4150;
+    border: 1px solid #d9dce3;
+    border-radius: 8px;
+    padding: 7px 10px;
+    font-size: 12px;
+}

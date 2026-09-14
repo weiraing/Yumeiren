@@ -48,6 +48,13 @@ public:
     void setTargetFps(int fps);
     bool isStarted() const { return m_started; }
     void evaluateSuspend();
+    // 退出收口(崩溃修复)：必须在 main() 里、QApplication 仍存活时调用。
+    // 函数内静态单例的析构由 CRT atexit 链在 main() 返回之后执行，那时
+    // ~QApplication 已跑完，任何 QWidget 调用都会落到 qApp==nullptr 的
+    // Qt6Widgets 内部路径上(c0000005)。详见 docs/crash_analysis.md。
+    // 幂等；单例尚未创建时不做任何事(绝不在此处构造单例)。
+    static void shutdown();
+
     // 列表双击(任务书交互): 运行中立即切换到指定条目作为壁纸；
     // 未启动时忽略(此时由 startPlaying 的 preferIndex 决定起点)
     void switchToTrack(int index);
@@ -62,6 +69,12 @@ signals:
 private:
     explicit VideoWallpaper(QObject *parent = nullptr);
     ~VideoWallpaper() override;
+
+    // 真正的清理动作(成员函数，供静态 shutdown() 与析构兜底共用)
+    void shutdownNow();
+    // 心跳定时器：只在 m_started 期间运行，停止后不再有空转轮询(任务书 10.1)
+    void ensureHeartbeatTimers();
+    void stopHeartbeatTimers();
 
     // 挂起原因(位掩码)：任一存在即暂停播放，全部消失且用户未手动暂停则恢复
     enum SuspendReason
@@ -81,6 +94,9 @@ private:
         QAudioOutput *audio = nullptr;
         QRect logicalRect; // 期望的逻辑几何(所在屏幕/覆盖区域)，重挂载时换算物理坐标比对
     };
+    // 捕获型 lambda 的存活校验(任务书 6.3)：只比对指针值，绝不解引用可能已释放的对象
+    bool isLiveOutput(const VideoOutput &out) const;
+    bool isPrimaryOutput(const VideoOutput &out) const;
     bool ensureOutputs(QString *error);
     void layoutOutputs();
     void remountOutputs();
@@ -114,6 +130,10 @@ private:
     // FrameScheduler 状态机
     bool m_started = false;        // 用户启动过且未停止
     bool m_manualPaused = false;   // 用户手动暂停(优先于自动恢复)
+    // 生命周期保护(任务书 6.3)：退出清理中拒绝一切信号回调与延迟任务，
+    // 并且清理只执行一次。两个标志各自只有一个含义，不构成状态机。
+    bool m_shuttingDown = false;   // 正在/已经做退出清理
+    bool m_shutdownDone = false;   // 清理完成(析构不再重复)
     bool m_monitorOn = true;       // 显示器电源状态(MainWindow 转发)
     int m_suspendReasons = 0;      // 当前生效的挂起原因
     int m_lastEmittedReasons = -1; // 去重：挂起原因不变时不重复发状态文本

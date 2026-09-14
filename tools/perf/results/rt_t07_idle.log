@@ -1,3 +1,17 @@
-2026-09-14 03:04:07.937 [I] ==== 视频壁纸模块启动 (diag=on) ====
-2026-09-14 03:04:08.755 [I] 配置读取: path=C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/config/.ini exists=1 size=307267099 keys=41 wasPlaying=0
-2026-09-14 03:04:08.756 [I] 配置校验: 补齐缺失 0 项, 修复非法 16 项
+[16:40:58.526][INFO][tid=4828][App] ==== 进程启动 pid=39584 diag=on ver=1.0.0 ====
+[16:40:58.527][INFO][tid=4828][Startup] 阶段 进程启动→诊断初始化 用时 +34ms 累计 34ms
+[16:40:58.527][INFO][tid=4828][Startup] 阶段 Qt 应用对象创建 用时 +0ms 累计 34ms
+[16:40:59.401][INFO][tid=4828][Config] 配置读取: path=C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/config/.ini exists=1 size=307267099 keys=41 wasPlaying=false
+[16:40:59.402][INFO][tid=4828][Config] 配置已加载: C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/config/.ini
+[16:40:59.402][INFO][tid=4828][Startup] 阶段 配置加载(含注册表迁移与校验) 用时 +875ms 累计 909ms
+[16:40:59.402][INFO][tid=4828][App] 资源友好模式: 进程已限制到 4 个逻辑核
+[16:40:59.404][INFO][tid=4828][Startup] 阶段 单实例守卫与旧配置导入 用时 +2ms 累计 911ms
+[16:40:59.404][INFO][tid=4828][Startup] 阶段 样式与内嵌资源加载 用时 +0ms 累计 911ms
+[16:40:59.405][INFO][tid=4828][Startup] 阶段 壁纸状态恢复跳过(上次未播放) 用时 +1ms 累计 912ms
+[16:41:00.007][INFO][tid=4828][Startup] VideoWallpaper 初始化完成 uptime=1514ms
+[16:41:00.007][INFO][tid=4828][Startup] 阶段 视频壁纸单例初始化完成 用时 +602ms 累计 1514ms
+[16:41:00.075][INFO][tid=4828][Startup] 阶段 主窗口控件树构建完成(UI 初始化) 用时 +69ms 累计 1583ms
+[16:41:00.351][INFO][tid=4828][Startup] 阶段 设置回填完成(含图库与显示器枚举) 用时 +275ms 累计 1858ms
+[16:41:00.512][DEBUG][tid=4828][Lifecycle] create MainWindow=0x62ebdff880 size=1109x995
+[16:41:00.512][INFO][tid=4828][Startup] 阶段 主窗口构造完成(含 UI 初始化) 用时 +162ms 累计 2020ms
+[16:41:00.560][INFO][tid=4828][Startup] 阶段 主窗口首次显示 用时 +47ms 累计 2067ms

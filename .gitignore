@@ -22,3 +22,6 @@ loop_ydif*.csv
 tools/.cmsg.txt
 dist/
 tools/dumps/
+new-build
+scripts
+tests

@@ -25,8 +25,10 @@ int main(int argc, char *argv[])
     // 导致之后永远"已经在运行"——attach+detach 清掉残段后重试一次即可自愈；
     // 真有另一实例在跑时重试依旧失败，提示不变。
     videodiag::init(); // 守卫阶段即可记录诊断(幂等)
+    videodiag::stage(QStringLiteral("Qt 应用对象创建"));
 
     AppConfig::instance().load(); // 统一配置: 主窗口创建前加载(目录创建/迁移/校验)
+    videodiag::stage(QStringLiteral("配置加载(含注册表迁移与校验)"));
 
     // 资源友好模式(默认开)：限制进程到前 4 个逻辑核。解码线程数跟随
     // QThread::idealThreadCount(受亲和性掩码影响)，实测(32核机,1080p30)
@@ -36,10 +38,12 @@ int main(int argc, char *argv[])
             .value(ConfigKeys::Video::AffinityLimit, true).toBool()) {
         if (fbswin::applyProcessAffinityLimit(4))
             videodiag::log(videodiag::Level::Info,
-                QStringLiteral("资源友好模式: 进程已限制到 4 个逻辑核"));
+                QStringLiteral("资源友好模式: 进程已限制到 4 个逻辑核"),
+                QStringLiteral("App"));
     } else {
         videodiag::log(videodiag::Level::Info,
-            QStringLiteral("资源友好模式: 已关闭(全核运行)"));
+            QStringLiteral("资源友好模式: 已关闭(全核运行)"),
+            QStringLiteral("App"));
     }
     if (!fbswin::acquireSingleInstanceLock()) {
         // 已有实例在运行：直接把它的主窗口调到最前，不弹窗打断；
@@ -69,18 +73,21 @@ int main(int argc, char *argv[])
         }
         if (!activated) {
             videodiag::log(videodiag::Level::Warning,
-                QStringLiteral("唤起已运行实例失败: %1").arg(why));
+                QStringLiteral("唤起已运行实例失败: %1").arg(why),
+                QStringLiteral("App"));
             QMessageBox::information(nullptr, QStringLiteral("虞美人"),
                                      QStringLiteral("虞美人已经在运行。"));
         } else {
             videodiag::log(videodiag::Level::Info,
-                QStringLiteral("已唤起已运行实例窗口: %1").arg(why));
+                QStringLiteral("已唤起已运行实例窗口: %1").arg(why),
+                QStringLiteral("App"));
         }
         return 0;
     }
 
     // one-shot import of the settings left behind by the FolderBgStudio builds
     appinfo::migrateLegacy();
+    videodiag::stage(QStringLiteral("单实例守卫与旧配置导入"));
 
     // 阶段7 诊断日志尽早初始化(幂等)：默认 Info+，诊断模式经 YUMEIREN_DIAG=1 开启
     videodiag::init();
@@ -90,9 +97,12 @@ int main(int argc, char *argv[])
     QFile qss(QStringLiteral(":/style.qss"));
     if (qss.open(QIODevice::ReadOnly | QIODevice::Text))
         app.setStyleSheet(QString::fromUtf8(qss.readAll()));
+    videodiag::stage(QStringLiteral("样式与内嵌资源加载"));
 
     MainWindow w;
+    videodiag::stage(QStringLiteral("主窗口构造完成(含 UI 初始化)"));
     w.show();
+    videodiag::stage(QStringLiteral("主窗口首次显示"));
 
     // 自动化内存实验探针(第二阶段)：loadSettings 已在 MainWindow 构造中把播放列表
     // 写入 VideoWallpaper，此处再按 YUMEIREN_PROBE_STAGE 建立受控媒体栈状态。
@@ -101,5 +111,21 @@ int main(int argc, char *argv[])
         !probeStage.isEmpty())
         VideoWallpaper::instance().runProbeStage(probeStage);
 
-    return app.exec();
+    const int exitCode = app.exec();
+    // 退出收口(崩溃修复)：必须在 QApplication 析构之前、且在 MainWindow 析构之前
+    // 主动卸载视频管线。函数内静态单例的析构由 CRT atexit 链驱动，跑在 main()
+    // 返回之后，那时 ~QApplication 已经完成，任何 QWidget 调用(经 unmountWindow
+    // → winId())都会踩进 Qt6Widgets 里 qApp==nullptr 的路径 → c0000005。
+    // 详见 docs/crash_analysis.md。
+    // 退出段不用 stage()：它的差值是"距上一次分段"的时间，会把事件循环运行
+    // 时长一起算进来，读起来像 14 秒的"卸载"。这里单独量收口本身的耗时。
+    const qint64 shutdownBegin = videodiag::elapsedMs();
+    VideoWallpaper::shutdown();
+    videodiag::log(videodiag::Level::Info,
+        QStringLiteral("事件循环结束 exit=%1 uptime=%2ms 退出收口 cost=%3ms")
+            .arg(exitCode)
+            .arg(videodiag::elapsedMs())
+            .arg(videodiag::elapsedMs() - shutdownBegin),
+        QStringLiteral("App"));
+    return exitCode;
 }

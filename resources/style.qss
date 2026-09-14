@@ -604,3 +604,16 @@ QPushButton#ParamResetButton:hover {
     border: 1px solid #4f8cff;
     color: #d5d8de;
 }
+
+/* ---------- tooltip ----------
+   Qt 未加样式时沿用系统经典黄色气泡，与深色面板完全不搭。
+   这里把提示统一成与 ComboContainer 同一族的浮层表面(深色面板 + 细描边)。
+   注意：QToolTip 的窗口不含边框宽度，故用 padding 让出描边空间，避免文字被裁。 */
+QToolTip {
+    background-color: #212228;
+    color: #c9ccd4;
+    border: 1px solid #3a3b45;
+    border-radius: 8px;
+    padding: 7px 10px;
+    font-size: 12px;
+}

@@ -26,6 +26,7 @@ set(YUMEIREN_SOURCES
     src/appinfo.cpp
     src/config/AppConfig.cpp
     src/mainwindow.cpp
+    src/tooltipstyle.cpp
     src/imageprocess.cpp
     src/engine.cpp
     src/videowallpaper.cpp

@@ -7,6 +7,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QMutex>
+#include <QObject>
 #include <QTimer>
 
 #include "config/AppConfig.h"
@@ -25,15 +26,43 @@ QFile g_file;
 bool g_diag = false;
 constexpr qint64 kMaxLogBytes = 1024 * 1024; // 1MB 滚动
 
+// 启动分段测量(任务书 9.1)：段间一律用 QElapsedTimer 单调时钟，不用系统时间差。
+// 原点取进程创建时刻(见 processAgeMs)，因此累计值可直接和 10.1 的启动耗时对照。
+QElapsedTimer *g_bootClock = nullptr;
+qint64 g_processStartOffsetMs = 0;
+qint64 g_lastStageMs = 0;
+
 QString levelTag(Level lv)
 {
     switch (lv) {
-    case Level::Error:   return QStringLiteral("E");
-    case Level::Warning: return QStringLiteral("W");
-    case Level::Info:    return QStringLiteral("I");
-    case Level::Debug:   return QStringLiteral("D");
+    case Level::Error:   return QStringLiteral("ERROR");
+    case Level::Warning: return QStringLiteral("WARNING");
+    case Level::Info:    return QStringLiteral("INFO");
+    case Level::Debug:   return QStringLiteral("DEBUG");
     }
     return QStringLiteral("?");
+}
+
+// 进程已存活毫秒数(用于“进程启动→诊断初始化”这一段，此刻单调时钟尚未开始)。
+// 系统时钟在本机出现过非单调跳变，故结果不可信时直接丢弃(返回 -1)。
+qint64 processAgeMs()
+{
+    FILETIME creation = {}, exitT = {}, kernel = {}, user = {}, now = {};
+    if (!GetProcessTimes(GetCurrentProcess(), &creation, &exitT, &kernel, &user))
+        return -1;
+    GetSystemTimeAsFileTime(&now);
+    ULARGE_INTEGER a{}, b{};
+    a.LowPart = creation.dwLowDateTime;
+    a.HighPart = creation.dwHighDateTime;
+    b.LowPart = now.dwLowDateTime;
+    b.HighPart = now.dwHighDateTime;
+    const qint64 ms = qint64((b.QuadPart - a.QuadPart) / 10000);
+    return (ms >= 0 && ms < 600000) ? ms : -1;
+}
+
+qint64 bootElapsedMs()
+{
+    return g_bootClock ? g_processStartOffsetMs + g_bootClock->elapsed() : 0;
 }
 
 QString logPath()
@@ -58,14 +87,28 @@ void rotateIfNeeded()
 }
 
 // 内部写入(调用方必须已持有 g_mutex)：init 与 log 共用，避免非递归锁重入死锁
-void writeLine(Level lv, const QString &msg)
+void writeLine(Level lv, const QString &module, const QString &msg)
 {
     const QString stamp =
-        QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"));
-    g_file.write(QStringLiteral("%1 [%2] %3\n")
-                     .arg(stamp, levelTag(lv), msg).toUtf8());
+        QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss.zzz"));
+    g_file.write(QStringLiteral("[%1][%2][tid=%3][%4] %5\n")
+                     .arg(stamp, levelTag(lv))
+                     .arg(quint32(GetCurrentThreadId()))
+                     .arg(module.isEmpty() ? QStringLiteral("VideoWallpaper") : module,
+                          msg)
+                     .toUtf8());
     g_file.flush();
     rotateIfNeeded();
+}
+
+// 调用方必须已持锁：记录一个启动阶段，delta 为距上一阶段的毫秒数
+void stageAt(Level lv, const QString &name, qint64 nowMs)
+{
+    const qint64 delta = nowMs - g_lastStageMs;
+    g_lastStageMs = nowMs;
+    writeLine(lv, QStringLiteral("Startup"),
+              QStringLiteral("阶段 %1 用时 +%2ms 累计 %3ms")
+                  .arg(name).arg(delta).arg(nowMs));
 }
 
 int currentThreadCount()
@@ -114,8 +157,19 @@ void init()
         g_file.setFileName(path);
         g_file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text);
     }
-    writeLine(Level::Info, QStringLiteral("==== 视频壁纸模块启动 (diag=%1) ====")
-                               .arg(g_diag ? QStringLiteral("on") : QStringLiteral("off")));
+    if (!g_bootClock) {
+        g_bootClock = new QElapsedTimer();
+        g_bootClock->start();
+        const qint64 age = processAgeMs();
+        if (age >= 0)
+            g_processStartOffsetMs = age;
+    }
+    writeLine(Level::Info, QStringLiteral("App"),
+              QStringLiteral("==== 进程启动 pid=%1 diag=%2 ver=%3 ====")
+                  .arg(GetCurrentProcessId())
+                  .arg(g_diag ? QStringLiteral("on") : QStringLiteral("off"))
+                  .arg(QCoreApplication::applicationVersion()));
+    stageAt(Level::Info, QStringLiteral("进程启动→诊断初始化"), bootElapsedMs());
 }
 
 bool diagEnabled()
@@ -124,7 +178,7 @@ bool diagEnabled()
     return g_diag;
 }
 
-void log(Level lv, const QString &msg)
+void log(Level lv, const QString &msg, const QString &module)
 {
     QMutexLocker lock(&g_mutex);
     // 默认 Info+Warning+Error；Debug 仅诊断模式(任务书 10.4)
@@ -132,12 +186,36 @@ void log(Level lv, const QString &msg)
         return;
     if (!g_file.isOpen())
         return;
-    const QString stamp =
-        QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"));
-    g_file.write(QStringLiteral("%1 [%2] %3\n")
-                     .arg(stamp, levelTag(lv), msg).toUtf8());
-    g_file.flush();
-    rotateIfNeeded();
+    writeLine(lv, module, msg);
+}
+
+void stage(const QString &name)
+{
+    QMutexLocker lock(&g_mutex);
+    if (!g_file.isOpen() || !g_bootClock)
+        return;
+    stageAt(Level::Info, name, bootElapsedMs());
+}
+
+qint64 elapsedMs()
+{
+    QMutexLocker lock(&g_mutex);
+    return g_bootClock ? bootElapsedMs() : -1;
+}
+
+void logObjectEvent(const char *action, const QObject *obj, const QString &detail)
+{
+    if (!obj)
+        return;
+    // 对象地址用于把创建/销毁两端的同一对象对上(任务书 5.3)；只记地址与类名，
+    // 不记录任何路径或用户数据。DEBUG 级：默认不写盘，不刷屏。
+    log(Level::Debug,
+        QStringLiteral("%1 %2=0x%3 %4")
+            .arg(QString::fromLatin1(action),
+                 QString::fromLatin1(obj->metaObject()->className()))
+            .arg(quintptr(obj), 0, 16)
+            .arg(detail),
+        QStringLiteral("Lifecycle"));
 }
 
 void startDiagSampling()
@@ -168,11 +246,13 @@ void startDiagSampling()
         }
         DWORD handles = 0;
         GetProcessHandleCount(GetCurrentProcess(), &handles);
-        log(Level::Debug, QStringLiteral("sample t=%1s %2 threads=%3 handles=%4")
-                              .arg(qint64(clock.elapsed() / 1000))
-                              .arg(mem)
-                              .arg(currentThreadCount())
-                              .arg(handles));
+        log(Level::Debug,
+            QStringLiteral("sample t=%1s %2 threads=%3 handles=%4")
+                .arg(qint64(clock.elapsed() / 1000))
+                .arg(mem)
+                .arg(currentThreadCount())
+                .arg(handles),
+            QStringLiteral("Resource"));
     });
     timer->start(intervalMs);
 }

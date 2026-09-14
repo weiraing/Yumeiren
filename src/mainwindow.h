@@ -3,6 +3,7 @@
 
 #include <QLabel>
 #include <QMainWindow>
+#include <QMutex>
 #include <QSize>
 #include <QSlider>
 #include <QStringList>
@@ -25,6 +26,8 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 public:
     explicit MainWindow(QWidget *parent = nullptr);
+    // 析构必须存在：它负责关闭图库缩略图后台任务的回调闸门(见 m_thumbTasksLive)。
+    ~MainWindow() override;
 
 private slots:
     void switchPage(int row);
@@ -55,6 +58,8 @@ protected:
     bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
     void changeEvent(QEvent *event) override;
     void closeEvent(QCloseEvent *event) override; // 保存窗口几何到统一配置
+    void resizeEvent(QResizeEvent *event) override;
+    void showEvent(QShowEvent *event) override;
 
 private:
     // UI builders
@@ -99,6 +104,13 @@ private:
     QString m_presetDir;       // user-chosen extra preset folder
     QString galleryThumbPath(const QString &image) const;
     QString m_sourceText;      // “当前选择”完整文本(展示时按两行省略)
+
+    // 缩略图后台任务存活闸门(任务书 5.4 / 6.3：lambda 捕获裸 this 的悬空风险)：
+    // QThreadPool 工作线程在锁内复查标志后才向 this 投递队列回调，析构函数在同一
+    // 把锁内翻标志；互斥保证“检查通过则对象必然仍然存活”，否则退出时可能踩到
+    // 已销毁的 MainWindow。
+    QMutex m_thumbTasksMutex;
+    bool m_thumbTasksLive = true;
 
     struct EffectPreset {
         QString name;
@@ -191,6 +203,8 @@ private:
     QComboBox *m_themeCombo = nullptr;
     int m_themeMode = 0;      // 0 = follow system, 1 = light, 2 = dark
     bool m_darkTheme = true;  // currently applied scheme
+    QSize m_savedWindowSize;  // 启动时恢复的意图尺寸，关闭时保存它以防止布局漂移导致膨胀
+    bool m_windowShown = false; // 首次 show 完成前不更新 m_savedWindowSize
 };
 
 #endif // MAINWINDOW_H

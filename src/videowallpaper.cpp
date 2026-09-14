@@ -10,11 +10,13 @@
 
 #include <QAudioOutput>
 #include <QElapsedTimer>
+#include <QCoreApplication>
 #include <QGuiApplication>
 #include <QMediaMetaData>
 #include <QMediaPlayer>
 #include <QRandomGenerator>
 #include <QScreen>
+#include <QThread>
 #include <QTimer>
 #include <QUrl>
 #include <QVideoWidget>
@@ -25,7 +27,16 @@
 #include <windows.h>
 #endif
 
+// 线程约束断言(任务书 6.4)：本类的 QWidget / 播放器 / 视频输出对象只允许在
+// GUI 线程创建、访问和销毁。Release 下 Q_ASSERT 编译为空，零运行期开销。
+// 仅用于确定只在 GUI 线程跑的函数，不对合法后台逻辑使用。
+#define VW_ASSERT_GUI() Q_ASSERT(QThread::currentThread() == qApp->thread())
+
 namespace {
+
+// 单例裸句柄：仅供 shutdown() 判断“实例是否存在”，绝不触发构造。
+// 构造时赋值、析构时清空，因此退出清理完成后析构不会二次清理。
+VideoWallpaper *g_wallpaper = nullptr;
 
 // 持续挂起多久后卸载解码管线(省显存/内存)，恢复时重建约需 2s。
 // YUMEIREN_LONG_SUSPEND_MS 仅用于自动化测试覆盖阈值。
@@ -50,6 +61,20 @@ QString mediaErrorText(QMediaPlayer::Error err, const QString &detail)
     return detail.isEmpty() ? QStringLiteral("未知错误") : detail;
 }
 
+// 显示模式名(仅诊断日志使用)：多屏问题的时序要靠这一行区分主屏/拉伸/镜像。
+QString screenModeName(int mode)
+{
+    switch (mode) {
+    case VideoWallpaper::PrimaryScreen:
+        return QStringLiteral("主屏");
+    case VideoWallpaper::StretchAll:
+        return QStringLiteral("拉伸全部");
+    case VideoWallpaper::MirrorAll:
+        return QStringLiteral("每屏镜像");
+    }
+    return QStringLiteral("?%1").arg(mode);
+}
+
 } // namespace
 
 VideoWallpaper &VideoWallpaper::instance()
@@ -60,18 +85,76 @@ VideoWallpaper &VideoWallpaper::instance()
 
 VideoWallpaper::~VideoWallpaper()
 {
-    // 退出前停播并卸载挂载窗口，避免残留一帧冻结的壁纸窗口
-    stopAll();
+    // 兜底路径：正常退出应走 main() 里的显式 shutdown()(见 shutdownNow 注释)。
+    // 这里只在“qApp 仍存活且尚未清理”时补做一次；qApp 已销毁时必须放弃清理——
+    // 此时任何 QWidget 调用都会踩到 Qt6Widgets 内部的空 qApp 路径(c0000005)，
+    // 正是 docs/crash_analysis.md 定位到的退出崩溃。
+    g_wallpaper = nullptr;
+    if (!qApp || m_shutdownDone)
+        return;
+    shutdownNow();
+}
+
+void VideoWallpaper::shutdown()
+{
+    // 单例不存在(未使用视频壁纸)时什么都不做：绝不能为了清理而构造单例。
+    if (!qApp || !g_wallpaper)
+        return;
+    g_wallpaper->shutdownNow();
+}
+
+// 单一退出收口(任务书 6.2)：停止新操作 → 停定时器 → 卸载播放器/输出/窗口 →
+// 兑现挂起的 deleteLater。必须在 QApplication 析构之前执行完毕。
+void VideoWallpaper::shutdownNow()
+{
+    if (m_shutdownDone)
+        return; // 幂等：重复调用不再触碰任何 Qt 对象
+    m_shutdownDone = true;
+    m_shuttingDown = true; // 此后所有信号回调/延迟任务直接短路
+    VW_ASSERT_GUI();
+    videodiag::log(videodiag::Level::Info,
+        QStringLiteral("退出清理开始: outputs=%1 session=%2 uptime=%3ms")
+            .arg(m_outputs.size()).arg(m_playbackSessionId)
+            .arg(videodiag::elapsedMs()),
+        QStringLiteral("Lifecycle"));
+    stopHeartbeatTimers();
+    // 取消尚未触发的延迟任务(重试/跳曲/重布局/裁剪)：context 是本单例，
+    // 用 removePostedEvents 一次性摘掉，避免清理中再被回调拽回播放路径。
+    QCoreApplication::removePostedEvents(this, QEvent::Timer);
+    stopAll(); // 复用统一的停播收口(teardownOutputs + 状态复位)
+    // 探针对象(仅 YUMEIREN_PROBE_STAGE 使用)同样必须赶在 qApp 销毁前释放，
+    // 否则 ~QWidget/~QMediaPlayer 落到 atexit 链上，与上面的崩溃同因。
+    if (m_probePlayer) {
+        m_probePlayer->stop();
+        m_probePlayer->setVideoOutput(nullptr);
+    }
+    if (m_probeWidget)
+        fbswin::unmountWindow(m_probeWidget);
+    delete m_probeWidget;
+    delete m_probePlayer;
+    delete m_probeAudio;
+    m_probeWidget = nullptr;
+    m_probePlayer = nullptr;
+    m_probeAudio = nullptr;
+    videodiag::log(videodiag::Level::Info,
+        QStringLiteral("退出清理完成: players=%1/%2 widgets=%3/%4 audios=%5/%6")
+            .arg(m_playersCreated).arg(m_playersDestroyed)
+            .arg(m_widgetsCreated).arg(m_widgetsDestroyed)
+            .arg(m_audiosCreated).arg(m_audiosDestroyed),
+        QStringLiteral("Lifecycle"));
 }
 
 // 资源所有权说明：VideoOutput 中的 widget/player/audio 均由 m_outputs 独占持有，
 // 统一通过 teardownOutputs() 的 deleteLater 销毁。这里必须用异步删除——teardown
 // 可能被播放器的信号链(EndOfMedia → nextTrack)间接触发，同步 delete 会析构正在
-// 发信号的 sender 造成 use-after-free。WorkerW 挂载与系统探测在
-// platform/windows/desktopmount.cpp，本类只保留播放控制与状态机。
+// 发信号的 sender 造成 use-after-free。唯一例外是退出清理(m_shuttingDown)：
+// 那时事件循环已经结束，deleteLater 无人兑现，teardownOutputs 会就地兑现
+// (且此时信号已全部断开，不存在“析构正在发信号的 sender”)。WorkerW 挂载与系统
+// 探测在 platform/windows/desktopmount.cpp，本类只保留播放控制与状态机。
 
 VideoWallpaper::VideoWallpaper(QObject *parent) : QObject(parent)
 {
+    g_wallpaper = this;
     m_mountFixClock = new QElapsedTimer();
     m_mountFixClock->start();
     m_suspendClock = new QElapsedTimer();
@@ -79,7 +162,6 @@ VideoWallpaper::VideoWallpaper(QObject *parent) : QObject(parent)
     m_fullscreenTimer = new QTimer(this);
     m_fullscreenTimer->setInterval(1000);
     connect(m_fullscreenTimer, &QTimer::timeout, this, &VideoWallpaper::evaluateSuspend);
-    m_fullscreenTimer->start();
 
     m_reclaimTimer = new QTimer(this);
     m_reclaimTimer->setInterval(30000);
@@ -92,7 +174,9 @@ VideoWallpaper::VideoWallpaper(QObject *parent) : QObject(parent)
         if (m_reclaimMemory && deliberateIdle)
             trimMemory();
     });
-    m_reclaimTimer->start();
+    // 心跳定时器这里只创建不启动：只有“用户启动过且未停止”(m_started)期间才需要
+    // 轮询，见 ensureHeartbeatTimers/stopHeartbeatTimers。未播放时进程完全静默
+    // (任务书 10.1)，不再有空转的 1s/30s 唤醒。
 
     // 关闭/重载实验驱动(仅自动化测试使用)：定时调用 stopAll/startPlaying，
     // 用于验证“停止→等待→重载”后内存回落并复现同一基线(排查 deleteLater 残留)。
@@ -113,7 +197,58 @@ VideoWallpaper::VideoWallpaper(QObject *parent) : QObject(parent)
 
     // 阶段7 诊断：采样器仅诊断模式生效(默认 no-op)
     videodiag::startDiagSampling();
-    videodiag::log(videodiag::Level::Info, QStringLiteral("VideoWallpaper 初始化完成"));
+    videodiag::log(videodiag::Level::Info,
+        QStringLiteral("VideoWallpaper 初始化完成 uptime=%1ms")
+            .arg(videodiag::elapsedMs()),
+        QStringLiteral("Startup"));
+    videodiag::stage(QStringLiteral("视频壁纸单例初始化完成"));
+}
+
+// 心跳定时器收口：m_started 为真期间必须运行，停止/退出时必须关闭。
+// 两个函数各自只做“起”与“停”，幂等，可安全地在任意状态转换点调用。
+void VideoWallpaper::ensureHeartbeatTimers()
+{
+    if (!m_fullscreenTimer->isActive()) {
+        m_fullscreenTimer->start();
+        videodiag::logObjectEvent("timer-start", m_fullscreenTimer,
+                                  QStringLiteral("1000ms evaluateSuspend"));
+    }
+    if (!m_reclaimTimer->isActive()) {
+        m_reclaimTimer->start();
+        videodiag::logObjectEvent("timer-start", m_reclaimTimer,
+                                  QStringLiteral("30000ms trimMemory"));
+    }
+}
+
+void VideoWallpaper::stopHeartbeatTimers()
+{
+    if (m_fullscreenTimer && m_fullscreenTimer->isActive()) {
+        m_fullscreenTimer->stop();
+        videodiag::logObjectEvent("timer-stop", m_fullscreenTimer);
+    }
+    if (m_reclaimTimer && m_reclaimTimer->isActive()) {
+        m_reclaimTimer->stop();
+        videodiag::logObjectEvent("timer-stop", m_reclaimTimer);
+    }
+}
+
+// 捕获型 lambda 的存活校验(任务书 6.3)：只比对播放器指针是否仍是现役输出之一，
+// 绝不解引用可能已释放的对象。指针值复用(旧播放器地址被新播放器占用)理论上可能
+// 误判为存活，与既有代码同源；退出清理期间一律判为不存活。
+bool VideoWallpaper::isLiveOutput(const VideoOutput &out) const
+{
+    if (m_shuttingDown || out.player == nullptr)
+        return false;
+    for (const VideoOutput &cur : m_outputs)
+        if (cur.player == out.player)
+            return true;
+    return false;
+}
+
+// “首个输出”= 承载音频与状态推进的主输出(MirrorAll 下其余为副本)。
+bool VideoWallpaper::isPrimaryOutput(const VideoOutput &out) const
+{
+    return !m_outputs.isEmpty() && out.player == m_outputs.first().player;
 }
 
 void VideoWallpaper::setPlaylist(const QStringList &files)
@@ -140,6 +275,9 @@ void VideoWallpaper::clearPlaylist()
 
 void VideoWallpaper::layoutOutputs()
 {
+    VW_ASSERT_GUI(); // 创建/销毁 QVideoWidget：仅 GUI 线程
+    if (m_shuttingDown)
+        return;
     teardownOutputs();
     if (!fbswin::ensureWorker())
         return;
@@ -168,6 +306,12 @@ void VideoWallpaper::layoutOutputs()
         out.audio->setMuted(true);
         out.player->setAudioOutput(out.audio);
         out.player->setVideoOutput(out.widget);
+        videodiag::logObjectEvent("create", out.player,
+            QStringLiteral("player widget=%1 audio=%2")
+                .arg(quintptr(out.widget), 0, 16)
+                .arg(quintptr(out.audio), 0, 16));
+        videodiag::logObjectEvent("bind", out.widget, QStringLiteral("player=0x%1")
+            .arg(quintptr(out.player), 0, 16));
 
         // Track end: advance in the playlist or stop (keeping the last frame).
         // 阶段3：LoadedMedia 时先检查 hasVideo——纯音频素材对壁纸无意义：
@@ -175,6 +319,8 @@ void VideoWallpaper::layoutOutputs()
         // 然后走与错误一致的跳过链路(重试不会长出视频轨，故不重试)。
         connect(out.player, &QMediaPlayer::mediaStatusChanged, this,
                 [this, out](QMediaPlayer::MediaStatus st) {
+            if (!isLiveOutput(out))
+                return; // 输出已被卸载/正在退出清理：不再触碰播放器与状态机
             videodiag::log(videodiag::Level::Debug,
                 QStringLiteral("session=%1 mediaStatus=%2 file=%3")
                     .arg(m_playbackSessionId).arg(int(st))
@@ -183,7 +329,7 @@ void VideoWallpaper::layoutOutputs()
                 nextTrack();
             else if (st == QMediaPlayer::LoadedMedia && m_started
                      && !m_outputs.isEmpty()
-                     && out.player == m_outputs.first().player) {
+                     && isPrimaryOutput(out)) {
                 // 长挂起释放后的恢复：跳回暂停时的进度
                 if (m_resumePosMs > 0) {
                     out.player->setPosition(m_resumePosMs);
@@ -198,9 +344,8 @@ void VideoWallpaper::layoutOutputs()
                     const QUrl src = out.player->source();
                     QTimer::singleShot(2000, this, [this, out, src] {
                         m_noVideoCheckPending = false;
-                        if (!m_started || m_outputs.isEmpty()
-                            || out.player != m_outputs.first().player
-                            || out.player->source() != src)
+                        if (!isLiveOutput(out) || !m_started || m_outputs.isEmpty()
+                            || !isPrimaryOutput(out) || out.player->source() != src)
                             return;
                         if (!out.player->hasVideo()
                             && !out.player->metaData()
@@ -216,6 +361,8 @@ void VideoWallpaper::layoutOutputs()
         // count a successful start as proof the current file is playable.
         connect(out.player, &QMediaPlayer::playbackStateChanged, this,
                 [this, out](QMediaPlayer::PlaybackState st) {
+            if (!isLiveOutput(out))
+                return;
             if (st == QMediaPlayer::PlayingState) {
                 // 仅“真素材成功”才恢复失败额度：无视频轨素材也会进入
                 // PlayingState(音频在播)，不能借此洗白失败计数
@@ -234,6 +381,8 @@ void VideoWallpaper::layoutOutputs()
         // 策略见 docs/VIDEO_MEDIA_COMPATIBILITY_POLICY.md)。
         connect(out.player, &QMediaPlayer::metaDataChanged, this,
                 [this, out, carriesAudio = withAudio] {
+            if (!isLiveOutput(out))
+                return;
             videodiag::log(videodiag::Level::Debug,
                 QStringLiteral("session=%1 metaDataChanged file=%2")
                     .arg(m_playbackSessionId)
@@ -265,8 +414,8 @@ void VideoWallpaper::layoutOutputs()
         // 停播。只有首个输出参与推进(MirrorAll 的副本播放器会对同一文件重复报错)。
         connect(out.player, &QMediaPlayer::errorOccurred, this,
                 [this, out](QMediaPlayer::Error err, const QString &msg) {
-            if (!m_started || m_outputs.isEmpty()
-                || out.player != m_outputs.first().player)
+            if (!isLiveOutput(out) || !m_started || m_outputs.isEmpty()
+                || !isPrimaryOutput(out))
                 return;
             const QString reason = mediaErrorText(err, msg);
             videodiag::log(videodiag::Level::Warning,
@@ -323,6 +472,8 @@ void VideoWallpaper::layoutOutputs()
 
 void VideoWallpaper::remountOutputs()
 {
+    if (m_shuttingDown)
+        return; // 清理期间只允许销毁，不允许再创建/挂载任何窗口
     // 轻量重挂载：只修正父窗口与位置，不重建解码管线(避免换曲时资源反复销毁)。
     // 位置与尺寸都比对物理像素，纠正历史遗留的错误坐标。
     for (int i = 0; i < m_outputs.size(); ++i) {
@@ -374,6 +525,8 @@ bool VideoWallpaper::mountIsStale() const
 
 void VideoWallpaper::scheduleMountFix()
 {
+    if (m_shuttingDown)
+        return;
     if (m_mountFixClock->isValid() && m_mountFixClock->elapsed() < 10000)
         return;
     // 探测失败(explorer 正在重启，Progman 尚未出现)时不重置节流——下个心跳(1s)
@@ -386,13 +539,13 @@ void VideoWallpaper::scheduleMountFix()
 
 void VideoWallpaper::scheduleRelayout()
 {
-    if (!m_started || m_outputs.isEmpty() || m_relayoutPending)
+    if (m_shuttingDown || !m_started || m_outputs.isEmpty() || m_relayoutPending)
         return;
     m_relayoutPending = true;
     // DPI/几何变化会连发多个信号，防抖合并成一次重建
     QTimer::singleShot(600, this, [this] {
         m_relayoutPending = false;
-        if (!m_started || m_outputs.isEmpty())
+        if (m_shuttingDown || !m_started || m_outputs.isEmpty())
             return;
         layoutOutputs();
         if (!m_playlist.isEmpty())
@@ -403,10 +556,23 @@ void VideoWallpaper::scheduleRelayout()
 
 void VideoWallpaper::teardownOutputs()
 {
+    if (m_outputs.isEmpty())
+        return;
     const int torn = m_outputs.size();
-    for (const VideoOutput &out : std::as_const(m_outputs)) {
-        if (out.player)
+    // 先把整张表换出再逐个处理：teardown 可能被播放器信号链(EndOfMedia →
+    // nextTrack → handleUnplayable → stopAll)间接重入，重入时看到必须是空列表，
+    // 否则同一批对象会被二次 deleteLater(任务书 6.3 的再入风险)。
+    QList<VideoOutput> victims;
+    victims.swap(m_outputs);
+    // 退出清理期间事件循环已经不在，deleteLater 永远不会被兑现；此时就地强制
+    // 兑现，保证播放器/音频输出/视频窗口都在 qApp 存活时真正销毁(任务书 6.2)。
+    const bool flushNow = m_shuttingDown;
+    for (const VideoOutput &out : std::as_const(victims)) {
+        if (out.player) {
+            // 先断开本类与播放器的全部连接：清理路径上不应再有信号回调进来。
+            out.player->disconnect(this);
             out.player->stop();
+        }
         if (out.widget) {
             fbswin::unmountWindow(out.widget);
             out.widget->hide();
@@ -419,19 +585,30 @@ void VideoWallpaper::teardownOutputs()
             out.audio->deleteLater();
         ++m_playersDestroyed;
         ++m_audiosDestroyed;
+        if (flushNow) {
+            // 顺序固定：播放器(持有 sink 与音频输出引用) → 音频输出 → 视频窗口。
+            QCoreApplication::sendPostedEvents(out.player, QEvent::DeferredDelete);
+            QCoreApplication::sendPostedEvents(out.audio, QEvent::DeferredDelete);
+            QCoreApplication::sendPostedEvents(out.widget, QEvent::DeferredDelete);
+        }
     }
-    m_outputs.clear();
-    if (torn > 0)
-        videodiag::log(videodiag::Level::Info,
-            QStringLiteral("teardown n=%1 累计 players=%2/%3 widgets=%4/%5 audios=%6/%7")
-                .arg(torn)
-                .arg(m_playersCreated).arg(m_playersDestroyed)
-                .arg(m_widgetsCreated).arg(m_widgetsDestroyed)
-                .arg(m_audiosCreated).arg(m_audiosDestroyed));
+    videodiag::log(videodiag::Level::Info,
+        QStringLiteral("管线卸载 n=%1%2 累计 players=%3/%4 widgets=%5/%6 audios=%7/%8")
+            .arg(torn)
+            .arg(flushNow ? QStringLiteral("(退出模式·就地销毁)") : QString())
+            .arg(m_playersCreated).arg(m_playersDestroyed)
+            .arg(m_widgetsCreated).arg(m_widgetsDestroyed)
+            .arg(m_audiosCreated).arg(m_audiosDestroyed),
+        QStringLiteral("Lifecycle"));
 }
 
 bool VideoWallpaper::ensureOutputs(QString *error)
 {
+    if (m_shuttingDown) {
+        if (error)
+            *error = QStringLiteral("正在退出，不再创建视频输出");
+        return false;
+    }
     if (!m_outputs.isEmpty()) {
         remountOutputs(); // 轻量重挂载保持 z 序；解码管线复用，切换曲目零重建
         return true;
@@ -448,7 +625,9 @@ void VideoWallpaper::playIndex(int index, qint64 resumePos)
 {
     if (m_playlist.isEmpty())
         return;
+    VW_ASSERT_GUI();
     m_started = true;
+    ensureHeartbeatTimers(); // 起播即恢复挂起状态机与回收心跳
     ++m_playbackSessionId; // 会话 ID：每次起播/换曲/重试自增，供诊断日志关联
     if (index != m_index)
         m_fileRetries = 0; // 换曲重置单文件重试额度；同 index 的重试调用保留计数
@@ -483,6 +662,8 @@ void VideoWallpaper::playIndex(int index, qint64 resumePos)
     }
     bool first = true;
     for (const VideoOutput &out : std::as_const(m_outputs)) {
+        if (!isLiveOutput(out))
+            continue; // 防御：列表中不应有失效项，出现即跳过而非解引用
         if (sameSource)
             out.player->setPosition(0); // 解码器复用，原地重播
         else {
@@ -501,6 +682,8 @@ void VideoWallpaper::playIndex(int index, qint64 resumePos)
 
 void VideoWallpaper::nextTrack()
 {
+    if (m_shuttingDown)
+        return; // 清理中不再推进列表(否则会被拽回起播路径)
     if (m_playlist.isEmpty())
         return;
     const int size = m_playlist.size();
@@ -540,7 +723,9 @@ void VideoWallpaper::nextTrack()
 // 清除该曲目的失败记录，给一次重新打开的机会。
 void VideoWallpaper::switchToTrack(int index)
 {
-    if (!m_started || index < 0 || index >= m_playlist.size() || index == m_index)
+    VW_ASSERT_GUI();
+    if (!m_started || m_shuttingDown || index < 0 || index >= m_playlist.size()
+        || index == m_index)
         return;
     m_trackFails.remove(index);
     m_deadTracks.remove(index);
@@ -548,19 +733,19 @@ void VideoWallpaper::switchToTrack(int index)
     playIndex(index);
     if (m_manualPaused || m_suspendReasons != 0) {
         for (const VideoOutput &out : std::as_const(m_outputs))
-            if (out.player)
+            if (isLiveOutput(out))
                 out.player->pause();
     }
 }
 
 void VideoWallpaper::advanceOnError()
 {
-    if (!m_started || m_outputs.isEmpty() || m_playlist.isEmpty())
+    if (!m_started || m_shuttingDown || m_outputs.isEmpty() || m_playlist.isEmpty())
         return;
     nextTrack();
     if (m_manualPaused || m_suspendReasons != 0) {
         for (const VideoOutput &out : std::as_const(m_outputs))
-            if (out.player)
+            if (isLiveOutput(out))
                 out.player->pause();
     }
 }
@@ -571,6 +756,8 @@ void VideoWallpaper::advanceOnError()
 // 全部曲目入名单则整体停播。仅首个输出允许调用(防 MirrorAll 重复推进)。
 void VideoWallpaper::handleUnplayable(const QString &reason)
 {
+    if (m_shuttingDown)
+        return; // 清理中不再跳曲/重试
     m_fileRetries = 0;
     const int fails = ++m_trackFails[m_index];
     m_deadTracks.insert(m_index);
@@ -595,12 +782,19 @@ void VideoWallpaper::handleUnplayable(const QString &reason)
 
 bool VideoWallpaper::startPlaying(QString *error, int preferIndex)
 {
+    VW_ASSERT_GUI();
+    if (m_shuttingDown) {
+        if (error)
+            *error = QStringLiteral("正在退出，无法启动壁纸");
+        return false;
+    }
     if (m_playlist.isEmpty()) {
         if (error) *error = QStringLiteral("播放列表为空，请先添加视频");
         return false;
     }
     m_manualPaused = false; // 用户点击“启动”即视为要求播放
     m_started = true;
+    ensureHeartbeatTimers();
     m_trackFails.clear(); // 全新起播会话：失败名单清空，所有曲目重新获得机会
     m_deadTracks.clear();
     m_fileRetries = 0;
@@ -618,6 +812,7 @@ bool VideoWallpaper::startPlaying(QString *error, int preferIndex)
 
 void VideoWallpaper::pauseResume()
 {
+    VW_ASSERT_GUI();
     if (m_outputs.isEmpty()) {
         // 长挂起已释放管线：重建并按当前状态继续(维持暂停由挂起原因决定)
         if (m_started && !m_playlist.isEmpty()) {
@@ -639,6 +834,8 @@ void VideoWallpaper::pauseResume()
 
 void VideoWallpaper::stopAll()
 {
+    VW_ASSERT_GUI();
+    stopHeartbeatTimers(); // 停播即停止轮询(任务书 10.1)
     for (const VideoOutput &out : std::as_const(m_outputs))
         if (out.player)
             out.player->stop();
@@ -656,11 +853,15 @@ void VideoWallpaper::stopAll()
         trimMemory(); // 停止后立即把解码器释放后的内存还给系统，不等下一个回收周期
     videodiag::log(videodiag::Level::Info,
         QStringLiteral("stopAll: 管线已卸载 session=%1").arg(m_playbackSessionId));
-    emit playbackStateChanged(QStringLiteral("已停止"));
+    // 退出清理中不再向 UI 广播状态变化：此时窗口正在销毁，文本无人消费。
+    if (!m_shuttingDown)
+        emit playbackStateChanged(QStringLiteral("已停止"));
 }
 
 bool VideoWallpaper::isPlaying() const
 {
+    if (m_shuttingDown)
+        return false;
     for (const VideoOutput &out : m_outputs)
         if (out.player && out.player->playbackState() == QMediaPlayer::PlayingState)
             return true;
@@ -674,6 +875,10 @@ void VideoWallpaper::setScreenMode(int mode)
     if (m_screenMode == prev)
         return; // 值未变时不重建：启动时 loadSettings 会对已运行的管线重复调用，
                 // 重建会短暂保留上一代窗口，平白多出一份渲染表面
+    videodiag::log(videodiag::Level::Info,
+        QStringLiteral("显示模式切换: %1→%2 outputs=%3")
+            .arg(screenModeName(prev)).arg(screenModeName(m_screenMode))
+            .arg(m_outputs.size()));
     if (!m_outputs.isEmpty()) {
         layoutOutputs();
         // 重建后恢复播放(状态机会在全屏等挂起原因下保持暂停)
@@ -708,7 +913,8 @@ void VideoWallpaper::setTargetFps(int fps)
 {
     m_targetFps = qBound(0, fps, 240);
     for (const VideoOutput &out : std::as_const(m_outputs))
-        applyPlaybackRate(out.player);
+        if (isLiveOutput(out))
+            applyPlaybackRate(out.player);
 }
 
 // 帧率上限实现说明：QMediaPlayer 没有呈现帧率 API，这里用 playbackRate 实现
@@ -737,6 +943,8 @@ void VideoWallpaper::setVolume(int percent)
     m_volume = qBound(0, percent, 100);
     bool first = true;
     for (const VideoOutput &out : std::as_const(m_outputs)) {
+        if (!isLiveOutput(out) || !out.audio)
+            break; // 列表已失效(清理中/已卸载)：整体停手，不逐条解引用
         out.audio->setMuted(!first);
         out.audio->setVolume(m_volume / 100.0);
         if (first)
@@ -750,7 +958,7 @@ void VideoWallpaper::setVolume(int percent)
 // 加载时重置，playIndex 和 metaDataChanged 两处都会调用这里重新断言。
 void VideoWallpaper::applyAudioPolicy(const VideoOutput &out, bool carriesAudio)
 {
-    if (!out.player)
+    if (!isLiveOutput(out))
         return;
     out.player->setActiveAudioTrack(carriesAudio && m_volume > 0 ? 0 : -1);
 }
@@ -779,14 +987,16 @@ void VideoWallpaper::setAutoLoop(bool on)
 {
     m_autoLoop = on;
     for (const VideoOutput &out : std::as_const(m_outputs))
-        applyLoopPolicy(out.player);
+        if (isLiveOutput(out))
+            applyLoopPolicy(out.player);
 }
 
 void VideoWallpaper::setRandom(bool on)
 {
     m_random = on;
     for (const VideoOutput &out : std::as_const(m_outputs))
-        applyLoopPolicy(out.player);
+        if (isLiveOutput(out))
+            applyLoopPolicy(out.player);
 }
 
 // FrameScheduler 状态机：汇总全部挂起原因(全屏/锁屏/显示器关闭/电池)，
@@ -795,6 +1005,8 @@ void VideoWallpaper::setRandom(bool on)
 // 同时承担壁纸窗口健康检查(Explorer 重启恢复)。
 void VideoWallpaper::evaluateSuspend()
 {
+    if (m_shuttingDown)
+        return;
     if (!m_started) {
         m_suspendReasons = 0;
         return;
@@ -840,19 +1052,22 @@ void VideoWallpaper::evaluateSuspend()
         videodiag::log(videodiag::Level::Info,
             QStringLiteral("恢复播放: reasons=0 manualPaused=%1").arg(m_manualPaused));
         for (const VideoOutput &out : std::as_const(m_outputs))
-            out.player->play();
+            if (isLiveOutput(out))
+                out.player->play();
         emitTrackState();
         m_lastEmittedReasons = 0;
         return;
     }
     if (!shouldPlay && wasPlaying) {
         for (const VideoOutput &out : std::as_const(m_outputs))
-            out.player->pause();
+            if (isLiveOutput(out))
+                out.player->pause();
         m_suspendClock->restart(); // 挂起计时开始(持续挂起超阈值即释放管线)
         if (m_reclaimMemory) {
             // 暂停后解码器队列逐渐排空，稍等片刻再把工作集还给系统
             QTimer::singleShot(2000, this, [this] {
-                if (!isPlaying() && (m_manualPaused || m_suspendReasons != 0))
+                if (!m_shuttingDown && !isPlaying()
+                    && (m_manualPaused || m_suspendReasons != 0))
                     trimMemory();
             });
         }
@@ -903,6 +1118,7 @@ void VideoWallpaper::trimMemory()
 // 即弃；正常发布路径不会设置 YUMEIREN_PROBE_STAGE，此函数不执行。
 void VideoWallpaper::runProbeStage(const QString &stage)
 {
+    VW_ASSERT_GUI();
     if (stage == QLatin1String("B") || stage == QLatin1String("C")
         || stage == QLatin1String("D") || stage == QLatin1String("E")) {
         m_probePlayer = new QMediaPlayer(this);
@@ -946,6 +1162,8 @@ void VideoWallpaper::emitTrackState()
 // m_resumePosMs 记住进度，恢复时重建管线经 LoadedMedia 跳回原位置。
 void VideoWallpaper::longSuspendRelease()
 {
+    if (m_shuttingDown)
+        return;
     qint64 pos = -1;
     for (const VideoOutput &out : std::as_const(m_outputs)) {
         if (out.player) {

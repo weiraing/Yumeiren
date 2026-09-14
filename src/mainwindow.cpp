@@ -5,6 +5,7 @@
 #include "config/ConfigKeys.h"
 #include "videodiag.h"
 #include "videowallpaper.h"
+#include "tooltipstyle.h"
 
 #include <QApplication>
 #include <QCheckBox>
@@ -97,19 +98,20 @@ void runComboSelfTest(QWidget *window);
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 {
     setWindowTitle(appinfo::windowTitle()); // 原生标题=Yumeiren(窗口行); 品牌名在自绘标题栏
-    setMinimumSize(880, 680);
+    setMinimumSize(880, 660);
     // 初始窗口几何：优先恢复上次保存的尺寸位置(钳制在可用工作区 94% 内；越界
-    // 自动拉回主屏)，无保存记录时用自适应首选 1120×900。此前固定 990×780 在
-    // 多数屏幕上会把图片背景页底部按钮行裁掉一半。
+    // 自动拉回主屏)，无保存记录时用自适应首选 960×840(贴近用户实测合适尺寸，
+    // 且高于最小值 880×660 不会裁掉底部按钮行)。
     {
         const QRect avail = QGuiApplication::primaryScreen()->availableGeometry();
         auto &cfg = AppConfig::instance();
         const int cw = cfg.value(ConfigKeys::Window::Width, 0).toInt();
         const int ch = cfg.value(ConfigKeys::Window::Height, 0).toInt();
-        if (cw >= 880 && ch >= 680) {
+        if (cw >= 880 && ch >= 660) {
             QSize want(cw, ch);
             want = want.boundedTo(avail.size() * 0.94);
             resize(want);
+            m_savedWindowSize = want;
             const int x = cfg.value(ConfigKeys::Window::X, avail.left()).toInt();
             const int y = cfg.value(ConfigKeys::Window::Y, avail.top()).toInt();
             move(qBound(avail.left(), x, qMax(avail.left(), avail.right() - width())),
@@ -117,7 +119,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
             if (cfg.value(ConfigKeys::Window::Maximized, false).toBool())
                 setWindowState(Qt::WindowMaximized);
         } else {
-            resize(QSize(1120, 900).boundedTo(avail.size() * 0.94));
+            m_savedWindowSize = QSize(960, 840).boundedTo(avail.size() * 0.94);
+            resize(m_savedWindowSize);
         }
     }
     // 标题栏自绘方案：保留 WS_THICKFRAME(圆角/阴影/贴边由 DWM 提供)，
@@ -145,6 +148,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
             videodiag::log(videodiag::Level::Warning,
                 QStringLiteral("自动恢复跳过: 上次标记播放中但播放列表为空"));
         }
+        videodiag::stage(earlyWasPlaying && !earlyPlaylist.isEmpty()
+                             ? QStringLiteral("壁纸状态恢复已发起(视频管线后台起跑)")
+                             : QStringLiteral("壁纸状态恢复跳过(上次未播放)"));
     }
 
     // Effect presets collected from the three projects' default configs.
@@ -235,7 +241,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     m_nav->setCurrentRow(0);
     m_topStack->setCurrentIndex(0);
     selectHeaderTab(0);
+    videodiag::stage(QStringLiteral("主窗口控件树构建完成(UI 初始化)"));
     loadSettings();
+    videodiag::stage(QStringLiteral("设置回填完成(含图库与显示器枚举)"));
     applyTheme(m_themeCombo->currentIndex());
     refreshStatus();
     // the legacy import ran before this window existed; report what it carried over
@@ -253,6 +261,18 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     // opens its popup and writes metrics plus a rendered PNG into that directory.
     if (qEnvironmentVariableIsSet("FBS_COMBO_DEBUG"))
         runComboSelfTest(this);
+    videodiag::logObjectEvent("create", this,
+                              QStringLiteral("size=%1x%2").arg(width()).arg(height()));
+}
+
+// 退出闸门(任务书 6.3)：关闭缩略图后台任务的回调通路。锁内翻标志即可返回，
+// 不等待任务跑完(退出时卡住比多一次无效投递更糟)；已经通过检查的任务在投递时
+// 对象必然仍然存活，其队列回调由 ~QObject 丢弃。
+MainWindow::~MainWindow()
+{
+    QMutexLocker guard(&m_thumbTasksMutex);
+    m_thumbTasksLive = false;
+    videodiag::logObjectEvent("destroy", this);
 }
 
 QWidget *MainWindow::buildTitleBar()
@@ -538,14 +558,14 @@ QWidget *MainWindow::buildImagePage()
 
     // custom image buttons
     auto *folderBtn = new QPushButton(QStringLiteral("选择文件夹"), leftCard);
-    folderBtn->setToolTip(QStringLiteral("读取文件夹内所有符合格式的图片并展示到图库"));
+    folderBtn->setToolTip(tooltipstyle::format(QStringLiteral("读取文件夹内所有符合格式的图片并展示到图库")));
     connect(folderBtn, &QPushButton::clicked, this, &MainWindow::pickPresetFolder);
     leftLay->addWidget(folderBtn);
     auto *customRow = new QHBoxLayout();
     auto *pickBtn = new QPushButton(QStringLiteral("选择图片…"), leftCard);
     auto *wallBtn = new QPushButton(QStringLiteral("用桌面壁纸"), leftCard);
-    pickBtn->setToolTip(QStringLiteral("选择任意 PNG/JPG/BMP/WebP 图片"));
-    wallBtn->setToolTip(QStringLiteral("截取当前桌面壁纸作为背景"));
+    pickBtn->setToolTip(tooltipstyle::format(QStringLiteral("选择任意 PNG/JPG/BMP/WebP 图片")));
+    wallBtn->setToolTip(tooltipstyle::format(QStringLiteral("截取当前桌面壁纸作为背景")));
     connect(pickBtn, &QPushButton::clicked, this, &MainWindow::pickImage);
     connect(wallBtn, &QPushButton::clicked, this, &MainWindow::pickWallpaper);
     customRow->addWidget(pickBtn, 1);
@@ -593,9 +613,9 @@ QWidget *MainWindow::buildImagePage()
     auto *resetParamsBtn = new QPushButton(QStringLiteral("↺ 重置"), rightCard);
     resetParamsBtn->setObjectName(QStringLiteral("ParamResetButton"));
     resetParamsBtn->setCursor(Qt::PointingHandCursor);
-    resetParamsBtn->setToolTip(QStringLiteral(
-        "恢复默认参数：尺寸100%、显示位置右下、亮度/对比度100%、模糊0、不透明度255，\n"
-        "两个选项不勾选"));
+    resetParamsBtn->setToolTip(tooltipstyle::format(QStringLiteral(
+            "恢复默认参数：尺寸100%、显示位置右下、亮度/对比度100%、模糊0、不透明度255，\n"
+            "两个选项不勾选")));
     connect(resetParamsBtn, &QPushButton::clicked, this, &MainWindow::resetImageParams);
     adjTitleRow->addWidget(resetParamsBtn);
     rightLay->addLayout(adjTitleRow);
@@ -611,9 +631,9 @@ QWidget *MainWindow::buildImagePage()
         grid2->addWidget(valLabel, row, 2);
     };
     m_scale = makeSlider(10, 150, 100, &m_scaleVal, QStringLiteral("%"));
-    m_scale->setToolTip(QStringLiteral(
-        "调整图片相对文件浏览器窗口的比例，100% 表示按原图大小显示，用于“居中(原尺寸)”与四角模式；"
-        "“填充窗口/拉伸填满”模式下图片始终铺满窗口，该调节无效果"));
+    m_scale->setToolTip(tooltipstyle::format(QStringLiteral(
+            "调整图片相对文件浏览器窗口的比例，100% 表示按原图大小显示，用于“居中(原尺寸)”与四角模式；"
+            "“填充窗口/拉伸填满”模式下图片始终铺满窗口，该调节无效果")));
     m_brightness = makeSlider(20, 200, 100, &m_brightnessVal, QStringLiteral("%"));
     m_contrast = makeSlider(50, 150, 100, &m_contrastVal, QStringLiteral("%"));
     m_blur = makeSlider(0, 20, 0, &m_blurVal, QStringLiteral("px"));
@@ -625,8 +645,8 @@ QWidget *MainWindow::buildImagePage()
     addRow(3, QStringLiteral("模糊"), m_blur, m_blurVal);
     addRow(4, QStringLiteral("不透明度"), m_opacity, m_opacityVal);
     m_rotate = makeSlider(-180, 180, 0, &m_rotateVal, QStringLiteral("°"));
-    m_rotate->setToolTip(QStringLiteral(
-        "绕图片竖直中心轴旋转的投影：向左逆时针、向右顺时针，±180° 即左右镜像"));
+    m_rotate->setToolTip(tooltipstyle::format(QStringLiteral(
+            "绕图片竖直中心轴旋转的投影：向左逆时针、向右顺时针，±180° 即左右镜像")));
     addRow(5, QStringLiteral("转动角度"), m_rotate, m_rotateVal);
     rightLay->addLayout(grid2);
 
@@ -649,8 +669,8 @@ QWidget *MainWindow::buildImagePage()
         auto *b = new QPushButton(text, this);
         b->setObjectName(QStringLiteral("PosButton"));
         b->setEnabled(false);
-        b->setToolTip(QStringLiteral(
-            "背景组件暂不支持边中点锚点，仅支持四角、居中、填充窗口与拉伸填满"));
+        b->setToolTip(tooltipstyle::format(QStringLiteral(
+                "背景组件暂不支持边中点锚点，仅支持四角、居中、填充窗口与拉伸填满")));
         return b;
     };
 
@@ -670,9 +690,9 @@ QWidget *MainWindow::buildImagePage()
     auto *modeRow = new QHBoxLayout();
     modeRow->setSpacing(6);
     auto *fillBtn = makePosBtn(QStringLiteral("⊞ 填充窗口"), 0);
-    fillBtn->setToolTip(QStringLiteral("等比缩放铺满整个窗口，超出部分裁剪"));
+    fillBtn->setToolTip(tooltipstyle::format(QStringLiteral("等比缩放铺满整个窗口，超出部分裁剪")));
     auto *stretchBtn = makePosBtn(QStringLiteral("⤢ 拉伸填满"), 2);
-    stretchBtn->setToolTip(QStringLiteral("忽略宽高比，拉伸至整个窗口"));
+    stretchBtn->setToolTip(tooltipstyle::format(QStringLiteral("忽略宽高比，拉伸至整个窗口")));
     modeRow->addWidget(fillBtn, 1);
     modeRow->addWidget(stretchBtn, 1);
     rightLay->addLayout(modeRow);
@@ -681,9 +701,9 @@ QWidget *MainWindow::buildImagePage()
     rightLay->addWidget(m_folderExt);
     m_comboEffect = new QCheckBox(
         QStringLiteral("叠加全窗口模糊/亚克力效果"), rightCard);
-    m_comboEffect->setToolTip(
-        QStringLiteral("启用 ExplorerBlurMica 作为整窗底色：图片覆盖文件列表区，"
-                       "侧边栏等其余区域显示模糊/亚克力效果并融入背景"));
+    m_comboEffect->setToolTip(tooltipstyle::format(
+            QStringLiteral("启用 ExplorerBlurMica 作为整窗底色：图片覆盖文件列表区，"
+                           "侧边栏等其余区域显示模糊/亚克力效果并融入背景")));
     rightLay->addWidget(m_comboEffect);
 
     auto *btnRow = new QHBoxLayout();
@@ -744,7 +764,7 @@ QWidget *MainWindow::buildEffectPage()
         btn->setCheckable(true);
         btn->setMinimumSize(260, 62);
         btn->setText(QStringLiteral("%1\n%2").arg(p.name, p.desc));
-        btn->setToolTip(p.desc);
+        btn->setToolTip(tooltipstyle::format(p.desc));
         connect(btn, &QPushButton::clicked, this, [this, i] {
             m_selectedEffect = i;
             updateEffectPresetSelection(i);
@@ -993,16 +1013,16 @@ QWidget *MainWindow::buildVideoWallpaperPage()
 
     m_autoLoopBox = new QCheckBox(QStringLiteral("列表循环"), leftCard);
     m_autoLoopBox->setChecked(true);
-    m_autoLoopBox->setToolTip(QStringLiteral(
-        "勾选：列表逐个播放，播完最后一个回到第一个继续；单个视频自动从头循环。\n"
-        "不勾选：列表播放一遍后停止。"));
+    m_autoLoopBox->setToolTip(tooltipstyle::format(QStringLiteral(
+            "勾选：列表逐个播放，播完最后一个回到第一个继续；单个视频自动从头循环。\n"
+            "不勾选：列表播放一遍后停止。")));
     m_randomBox = new QCheckBox(QStringLiteral("随机播放"), leftCard);
     m_fullscreenPauseBox = new QCheckBox(QStringLiteral("全屏自动暂停"), leftCard);
     m_fullscreenPauseBox->setChecked(true);
-    m_fullscreenPauseBox->setToolTip(QStringLiteral(
-        "前台应用全屏或完全遮住桌面时暂停视频壁纸(省 GPU/电量)，回到桌面 1 秒内自动恢复"));
+    m_fullscreenPauseBox->setToolTip(tooltipstyle::format(QStringLiteral(
+            "前台应用全屏或完全遮住桌面时暂停视频壁纸(省 GPU/电量)，回到桌面 1 秒内自动恢复")));
     m_batteryBox = new QCheckBox(QStringLiteral("电池模式自动暂停"), leftCard);
-    m_batteryBox->setToolTip(QStringLiteral("使用电池供电时自动暂停视频壁纸以省电，接通电源后自动恢复"));
+    m_batteryBox->setToolTip(tooltipstyle::format(QStringLiteral("使用电池供电时自动暂停视频壁纸以省电，接通电源后自动恢复")));
     leftLay->addWidget(m_autoLoopBox);
     leftLay->addWidget(m_randomBox);
     leftLay->addWidget(m_fullscreenPauseBox);
@@ -1010,13 +1030,13 @@ QWidget *MainWindow::buildVideoWallpaperPage()
 
     m_reclaimBox = new QCheckBox(QStringLiteral("自动回收内存"), leftCard);
     m_reclaimBox->setChecked(true);
-    m_reclaimBox->setToolTip(QStringLiteral("定期把空闲内存还给系统，控制内存占用"));
+    m_reclaimBox->setToolTip(tooltipstyle::format(QStringLiteral("定期把空闲内存还给系统，控制内存占用")));
     leftLay->addWidget(m_reclaimBox);
     m_affinityBox = new QCheckBox(QStringLiteral("资源友好模式"), leftCard);
     m_affinityBox->setChecked(true);
-    m_affinityBox->setToolTip(QStringLiteral(
-        "把本程序限制到最多 4 个逻辑核：解码线程与内存/显存占用随之下降\n"
-        "(实测 1080p 内存 -27%、显存 -36%，CPU 不变)。更改后重启生效。"));
+    m_affinityBox->setToolTip(tooltipstyle::format(QStringLiteral(
+            "把本程序限制到最多 4 个逻辑核：解码线程与内存/显存占用随之下降\n"
+            "(实测 1080p 内存 -27%、显存 -36%，CPU 不变)。更改后重启生效。")));
     leftLay->addWidget(m_affinityBox);
     connect(m_affinityBox, &QCheckBox::toggled, this, [this](bool on) {
         AppConfig &st = AppConfig::instance();
@@ -1044,9 +1064,9 @@ QWidget *MainWindow::buildVideoWallpaperPage()
                         QStringLiteral("60 FPS")});
     m_fpsBox->setCurrentIndex(2); // 默认 24 FPS(省内存/显存/CPU；高于24fps的素材为慢动作)
     styleCombo(m_fpsBox);
-    m_fpsBox->setToolTip(QStringLiteral(
-        "限制壁纸呈现帧率：视频帧率高于上限时按上限放慢呈现节奏(画面为慢动作效果)；"
-        "“跟随视频”保持原生帧率"));
+    m_fpsBox->setToolTip(tooltipstyle::format(QStringLiteral(
+            "限制壁纸呈现帧率：视频帧率高于上限时按上限放慢呈现节奏(画面为慢动作效果)；"
+            "“跟随视频”保持原生帧率")));
     connect(m_fpsBox, &QComboBox::currentIndexChanged, this, [this](int index) {
         static const int fpsValues[] = {0, 15, 24, 30, 60};
         VideoWallpaper::instance().setTargetFps(fpsValues[qBound(0, index, 4)]);
@@ -1073,8 +1093,8 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     m_videoList->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_videoList->setUniformItemSizes(false);
     m_videoList->setSpacing(4);
-    m_videoList->setToolTip(QStringLiteral(
-        "运行中双击条目：立即切换该视频为壁纸；选中条目后点“启动”：从该视频开始播放"));
+    m_videoList->setToolTip(tooltipstyle::format(QStringLiteral(
+            "运行中双击条目：立即切换该视频为壁纸；选中条目后点“启动”：从该视频开始播放")));
     // 运行中双击列表条目 → 立即切换该视频为动态壁纸
     connect(m_videoList, &QListWidget::itemDoubleClicked, this,
             [this](QListWidgetItem *item) {
@@ -1335,6 +1355,8 @@ void MainWindow::rebuildGallery()
         if (QFileInfo::exists(thumb)) {
             item->setIcon(QIcon(thumb));
         } else {
+            // 后台线程只做“解码+缩放+落盘”，不触碰任何 UI 对象；回到 GUI 线程的
+            // 回调必须先过存活闸门(见 m_thumbTasksLive / ~MainWindow)。
             QThreadPool::globalInstance()->start([this, res, thumb] {
                 QImage img(res);
                 if (img.isNull())
@@ -1342,6 +1364,9 @@ void MainWindow::rebuildGallery()
                 // 完整显示(不裁剪)并保留透明通道：PNG 透明区域透出卡片底色
                 img = img.scaled(300, 220, Qt::KeepAspectRatio, Qt::SmoothTransformation);
                 img.save(thumb, "PNG");
+                QMutexLocker guard(&m_thumbTasksMutex);
+                if (!m_thumbTasksLive)
+                    return; // 主窗口已销毁：缩略图已落盘，下次进入图库自然命中缓存
                 QMetaObject::invokeMethod(this, [this, res, thumb] {
                     if (!m_galleryList)
                         return;
@@ -1371,12 +1396,13 @@ void MainWindow::rebuildGallery()
 
 void MainWindow::pickPresetFolder()
 {
-    // 默认从当前浏览目录(软件目录/media/image)开始选择；仅本次会话生效
+    // 默认从当前浏览目录开始选择；选中后持久化到配置
     QString dir = QFileDialog::getExistingDirectory(
         this, QStringLiteral("选择图片文件夹(其中图片将展示到图库)"), m_presetDir);
     if (dir.isEmpty())
         return;
     m_presetDir = dir;
+    AppConfig::instance().setValue(ConfigKeys::Image::GalleryDir, dir);
     m_selectedPreset = 0; // 从该文件夹的第一张图开始展示
     rebuildGallery();
     setLog(QStringLiteral("图库已更新：共 %1 张图片(仅文件夹内)。").arg(m_presets.size()), false);
@@ -2053,8 +2079,12 @@ void MainWindow::loadSettings()
     m_folderExt->setChecked(s.value(ConfigKeys::Image::FolderExt, false).toBool());
     m_comboEffect->setChecked(s.value(ConfigKeys::Image::ComboEffect, true).toBool());
     m_keepImage->setChecked(s.value(ConfigKeys::Effect::KeepImage, false).toBool());
-    // 图片浏览目录：软件所在目录/media/image，每次启动默认打开(不存在则创建)
-    m_presetDir = QCoreApplication::applicationDirPath() + QStringLiteral("/media/image");
+    // 图片浏览目录：优先恢复用户上次选择的目录，否则默认 软件目录/media/image
+    const QString savedDir = s.value(ConfigKeys::Image::GalleryDir).toString();
+    if (!savedDir.isEmpty() && QDir(savedDir).exists())
+        m_presetDir = savedDir;
+    else
+        m_presetDir = QCoreApplication::applicationDirPath() + QStringLiteral("/media/image");
     QDir().mkpath(m_presetDir);
     rebuildGallery();
     m_selectedPreset = s.value(ConfigKeys::Image::Preset, 0).toInt();
@@ -2130,6 +2160,7 @@ void MainWindow::saveImageSettings()
     s.setValue(ConfigKeys::Image::ComboEffect, m_comboEffect->isChecked());
     s.setValue(ConfigKeys::Image::Preset, m_selectedPreset);
     s.setValue(ConfigKeys::Image::CustomPath, m_customImage);
+    s.setValue(ConfigKeys::Image::GalleryDir, m_presetDir);
 }
 
 void MainWindow::saveEffectSettings()
@@ -2499,16 +2530,32 @@ void MainWindow::updateVideoButtons()
 void MainWindow::closeEvent(QCloseEvent *event)
 {
     // 窗口几何持久化(统一配置)：退出时保存尺寸/位置/最大化状态
+    // 使用 m_savedWindowSize 而非 width()/height() 防止布局漂移导致窗口尺寸逐次膨胀
     auto &cfg = AppConfig::instance();
     cfg.setValue(ConfigKeys::Window::Maximized, isMaximized());
     if (!isMaximized()) {
-        cfg.setValue(ConfigKeys::Window::Width, width());
-        cfg.setValue(ConfigKeys::Window::Height, height());
+        cfg.setValue(ConfigKeys::Window::Width, m_savedWindowSize.width());
+        cfg.setValue(ConfigKeys::Window::Height, m_savedWindowSize.height());
         cfg.setValue(ConfigKeys::Window::X, x());
         cfg.setValue(ConfigKeys::Window::Y, y());
     }
     cfg.save();
     QMainWindow::closeEvent(event);
+}
+
+void MainWindow::resizeEvent(QResizeEvent *event)
+{
+    QMainWindow::resizeEvent(event);
+    // 首次 show 后的布局调整不要记录，否则布局漂移会逐次膨胀窗口尺寸
+    if (m_windowShown)
+        m_savedWindowSize = event->size();
+}
+
+void MainWindow::showEvent(QShowEvent *event)
+{
+    QMainWindow::showEvent(event);
+    // 延迟到首次布局完成后再启用 resizeEvent 记录，避免构造期布局漂移
+    QMetaObject::invokeMethod(this, [this] { m_windowShown = true; }, Qt::QueuedConnection);
 }
 
 void MainWindow::uninstallAll()

@@ -25,6 +25,7 @@ inline constexpr auto FolderExt = "image/folderExt";
 inline constexpr auto ComboEffect = "image/comboEffect";
 inline constexpr auto Preset = "image/preset";
 inline constexpr auto CustomPath = "image/customPath";
+inline constexpr auto GalleryDir = "image/galleryDir";
 }
 
 namespace Effect {

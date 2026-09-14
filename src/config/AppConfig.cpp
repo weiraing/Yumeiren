@@ -136,14 +136,16 @@ bool AppConfig::load()
             QStringLiteral("配置读取: path=%1 exists=%2 size=%3 keys=%4 wasPlaying=%5")
                 .arg(fi.absoluteFilePath()).arg(fi.exists())
                 .arg(fi.size()).arg(m_settings->allKeys().size())
-                .arg(m_settings->value(ConfigKeys::Video::WasPlaying, -1).toInt()));
+                .arg(m_settings->value(ConfigKeys::Video::WasPlaying, -1).toString()),
+            QStringLiteral("Config"));
     }
 
     // 1) 配置目录(不存在则创建)；目录不可写时以内存默认值继续运行
     const QString dir = configDirectory();
     if (!QDir().mkpath(dir)) {
         videodiag::log(videodiag::Level::Error,
-            QStringLiteral("配置目录创建失败: %1 (将以默认配置运行)").arg(dir));
+            QStringLiteral("配置目录创建失败: %1 (将以默认配置运行)").arg(dir),
+            QStringLiteral("Config"));
     }
 
     // 2) 旧注册表配置一次性迁入(仅当 INI 尚无用户键)
@@ -159,7 +161,8 @@ bool AppConfig::load()
         QStringLiteral("配置已加载: %1%2")
             .arg(configFilePath(),
                  m_migrated ? QStringLiteral(" (已从注册表迁移旧配置)")
-                            : QString()));
+                            : QString()),
+        QStringLiteral("Config"));
     return true;
 }
 
@@ -179,7 +182,8 @@ void AppConfig::migrateFromRegistry()
     if (copied > 0) {
         m_migrated = true;
         videodiag::log(videodiag::Level::Info,
-            QStringLiteral("已从旧注册表配置迁移 %1 项设置(原键保留未删除)").arg(copied));
+            QStringLiteral("已从旧注册表配置迁移 %1 项设置(原键保留未删除)").arg(copied),
+            QStringLiteral("Config"));
     }
 }
 
@@ -219,9 +223,15 @@ void AppConfig::ensureDefaultsAndFix()
                     || strcmp(key, ConfigKeys::Effect::ClearWinUIBg) == 0);
             ++missing;
         } else {
-            // 字符串形态的布尔规范化保存(保留用户原值而非盲目改 false)
-            m_settings->setValue(key, normalizeBool(m_settings->value(key)));
-            ++fixed;
+            // 字符串形态的布尔规范化(保留用户原值而非盲目改 false)。
+            // 只有存储值确实不是合法布尔写法时才改写并计数：INI 里一切皆字符串，
+            // 无脑 setValue 会把 16 个本来合法的布尔项每启动标脏一次，日志上表现为
+            // "修复非法 16 项"，掩盖真实修复(本次崩溃排查中即被这条噪声误导)。
+            const QVariant raw = m_settings->value(key);
+            if (!isValidBool(raw)) {
+                m_settings->setValue(key, normalizeBool(raw));
+                ++fixed;
+            }
         }
     }
     // 颜色类
@@ -257,7 +267,8 @@ void AppConfig::ensureDefaultsAndFix()
 
     if (missing + fixed > 0)
         videodiag::log(videodiag::Level::Info,
-            QStringLiteral("配置校验: 补齐缺失 %1 项, 修复非法 %2 项").arg(missing).arg(fixed));
+            QStringLiteral("配置校验: 补齐缺失 %1 项, 修复非法 %2 项").arg(missing).arg(fixed),
+            QStringLiteral("Config"));
 }
 
 bool AppConfig::save()
@@ -266,7 +277,8 @@ bool AppConfig::save()
     if (m_settings->status() != QSettings::NoError) {
         videodiag::log(videodiag::Level::Error,
             QStringLiteral("配置保存失败: %1 status=%2")
-                .arg(configFilePath()).arg(int(m_settings->status())));
+                .arg(configFilePath()).arg(int(m_settings->status())),
+            QStringLiteral("Config"));
         return false;
     }
     return true;
