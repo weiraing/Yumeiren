@@ -45,6 +45,7 @@ const NumericRule kNumericRules[] = {
     {ConfigKeys::Video::Volume, 0, 0, 100},
     {ConfigKeys::Video::TargetFps, 24, 0, 240},
     {ConfigKeys::Video::ScreenMode, 0, 0, 2},
+    {ConfigKeys::Video::PlayMode, 0, 0, 2},
 };
 
 const char *kBoolRules[] = {
@@ -56,8 +57,6 @@ const char *kBoolRules[] = {
     ConfigKeys::Effect::ShowLine,
     ConfigKeys::Effect::KeepImage,
     ConfigKeys::Video::WasPlaying,
-    ConfigKeys::Video::AutoLoop,
-    ConfigKeys::Video::Random,
     ConfigKeys::Video::PauseFullscreen,
     ConfigKeys::Video::PauseBattery,
     ConfigKeys::Video::Reclaim,
@@ -192,6 +191,19 @@ void AppConfig::ensureDefaultsAndFix()
     int missing = 0;
     int fixed = 0;
 
+    // 播放模式迁移(先于默认值补齐)：旧的"列表循环播放/随机播放"两个开关合并成
+    // 三选一的 video/playMode。老配置勾了随机就落在随机，勾了列表循环就落在列表
+    // 循环，其余(含全新配置)落到单循环。旧键留在文件里不删，回滚旧版仍可读。
+    if (!m_settings->contains(ConfigKeys::Video::PlayMode)) {
+        int mode = 0;
+        if (normalizeBool(m_settings->value(ConfigKeys::Video::RandomLegacy, false)))
+            mode = 2;
+        else if (normalizeBool(m_settings->value(ConfigKeys::Video::AutoLoopLegacy, true)))
+            mode = 1;
+        m_settings->setValue(ConfigKeys::Video::PlayMode, mode);
+        ++missing;
+    }
+
     // 数值类: 缺失补默认 / 越界收敛
     for (const NumericRule &rule : kNumericRules) {
         if (!m_settings->contains(rule.key)) {
@@ -213,8 +225,7 @@ void AppConfig::ensureDefaultsAndFix()
     for (const char *key : kBoolRules) {
         if (!m_settings->contains(key)) {
             m_settings->setValue(key,
-                strcmp(key, ConfigKeys::Video::AutoLoop) == 0
-                    || strcmp(key, ConfigKeys::Video::PauseFullscreen) == 0
+                strcmp(key, ConfigKeys::Video::PauseFullscreen) == 0
                     || strcmp(key, ConfigKeys::Video::Reclaim) == 0
                     || strcmp(key, ConfigKeys::Video::AffinityLimit) == 0
                     || strcmp(key, ConfigKeys::Image::ComboEffect) == 0

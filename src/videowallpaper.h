@@ -21,6 +21,11 @@ class VideoWallpaper : public QObject
     Q_OBJECT
 public:
     enum ScreenMode { PrimaryScreen = 0, StretchAll = 1, MirrorAll = 2 };
+    // 播放模式(三选一，UI 上是"模式"一行的互斥单选框)：
+    //   SingleLoop 单循环 —— 只播当前这一条，播完从头再来(默认)
+    //   ListLoop   列表循环 —— 按列表顺序逐个播，播完最后一条回到第一条
+    //   Random     随机     —— 每次从列表随机挑一条，播完再随机挑下一条
+    enum PlayMode { SingleLoop = 0, ListLoop = 1, Random = 2 };
 
     static VideoWallpaper &instance();
 
@@ -35,8 +40,8 @@ public:
     bool isManualPaused() const { return m_manualPaused; }
     int currentIndex() const { return m_index; }
 
-    void setAutoLoop(bool on);
-    void setRandom(bool on);
+    void setPlayMode(int mode);
+    int playMode() const { return m_mode; }
     void setPauseOnFullscreen(bool on);
     void setPauseOnBattery(bool on);
     void setReclaimMemory(bool on);
@@ -107,6 +112,14 @@ private:
     void longSuspendRelease();
     void playIndex(int index, qint64 resumePos = -1);
     void nextTrack();
+    // 当前曲目是否应当"从头无缝循环"：单循环模式，或列表里只剩一条素材。
+    // 命中时交给后端 setLoops(Infinite) 回绕，不产生 EndOfMedia，也不切源。
+    bool isSeamlessLoop() const;
+    void restartSingleLoop();       // 无缝循环兜底：原地回到起点，不停播、不切源、不改状态文本
+    // 播放器是否已经停在素材末尾(后端上报 EndOfMedia，或进度贴着时长不动)
+    bool atMediaEnd(const QMediaPlayer *player) const;
+    // 整表无可播曲目时的收口：只定格，绝不停止播放器
+    void finishPlaylist();
     void advanceOnError();
     // 错误统一收口(阶段3)：重试耗尽或素材无视频轨时调用——跳下一曲，
     // 连续失败铺满列表则整体停播。仅首个输出允许调用(防 MirrorAll 重复推进)。
@@ -119,8 +132,7 @@ private:
 
     QStringList m_playlist;
     int m_index = -1;
-    bool m_autoLoop = true;
-    bool m_random = false;
+    int m_mode = SingleLoop;
     bool m_pauseOnFullscreen = false;
     bool m_pauseOnBattery = false;
     bool m_reclaimMemory = true;
@@ -137,6 +149,14 @@ private:
     bool m_monitorOn = true;       // 显示器电源状态(MainWindow 转发)
     int m_suspendReasons = 0;      // 当前生效的挂起原因
     int m_lastEmittedReasons = -1; // 去重：挂起原因不变时不重复发状态文本
+    // 列表自然播完(整表无可播曲目)。1s 心跳只负责把"被挂起"的播放器捞回来，
+    // 绝不能把"已经正常播完"的列表重新点火——那正是边界处
+    // "播放结束 → 第 N 个 播放中"反复横跳、壁纸闪没的根因。
+    bool m_playbackFinished = false;
+    // 单视频循环看门狗：连续若干拍进度纹丝不动 = 后端既没回绕也没发 EndOfMedia，
+    // 就地回绕重播。仅在心跳里读写，不参与其他逻辑。
+    qint64 m_watchPosMs = -1;
+    int m_watchStalls = 0;
     // 帧率上限(0=跟随视频原生帧率)。默认 24：高于 24fps 的素材按比例放慢播放，
     // 实测可显著降低内存/显存/CPU(4K60 约 -40%，见 VIDEO_MEDIA_COMPATIBILITY_POLICY.md)。
     // 注意语义是"慢动作"而非丢帧渲染。

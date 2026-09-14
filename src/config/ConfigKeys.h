@@ -45,8 +45,12 @@ namespace Video {
 inline constexpr auto Playlist = "video/playlist";
 inline constexpr auto WasPlaying = "video/wasPlaying";
 inline constexpr auto Volume = "video/volume";
-inline constexpr auto AutoLoop = "video/autoLoop";
-inline constexpr auto Random = "video/random";
+// 播放模式(三选一)：0=单循环 1=列表循环 2=随机。见 VideoWallpaper::PlayMode。
+inline constexpr auto PlayMode = "video/playMode";
+// 旧版两个开关(列表循环播放 / 随机播放)已被 PlayMode 取代，仅保留键名供
+// AppConfig 一次性迁移读取，产品代码不再写入。
+inline constexpr auto AutoLoopLegacy = "video/autoLoop";
+inline constexpr auto RandomLegacy = "video/random";
 inline constexpr auto PauseFullscreen = "video/pauseFullscreen";
 inline constexpr auto PauseBattery = "video/pauseBattery";
 inline constexpr auto TargetFps = "video/targetFps";

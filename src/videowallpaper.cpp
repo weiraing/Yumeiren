@@ -16,6 +16,7 @@
 #include <QMediaPlayer>
 #include <QRandomGenerator>
 #include <QScreen>
+#include <QVector>
 #include <QThread>
 #include <QTimer>
 #include <QUrl>
@@ -263,6 +264,12 @@ void VideoWallpaper::setPlaylist(const QStringList &files)
     m_trackFails.clear();
     m_deadTracks.clear();
     m_fileRetries = 0;
+    // 列表条数决定无缝循环是否生效，换列表后必须对现役播放器重新断言；
+    // "已播完"标志也随新列表失效。
+    m_playbackFinished = false;
+    for (const VideoOutput &out : std::as_const(m_outputs))
+        if (isLiveOutput(out))
+            applyLoopPolicy(out.player);
 }
 
 void VideoWallpaper::clearPlaylist()
@@ -322,11 +329,21 @@ void VideoWallpaper::layoutOutputs()
             if (!isLiveOutput(out))
                 return; // 输出已被卸载/正在退出清理：不再触碰播放器与状态机
             videodiag::log(videodiag::Level::Debug,
-                QStringLiteral("session=%1 mediaStatus=%2 file=%3")
+                QStringLiteral("session=%1 mediaStatus=%2 playState=%3 pos=%4/%5 "
+                               "file=%6 player=0x%7 widget=0x%8")
                     .arg(m_playbackSessionId).arg(int(st))
-                    .arg(QFileInfo(out.player->source().toLocalFile()).fileName()));
-            if (st == QMediaPlayer::EndOfMedia)
-                nextTrack();
+                    .arg(int(out.player->playbackState()))
+                    .arg(out.player->position()).arg(out.player->duration())
+                    .arg(QFileInfo(out.player->source().toLocalFile()).fileName())
+                    .arg(quintptr(out.player), 0, 16)
+                    .arg(quintptr(out.widget), 0, 16));
+            // 只有首个输出推进列表：MirrorAll 下每台显示器各有一个播放器，
+            // 它们会对同一曲目各自上报一次 EndOfMedia，全部放行就会一次边界
+            // 跳两格(不循环模式下表现为"第二个视频根本没播")。
+            if (st == QMediaPlayer::EndOfMedia) {
+                if (isPrimaryOutput(out))
+                    nextTrack();
+            }
             else if (st == QMediaPlayer::LoadedMedia && m_started
                      && !m_outputs.isEmpty()
                      && isPrimaryOutput(out)) {
@@ -633,6 +650,11 @@ void VideoWallpaper::playIndex(int index, qint64 resumePos)
         m_fileRetries = 0; // 换曲重置单文件重试额度；同 index 的重试调用保留计数
     m_index = qBound(0, index, m_playlist.size() - 1);
     m_resumePosMs = resumePos;   // LoadedMedia 时消费；普通换曲传 -1 即无跳转
+    // 任何一次显式起播都意味着"列表又活了"：播完标志必须失效，否则心跳的
+    // 挂起恢复与管线重建会被上一次会话的收口状态永久锁住(壁纸再也捞不回来)。
+    m_playbackFinished = false;
+    m_watchPosMs = -1;
+    m_watchStalls = 0;
     videodiag::log(videodiag::Level::Info,
         QStringLiteral("session=%1 play index=%2/%3 file=%4 resumePos=%5")
             .arg(m_playbackSessionId).arg(m_index + 1).arg(m_playlist.size())
@@ -669,8 +691,11 @@ void VideoWallpaper::playIndex(int index, qint64 resumePos)
         else {
             out.player->setSource(url);
             applyAudioPolicy(out, first);
-            applyLoopPolicy(out.player);
         }
+        // 循环策略与媒体源无关，必须每次都断言：列表从 1 个变成多个(或反过来)时
+        // 走的是 sameSource 快路径，漏掉这里会把 setLoops(Infinite) 遗留在播放器上，
+        // 单曲循环就此吃掉整个列表。
+        applyLoopPolicy(out.player);
         applyPlaybackRate(out.player);
         out.audio->setVolume(first ? qBound(0, m_volume, 100) / 100.0 : 0);
         out.audio->setMuted(!first);
@@ -678,6 +703,47 @@ void VideoWallpaper::playIndex(int index, qint64 resumePos)
         first = false;
     }
     emitTrackState();
+}
+
+// 无缝循环的判定：单循环模式只播当前这一条；列表里只剩一条素材时三种模式没有区别，
+// 同样从头再来一遍。两种情况都交给后端 setLoops(Infinite)，应用层不介入换曲。
+bool VideoWallpaper::isSeamlessLoop() const
+{
+    return m_mode == SingleLoop || m_playlist.size() == 1;
+}
+
+// 无缝循环的兜底入口。首选路径是 applyLoopPolicy() 的 setLoops(Infinite)：
+// 后端自行回绕、一个信号都不发，应用层完全不介入。这里只兜住后端不遵守原生循环
+// 的情况(个别后端 / 时长未知的媒体)：在现役播放器上原地回到起点——
+// 不 stop、不 setSource、不动视频输出、不隐藏或重建窗口、不改状态文本(任务书 六.2)。
+void VideoWallpaper::restartSingleLoop()
+{
+    if (m_shuttingDown || !m_started || m_outputs.isEmpty())
+        return;
+    videodiag::log(videodiag::Level::Debug,
+        QStringLiteral("session=%1 单视频回绕 player=0x%2")
+            .arg(m_playbackSessionId)
+            .arg(quintptr(m_outputs.first().player), 0, 16));
+    m_watchPosMs = -1;
+    m_watchStalls = 0;
+    for (const VideoOutput &out : std::as_const(m_outputs)) {
+        if (!isLiveOutput(out))
+            continue;
+        out.player->setPosition(0); // 解码器复用，原地重播
+        out.player->play();
+    }
+}
+
+// 播放器是否停在素材末尾。两种形态：后端上报了 EndOfMedia；或时长已知且进度
+// 贴着末尾(此时 play() 只会在最后一帧上原地踏步，必须先回绕)。
+bool VideoWallpaper::atMediaEnd(const QMediaPlayer *player) const
+{
+    if (!player)
+        return false;
+    if (player->mediaStatus() == QMediaPlayer::EndOfMedia)
+        return true;
+    const qint64 dur = player->duration();
+    return dur > 0 && player->position() >= dur - 250;
 }
 
 void VideoWallpaper::nextTrack()
@@ -694,27 +760,61 @@ void VideoWallpaper::nextTrack()
         stopAll();
         return;
     }
-    if (m_random && size > 1) {
-        int next = m_index;
-        do { next = QRandomGenerator::global()->bounded(size); }
-        while (next == m_index || !alive(next));
-        playIndex(next);
+    // 单视频：绝不进入列表推进，也不产生任何用户可见的"播放结束"。
+    // 放在失败名单判断之后，坏文件不会被无限重播(任务书 十二)。
+    // 单循环模式同理：无论列表多长，都只把当前这一条从头再来一遍。
+    if (isSeamlessLoop()) {
+        restartSingleLoop();
         return;
     }
-    int next = m_index;
-    for (int step = 0; step < size; ++step) {
-        next += 1;
-        if (next >= size) {
-            if (!m_autoLoop) {
-                emit playbackStateChanged(QStringLiteral("播放结束"));
-                return;
-            }
-            next = 0;
+    // 随机模式：从"不是当前曲且可播"的候选里等概率挑一个。旧实现用 do-while
+    // 反复摇骰子，一旦当前曲是唯一的幸存者就会原地死循环，这里改成有限候选表。
+    if (m_mode == Random && size > 1) {
+        QVector<int> candidates;
+        candidates.reserve(size - 1);
+        for (int i = 0; i < size; ++i)
+            if (i != m_index && alive(i))
+                candidates.append(i);
+        if (!candidates.isEmpty()) {
+            playIndex(candidates.at(QRandomGenerator::global()->bounded(candidates.size())));
+            return;
         }
-        if (alive(next))
+        restartSingleLoop(); // 只剩当前一条可播：原地重播，不切源
+        return;
+    }
+    // 列表循环：向后找下一条可播曲目，跨过列表末尾绕回表头，一圈接一圈。
+    // 步数上限取 size 覆盖整个列表(最后一步会回到 m_index 自身)。
+    int next = -1;
+    for (int step = 1; step <= size; ++step) {
+        const int i = (m_index + step) % size;
+        if (alive(i)) {
+            next = i;
             break;
+        }
+    }
+    if (next < 0) {
+        finishPlaylist(); // 防御收口：整表没有可播曲目(正常模式轮换到不了这里)
+        return;
     }
     playIndex(next);
+}
+
+// 整表无可播曲目时的收口。刻意不对播放器 stop()：停止会让后端清空
+// 呈现面，而壁纸窗口仍挂在桌面上，用户看到的就是"视频播完，桌面直接变黑"。
+// EndOfMedia 状态下解码器已自行停机、不再耗资源，最后一帧留在表面上，桌面定格
+// 在结尾画面；用户点"继续"或换一个播放模式即可重新起播(见 pauseResume)。
+void VideoWallpaper::finishPlaylist()
+{
+    if (m_shuttingDown)
+        return;
+    emit playbackStateChanged(QStringLiteral("播放结束"));
+    m_playbackFinished = true; // 心跳不再自动重新点火
+    m_watchPosMs = -1;
+    m_watchStalls = 0;
+    videodiag::log(videodiag::Level::Info,
+        QStringLiteral("session=%1 列表播完收口 index=%2/%3 mode=%4")
+            .arg(m_playbackSessionId).arg(m_index + 1).arg(m_playlist.size())
+            .arg(m_mode));
 }
 
 // 解码失败自动跳转的收口：挂起/手动暂停期间只换源不强行播放
@@ -794,6 +894,7 @@ bool VideoWallpaper::startPlaying(QString *error, int preferIndex)
     }
     m_manualPaused = false; // 用户点击“启动”即视为要求播放
     m_started = true;
+    m_playbackFinished = false; // 新会话：允许心跳继续接管恢复
     ensureHeartbeatTimers();
     m_trackFails.clear(); // 全新起播会话：失败名单清空，所有曲目重新获得机会
     m_deadTracks.clear();
@@ -817,11 +918,20 @@ void VideoWallpaper::pauseResume()
         // 长挂起已释放管线：重建并按当前状态继续(维持暂停由挂起原因决定)
         if (m_started && !m_playlist.isEmpty()) {
             m_manualPaused = false;
+            m_playbackFinished = false;
             evaluateSuspend();
         }
         return;
     }
     m_manualPaused = isPlaying(); // 正在播 → 用户要暂停；已暂停(含自动挂起) → 用户要继续
+    // 用户亲手点的暂停/继续优先于"播完待命"：点了就要重新起播，
+    // 否则播完的列表按了继续也没反应。
+    // 播完之后点"继续"= 重走一圈：停在列表末尾的播放器直接 play() 只会立刻
+    // 再结束一次，所以显式回到表头重新起播(sameSource 快路径，原地回绕不重建)。
+    const bool restartLap = m_playbackFinished && !m_manualPaused;
+    m_playbackFinished = false;
+    if (restartLap && !m_playlist.isEmpty())
+        playIndex(0);
     evaluateSuspend();
     // 状态文本必须反映真实结果：手动暂停发“已暂停”(按钮文字靠这条信号翻转)；
     // 请求被挂起原因拦下时 evaluateSuspend 已发出原因文本，不能再用
@@ -843,6 +953,7 @@ void VideoWallpaper::stopAll()
     m_index = -1;
     m_started = false;
     m_manualPaused = false;
+    m_playbackFinished = false;
     m_suspendReasons = 0;
     m_trackFails.clear();
     m_deadTracks.clear();
@@ -963,17 +1074,17 @@ void VideoWallpaper::applyAudioPolicy(const VideoOutput &out, bool carriesAudio)
     out.player->setActiveAudioTrack(carriesAudio && m_volume > 0 ? 0 : -1);
 }
 
-// 单视频循环走后端原生 setLoops(Infinite)：EndOfMedia→setPosition(0) 的手工
+// 单循环(以及列表只剩一条素材)走后端原生 setLoops(Infinite)：EndOfMedia→setPosition(0) 的手工
 // 循环在换头瞬间解码器 seek 会清空呈现面，壁纸闪黑帧；后端循环无黑帧间隙，
 // 但实测回绕瞬间仍有约 1 帧的运动跳变(帧差约为正常运动的 2 倍，60fps 屏捕
 // 帧级取证)，且后端不发任何事件、应用层无法拦截。彻底消除需内容级配合：
 // 把首帧克隆 2-3 帧垫到片尾(tools/make_loop_clip.ps1)，跳变在数学上不可见。
-// 多曲目列表仍走 EndOfMedia→nextTrack 手动推进(需要切源)。
+// 列表循环/随机模式仍走 EndOfMedia→nextTrack 手动推进(需要切源)。
 void VideoWallpaper::applyLoopPolicy(QMediaPlayer *player)
 {
     if (!player)
         return;
-    const bool seamlessLoop = m_autoLoop && !m_random && m_playlist.size() == 1;
+    const bool seamlessLoop = isSeamlessLoop();
     player->setLoops(seamlessLoop ? QMediaPlayer::Infinite : QMediaPlayer::Once);
     videodiag::log(videodiag::Level::Debug,
         QStringLiteral("setLoops(%1) player=%2 widget=%3 source=%4")
@@ -983,20 +1094,21 @@ void VideoWallpaper::applyLoopPolicy(QMediaPlayer *player)
             .arg(player->source().toString()));
 }
 
-void VideoWallpaper::setAutoLoop(bool on)
+void VideoWallpaper::setPlayMode(int mode)
 {
-    m_autoLoop = on;
+    const int bounded = qBound(int(SingleLoop), mode, int(Random));
+    if (bounded == m_mode)
+        return;
+    m_mode = bounded;
+    // 无缝循环与列表推进的分界由循环策略决定，改模式必须对现役播放器重新断言；
+    // 列表从 1 条变成多条(或反过来)时也依赖这里把 setLoops 纠正回来。
     for (const VideoOutput &out : std::as_const(m_outputs))
         if (isLiveOutput(out))
             applyLoopPolicy(out.player);
-}
-
-void VideoWallpaper::setRandom(bool on)
-{
-    m_random = on;
-    for (const VideoOutput &out : std::as_const(m_outputs))
-        if (isLiveOutput(out))
-            applyLoopPolicy(out.player);
+    // 停在"播放结束"时用户换了模式：三种模式都会继续转，立刻从当前曲目续播，
+    // 不能只改策略让桌面继续黑着/定格着(心跳的恢复分支被 m_playbackFinished 拦着)。
+    if (m_playbackFinished && m_started && !m_playlist.isEmpty())
+        playIndex(m_index >= 0 ? m_index : 0);
 }
 
 // FrameScheduler 状态机：汇总全部挂起原因(全屏/锁屏/显示器关闭/电池)，
@@ -1038,7 +1150,8 @@ void VideoWallpaper::evaluateSuspend()
     const bool wasPlaying = isPlaying();
 
     // 长挂起期间管线已被释放，现在应当恢复：重建管线并跳回暂停时的进度
-    if (shouldPlay && m_outputs.isEmpty() && !m_playlist.isEmpty()) {
+    if (shouldPlay && !m_playbackFinished && m_outputs.isEmpty()
+        && !m_playlist.isEmpty()) {
         // 节流：挂载点缺失(如 explorer 未响应)时每 5s 重试一次，不空转
         if (!m_suspendClock->isValid() || m_suspendClock->elapsed() >= 5000) {
             m_suspendClock->restart();
@@ -1048,15 +1161,49 @@ void VideoWallpaper::evaluateSuspend()
         return;
     }
 
-    if (shouldPlay && !wasPlaying) {
+    // 只有"被挂起/被手动暂停后才解除"才需要心跳捞回来。列表正常播完(不循环)时
+    // 播放器停在末尾，这里若照抄恢复逻辑就会每秒看到 !isPlaying，几秒后把整个
+    // 列表从头重新点火——用户侧表现为壁纸闪没 + "播放结束/第 N 个 播放中"来回跳。
+    if (shouldPlay && !wasPlaying && !m_playbackFinished) {
         videodiag::log(videodiag::Level::Info,
             QStringLiteral("恢复播放: reasons=0 manualPaused=%1").arg(m_manualPaused));
+        // 无缝循环兜底：后端没遵守 setLoops(Infinite) 时(时长未知的流 / 个别
+        // 后端)，播放器会停在末尾，心跳的 play() 只会让它原地卡死。先回绕再播。
+        const bool rewindTail = isSeamlessLoop();
         for (const VideoOutput &out : std::as_const(m_outputs))
-            if (isLiveOutput(out))
+            if (isLiveOutput(out)) {
+                if (rewindTail && atMediaEnd(out.player))
+                    out.player->setPosition(0);
                 out.player->play();
+            }
         emitTrackState();
         m_lastEmittedReasons = 0;
         return;
+    }
+    // 无缝循环看门狗：进度连续 3 拍(约 3s)完全不前进，说明后端既没回绕也没
+    // 上报 EndOfMedia，壁纸会永远定格在最后一帧。原地回到起点重播，不停播、
+    // 不切源、不重建窗口。进度倒退视为正常回绕，只重置计数。
+    if (shouldPlay && wasPlaying && isSeamlessLoop() && !m_outputs.isEmpty()
+        && isLiveOutput(m_outputs.first())
+        // 素材还在探测/缓冲时进度本就不动，那不是停滞，别误判成卡死
+        && (m_outputs.first().player->mediaStatus() == QMediaPlayer::BufferedMedia
+            || m_outputs.first().player->mediaStatus() == QMediaPlayer::EndOfMedia)) {
+        const qint64 pos = m_outputs.first().player->position();
+        if (pos > m_watchPosMs) {
+            m_watchPosMs = pos;
+            m_watchStalls = 0;
+        } else if (pos < m_watchPosMs) {
+            m_watchPosMs = pos;
+            m_watchStalls = 0;
+        } else if (++m_watchStalls >= 3) {
+            videodiag::log(videodiag::Level::Warning,
+                QStringLiteral("session=%1 单视频循环停滞在 %2ms，看门狗回绕")
+                    .arg(m_playbackSessionId).arg(pos));
+            restartSingleLoop();
+        }
+    } else {
+        m_watchPosMs = -1;
+        m_watchStalls = 0;
     }
     if (!shouldPlay && wasPlaying) {
         for (const VideoOutput &out : std::as_const(m_outputs))
@@ -1074,7 +1221,9 @@ void VideoWallpaper::evaluateSuspend()
     }
     // 持续挂起超过阈值：壁纸反正看不见，整条解码管线+呈现表面全部释放，
     // 显存/内存回落到近空闲水平；恢复时重建并续播(代价 ~2s)
-    if (!shouldPlay && !wasPlaying && !m_outputs.isEmpty()
+    // 例外：列表已播完(不循环)时不释放。此时解码器本就停着、只剩一张定格的
+    // 末帧，而播完状态会拦住心跳的管线重建分支，卸载之后壁纸就再也回不来了。
+    if (!shouldPlay && !wasPlaying && !m_playbackFinished && !m_outputs.isEmpty()
         && m_suspendClock->isValid()) {
         qint64 threshold = kLongSuspendReleaseMs;
         if (const int overrideMs = qEnvironmentVariableIntValue(
@@ -1101,6 +1250,22 @@ void VideoWallpaper::evaluateSuspend()
         }
     }
     m_lastEmittedReasons = reasons;
+
+    // 循环边界取证(任务书 十三.2)：复用同一条 1s 心跳顺带记录进度与对象地址，
+    // 不新增定时器。Debug 级在非诊断模式下直接返回，产品环境零噪声。
+    if (!m_outputs.isEmpty() && isLiveOutput(m_outputs.first())) {
+        const VideoOutput &out = m_outputs.first();
+        videodiag::log(videodiag::Level::Debug,
+            QStringLiteral("snapshot session=%1 media=%2 state=%3 pos=%4/%5 "
+                           "player=0x%6 widget=0x%7 hwnd=0x%8 finished=%9")
+                .arg(m_playbackSessionId).arg(int(out.player->mediaStatus()))
+                .arg(int(out.player->playbackState()))
+                .arg(out.player->position()).arg(out.player->duration())
+                .arg(quintptr(out.player), 0, 16)
+                .arg(quintptr(out.widget), 0, 16)
+                .arg(quintptr(out.widget->winId()), 0, 16)
+                .arg(m_playbackFinished ? 1 : 0));
+    }
 }
 
 void VideoWallpaper::setReclaimMemory(bool on)

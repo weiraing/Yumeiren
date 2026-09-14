@@ -18,6 +18,7 @@ class QStackedWidget;
 class QCheckBox;
 class QComboBox;
 class QPushButton;
+class QRadioButton;
 class QGridLayout;
 class QScrollArea;
 
@@ -45,7 +46,6 @@ private slots:
     void updatePlayingHighlight(); // 播放列表中当前曲目条目高亮
     void pickPresetFolder();
     void rebuildGallery();
-    void pickImage();
     void pickWallpaper();
     void selectPreset(int index);
     void applyImage();
@@ -93,6 +93,8 @@ private:
     void setPosMode(int mode);
     void resetImageParams();
     void updateGalleryGrid();
+    void uninstallImage();   // 仅卸载图片背景
+    void uninstallEffect();  // 仅卸载效果样式
 
     // data
     struct PresetImage { QString name; QString res; bool isFigure; };
@@ -162,8 +164,10 @@ private:
     // video wallpaper page widgets
     QListWidget *m_videoList = nullptr;
     QSlider *m_videoVolume = nullptr;
-    QCheckBox *m_autoLoopBox = nullptr;
-    QCheckBox *m_randomBox = nullptr;
+    // 播放模式(互斥单选，三选一)：单循环 / 列表循环 / 随机，默认单循环
+    QRadioButton *m_modeSingle = nullptr;
+    QRadioButton *m_modeList = nullptr;
+    QRadioButton *m_modeRandom = nullptr;
     QCheckBox *m_fullscreenPauseBox = nullptr;
     QCheckBox *m_batteryBox = nullptr;
     QCheckBox *m_reclaimBox = nullptr;

@@ -227,6 +227,8 @@ QSlider:focus { background: transparent; }
 QCheckBox { border: none; }
 QCheckBox:focus { border: none; }
 QCheckBox::indicator:focus { border: 1px solid #2f6fd6; }
+QRadioButton { border: none; }
+QRadioButton:focus { border: none; }
 QSlider { border: none; }
 QSlider:focus { border: none; }
 
@@ -378,6 +380,34 @@ QCheckBox::indicator:hover { background: rgba(120, 122, 130, 0.26); }
 QCheckBox::indicator:checked {
     background: #2f6fd6;
     border: none;
+}
+
+/* 播放模式单选框：外圈常驻描边，选中时内圈填色(纯 QSS，无位图资源) */
+QRadioButton {
+    color: #5f6470;
+    font-size: 12px;
+    spacing: 5px;
+}
+
+QRadioButton:hover { color: #17181c; }
+
+QRadioButton::indicator {
+    width: 14px;
+    height: 14px;
+    border: 1px solid #b6b9c2;
+    border-radius: 8px;
+    background: transparent;
+}
+
+QRadioButton::indicator:hover { border-color: #8b8f99; }
+
+QRadioButton::indicator:focus { border-color: #2f6fd6; }
+
+QRadioButton::indicator:checked {
+    border-color: #2f6fd6;
+    background: qradialgradient(cx: 0.5, cy: 0.5, radius: 0.5, fx: 0.5, fy: 0.5,
+        stop: 0.0 #2f6fd6, stop: 0.42 #2f6fd6,
+        stop: 0.52 rgba(47, 111, 214, 0), stop: 1.0 rgba(47, 111, 214, 0));
 }
 
 /* ---------- buttons ---------- */

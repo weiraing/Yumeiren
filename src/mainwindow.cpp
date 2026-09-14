@@ -18,6 +18,7 @@
 #include <QFile>
 #include <QFileDialog>
 #include <QDirIterator>
+#include <QMessageBox>
 #include <QEvent>
 #include <QFileInfo>
 #include <QFrame>
@@ -36,6 +37,8 @@
 #include <QWindow>
 #include <QPushButton>
 #include <QPainterPath>
+#include <QButtonGroup>
+#include <QRadioButton>
 #include <QRegion>
 #include <QAbstractScrollArea>
 #include <QScrollBar>
@@ -557,20 +560,25 @@ QWidget *MainWindow::buildImagePage()
     leftLay->addWidget(gallery, 1);
 
     // custom image buttons
+    auto *folderRow = new QHBoxLayout();
     auto *folderBtn = new QPushButton(QStringLiteral("选择文件夹"), leftCard);
+    folderBtn->setObjectName(QStringLiteral("PrimaryButton"));
     folderBtn->setToolTip(tooltipstyle::format(QStringLiteral("读取文件夹内所有符合格式的图片并展示到图库")));
     connect(folderBtn, &QPushButton::clicked, this, &MainWindow::pickPresetFolder);
-    leftLay->addWidget(folderBtn);
-    auto *customRow = new QHBoxLayout();
-    auto *pickBtn = new QPushButton(QStringLiteral("选择图片…"), leftCard);
+    auto *refreshBtn = new QPushButton(QStringLiteral("刷新"), leftCard);
+    refreshBtn->setObjectName(QStringLiteral("VideoScanButton"));
+    refreshBtn->setToolTip(tooltipstyle::format(QStringLiteral("重新加载当前文件夹的图片")));
+    connect(refreshBtn, &QPushButton::clicked, this, [this] {
+        rebuildGallery();
+        setLog(QStringLiteral("图库已刷新：共 %1 张图片。").arg(m_presets.size()), false);
+    });
+    folderRow->addWidget(folderBtn, 2);
+    folderRow->addWidget(refreshBtn, 1);
+    leftLay->addLayout(folderRow);
     auto *wallBtn = new QPushButton(QStringLiteral("用桌面壁纸"), leftCard);
-    pickBtn->setToolTip(tooltipstyle::format(QStringLiteral("选择任意 PNG/JPG/BMP/WebP 图片")));
     wallBtn->setToolTip(tooltipstyle::format(QStringLiteral("截取当前桌面壁纸作为背景")));
-    connect(pickBtn, &QPushButton::clicked, this, &MainWindow::pickImage);
     connect(wallBtn, &QPushButton::clicked, this, &MainWindow::pickWallpaper);
-    customRow->addWidget(pickBtn, 1);
-    customRow->addWidget(wallBtn, 1);
-    leftLay->addLayout(customRow);
+    leftLay->addWidget(wallBtn);
 
     m_imageSourceLabel = new QLabel(leftCard);
     m_imageSourceLabel->setObjectName(QStringLiteral("HintLabel"));
@@ -710,10 +718,10 @@ QWidget *MainWindow::buildImagePage()
     btnRow->setSpacing(10);
     m_applyImageBtn = new QPushButton(QStringLiteral("应用图片背景"), rightCard);
     m_applyImageBtn->setObjectName(QStringLiteral("PrimaryButton"));
-    auto *resetBtn = new QPushButton(QStringLiteral("恢复默认(卸载)"), rightCard);
+    auto *resetBtn = new QPushButton(QStringLiteral("恢复"), rightCard);
     resetBtn->setObjectName(QStringLiteral("DangerButton"));
     connect(m_applyImageBtn, &QPushButton::clicked, this, &MainWindow::applyImage);
-    connect(resetBtn, &QPushButton::clicked, this, &MainWindow::uninstallAll);
+    connect(resetBtn, &QPushButton::clicked, this, &MainWindow::uninstallImage);
     btnRow->addWidget(m_applyImageBtn, 1);
     btnRow->addWidget(resetBtn, 1);
     rightLay->addLayout(btnRow);
@@ -884,10 +892,10 @@ QWidget *MainWindow::buildEffectPage()
     btnLay->setSpacing(10);
     m_applyEffectBtn = new QPushButton(QStringLiteral("应用效果样式"), btnCard);
     m_applyEffectBtn->setObjectName(QStringLiteral("PrimaryButton"));
-    auto *resetBtn = new QPushButton(QStringLiteral("恢复默认(卸载)"), btnCard);
+    auto *resetBtn = new QPushButton(QStringLiteral("恢复"), btnCard);
     resetBtn->setObjectName(QStringLiteral("DangerButton"));
     connect(m_applyEffectBtn, &QPushButton::clicked, this, &MainWindow::applyEffect);
-    connect(resetBtn, &QPushButton::clicked, this, &MainWindow::uninstallAll);
+    connect(resetBtn, &QPushButton::clicked, this, &MainWindow::uninstallEffect);
     btnLay->addWidget(m_applyEffectBtn, 1);
     btnLay->addWidget(resetBtn, 1);
     lay->addWidget(btnCard);
@@ -930,7 +938,7 @@ QWidget *MainWindow::buildHelpPage()
         "<p style='color:#d5d8de'><b>常见问题</b>：</p>"
         "<p style='color:#b9bcc4'>• 若 Windows 大版本更新后背景消失，重新点击“应用”即可。</p>"
         "<p style='color:#b9bcc4'>• 若资源管理器窗口无法打开，按住 <b>ESC</b> 键点击资源管理器可跳过背景加载，"
-        "然后在本工具点击“恢复默认(卸载)”。</p>"
+        "然后在本工具点击“恢复”。</p>"
         "<p style='color:#b9bcc4'>• “Home / 图库”页不显示背景，请进入任意文件夹查看。</p>"
         "<p style='color:#82858d'>致谢：SuryaMajumdar/ExplorerBgTool (MIT) · Maplespe/explorerTool · "
         "Maplespe/ExplorerBlurMica (LGPL-3.0)。本工具仅调用其官方 DLL 并生成配置。</p>");
@@ -994,6 +1002,36 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     playRow->addWidget(m_stopBtn, 1);
     leftLay->addLayout(playRow);
 
+    // 播放模式：单循环(默认) / 列表循环 / 随机，三选一互斥
+    auto *playModeRow = new QHBoxLayout();
+    playModeRow->setSpacing(6);
+    playModeRow->addWidget(new QLabel(QStringLiteral("模式"), leftCard));
+    playModeRow->addStretch(1);
+    m_modeSingle = new QRadioButton(QStringLiteral("单循环"), leftCard);
+    m_modeSingle->setToolTip(tooltipstyle::format(QStringLiteral(
+            "只播列表里选中的这一个视频，播完从头再来，周而复始")));
+    m_modeList = new QRadioButton(QStringLiteral("列表循环"), leftCard);
+    m_modeList->setToolTip(tooltipstyle::format(QStringLiteral(
+            "列表里的视频按顺序一个接一个播，播完最后一个回到第一个，周而复始")));
+    m_modeRandom = new QRadioButton(QStringLiteral("随机"), leftCard);
+    m_modeRandom->setToolTip(tooltipstyle::format(QStringLiteral(
+            "随机从列表挑一个视频作为壁纸，播完再随机挑下一个，周而复始")));
+    m_modeSingle->setChecked(true);
+    auto *modeGroup = new QButtonGroup(this);
+    modeGroup->setExclusive(true);
+    modeGroup->addButton(m_modeSingle, VideoWallpaper::SingleLoop);
+    modeGroup->addButton(m_modeList, VideoWallpaper::ListLoop);
+    modeGroup->addButton(m_modeRandom, VideoWallpaper::Random);
+    connect(modeGroup, &QButtonGroup::idClicked, this, [this](int mode) {
+        VideoWallpaper::instance().setPlayMode(mode);
+        AppConfig &st = AppConfig::instance();
+        st.setValue(ConfigKeys::Video::PlayMode, mode);
+    });
+    playModeRow->addWidget(m_modeSingle);
+    playModeRow->addWidget(m_modeList);
+    playModeRow->addWidget(m_modeRandom);
+    leftLay->addLayout(playModeRow);
+
     auto *volRow = new QHBoxLayout();
     volRow->addWidget(new QLabel(QStringLiteral("音量"), leftCard));
     m_videoVolume = new QSlider(Qt::Horizontal, leftCard);
@@ -1011,20 +1049,12 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     volRow->addWidget(volVal);
     leftLay->addLayout(volRow);
 
-    m_autoLoopBox = new QCheckBox(QStringLiteral("列表循环"), leftCard);
-    m_autoLoopBox->setChecked(true);
-    m_autoLoopBox->setToolTip(tooltipstyle::format(QStringLiteral(
-            "勾选：列表逐个播放，播完最后一个回到第一个继续；单个视频自动从头循环。\n"
-            "不勾选：列表播放一遍后停止。")));
-    m_randomBox = new QCheckBox(QStringLiteral("随机播放"), leftCard);
     m_fullscreenPauseBox = new QCheckBox(QStringLiteral("全屏自动暂停"), leftCard);
     m_fullscreenPauseBox->setChecked(true);
     m_fullscreenPauseBox->setToolTip(tooltipstyle::format(QStringLiteral(
             "前台应用全屏或完全遮住桌面时暂停视频壁纸(省 GPU/电量)，回到桌面 1 秒内自动恢复")));
     m_batteryBox = new QCheckBox(QStringLiteral("电池模式自动暂停"), leftCard);
     m_batteryBox->setToolTip(tooltipstyle::format(QStringLiteral("使用电池供电时自动暂停视频壁纸以省电，接通电源后自动恢复")));
-    leftLay->addWidget(m_autoLoopBox);
-    leftLay->addWidget(m_randomBox);
     leftLay->addWidget(m_fullscreenPauseBox);
     leftLay->addWidget(m_batteryBox);
 
@@ -1134,16 +1164,6 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     lay->addWidget(rightCard, 1);
 
     // option changes apply immediately
-    connect(m_autoLoopBox, &QCheckBox::toggled, this, [this](bool on) {
-        VideoWallpaper::instance().setAutoLoop(on);
-        AppConfig &st = AppConfig::instance();
-        st.setValue(ConfigKeys::Video::AutoLoop, on);
-    });
-    connect(m_randomBox, &QCheckBox::toggled, this, [this](bool on) {
-        VideoWallpaper::instance().setRandom(on);
-        AppConfig &st = AppConfig::instance();
-        st.setValue(ConfigKeys::Video::Random, on);
-    });
     connect(m_fullscreenPauseBox, &QCheckBox::toggled, this, [this](bool on) {
         VideoWallpaper::instance().setPauseOnFullscreen(on);
         AppConfig &st = AppConfig::instance();
@@ -1240,7 +1260,7 @@ QWidget *MainWindow::buildWebWallpaperPage()
     auto *applyBtn = new QPushButton(QStringLiteral("应用网页壁纸"), card);
     applyBtn->setObjectName(QStringLiteral("PrimaryButton"));
     applyBtn->setDisabled(true);
-    auto *resetBtn = new QPushButton(QStringLiteral("恢复默认(卸载)"), card);
+    auto *resetBtn = new QPushButton(QStringLiteral("恢复"), card);
     resetBtn->setObjectName(QStringLiteral("DangerButton"));
     resetBtn->setDisabled(true);
     btnRow->addWidget(applyBtn, 1);
@@ -1417,27 +1437,6 @@ void MainWindow::selectPreset(int index)
     if (m_galleryList && m_galleryList->currentRow() != index)
         m_galleryList->setCurrentRow(index);
     setImageSourceText(QStringLiteral("当前选择：图片 · %1").arg(m_presets[index].name));
-    updateImagePreview();
-}
-
-void MainWindow::pickImage()
-{
-    QString file = QFileDialog::getOpenFileName(
-        this, QStringLiteral("选择背景图片"), QString(),
-        QStringLiteral("图片文件 (*.png *.jpg *.jpeg *.bmp *.webp);;所有文件 (*)"));
-    if (file.isEmpty())
-        return;
-    QImage img(file);
-    if (img.isNull()) {
-        setLog(QStringLiteral("无法读取图片：%1").arg(file), true);
-        return;
-    }
-    m_customImage = file;
-    m_selectedPreset = -1;
-    for (auto *b : m_presetButtons)
-        b->setChecked(false);
-    setImageSourceText(QStringLiteral("当前选择：自定义图片 · %1")
-                           .arg(QFileInfo(file).fileName()));
     updateImagePreview();
 }
 
@@ -2121,8 +2120,22 @@ void MainWindow::loadSettings()
     VideoWallpaper::instance().setPlaylist(playlist);
     refreshVideoList();
     m_videoVolume->setValue(s.value(ConfigKeys::Video::Volume, 0).toInt());
-    m_autoLoopBox->setChecked(s.value(ConfigKeys::Video::AutoLoop, true).toBool());
-    m_randomBox->setChecked(s.value(ConfigKeys::Video::Random, false).toBool());
+    {
+        // 旧配置里的"列表循环播放/随机播放"两个开关已由 AppConfig 迁移成
+        // video/playMode，这里只需按模式点亮对应的单选框。
+        const int mode = qBound(int(VideoWallpaper::SingleLoop),
+                                s.value(ConfigKeys::Video::PlayMode,
+                                        VideoWallpaper::SingleLoop).toInt(),
+                                int(VideoWallpaper::Random));
+        // 三个单选框同属 leftCard，Qt 自动互斥：点亮一个即自动取消其余两个。
+        if (mode == VideoWallpaper::ListLoop)
+            m_modeList->setChecked(true);
+        else if (mode == VideoWallpaper::Random)
+            m_modeRandom->setChecked(true);
+        else
+            m_modeSingle->setChecked(true);
+        VideoWallpaper::instance().setPlayMode(mode);
+    }
     m_fullscreenPauseBox->setChecked(s.value(ConfigKeys::Video::PauseFullscreen, true).toBool());
     m_batteryBox->setChecked(s.value(ConfigKeys::Video::PauseBattery, false).toBool());
     {
@@ -2138,8 +2151,6 @@ void MainWindow::loadSettings()
     m_reclaimBox->setChecked(s.value(ConfigKeys::Video::Reclaim, true).toBool());
     m_affinityBox->setChecked(s.value(ConfigKeys::Video::AffinityLimit, true).toBool());
     m_screenModeCombo->setCurrentIndex(s.value(ConfigKeys::Video::ScreenMode, 0).toInt());
-    VideoWallpaper::instance().setAutoLoop(m_autoLoopBox->isChecked());
-    VideoWallpaper::instance().setRandom(m_randomBox->isChecked());
     VideoWallpaper::instance().setPauseOnFullscreen(m_fullscreenPauseBox->isChecked());
     VideoWallpaper::instance().setReclaimMemory(m_reclaimBox->isChecked());
     VideoWallpaper::instance().setScreenMode(m_screenModeCombo->currentIndex());
@@ -2315,13 +2326,29 @@ void MainWindow::applyEffect()
 
 void MainWindow::addVideos()
 {
-    // 默认打开软件目录下的 media/video(不存在则创建)
     const QString videoDir = QCoreApplication::applicationDirPath()
                              + QStringLiteral("/media/video");
     QDir().mkpath(videoDir);
+    const QStringList nameFilters = {
+        QStringLiteral("*.mp4"),  QStringLiteral("*.webm"), QStringLiteral("*.mkv"),
+        QStringLiteral("*.avi"),  QStringLiteral("*.mov"),  QStringLiteral("*.wmv")};
+
+    // 先尝试选择文件；若取消则尝试选择文件夹
     QStringList files = QFileDialog::getOpenFileNames(
-        this, QStringLiteral("添加视频到播放列表"), videoDir,
+        this, QStringLiteral("选择视频文件"), videoDir,
         QStringLiteral("视频文件 (*.mp4 *.webm *.mkv *.avi *.mov *.wmv);;所有文件 (*)"));
+
+    if (files.isEmpty()) {
+        // 用户未选文件，尝试选择文件夹
+        QString dir = QFileDialog::getExistingDirectory(
+            this, QStringLiteral("选择视频文件夹"), videoDir);
+        if (dir.isEmpty())
+            return;
+        QDirIterator it(dir, nameFilters, QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext())
+            files.append(it.next());
+    }
+
     if (files.isEmpty())
         return;
     QStringList list = VideoWallpaper::instance().playlist();
@@ -2505,6 +2532,11 @@ void MainWindow::updatePlayingHighlight()
 
 void MainWindow::onVideoStateChanged(const QString &text)
 {
+    // 用户可见的壁纸状态单独落一条诊断日志。排查循环边界是否出现
+    // "第 N 个 播放中 → 播放结束 → 第 N 个 播放中"这类可见抖动时，
+    // 这是唯一直接的取证点(任务书 十三.2)。
+    videodiag::log(videodiag::Level::Debug,
+                   QStringLiteral("UI状态 %1").arg(text));
     if (m_videoStatus)
         m_videoStatus->setText(text);
     updateVideoButtons();
@@ -2568,4 +2600,26 @@ void MainWindow::uninstallAll()
     Engine::restartExplorer(nullptr);
     refreshStatus();
     setLog(QStringLiteral("已恢复系统默认背景。"), false);
+}
+
+void MainWindow::uninstallImage()
+{
+    setLog(QStringLiteral("正在卸载图片背景…"), false);
+    QCoreApplication::processEvents();
+    QString err;
+    Engine::instance().unregisterImageDll(&err);
+    Engine::restartExplorer(nullptr);
+    refreshStatus();
+    setLog(QStringLiteral("图片背景已卸载。"), false);
+}
+
+void MainWindow::uninstallEffect()
+{
+    setLog(QStringLiteral("正在卸载效果样式…"), false);
+    QCoreApplication::processEvents();
+    QString err;
+    Engine::instance().unregisterEffectDll(&err);
+    Engine::restartExplorer(nullptr);
+    refreshStatus();
+    setLog(QStringLiteral("效果样式已卸载。"), false);
 }
