@@ -22,7 +22,11 @@ inline constexpr auto Blur = "image/blur";
 inline constexpr auto Opacity = "image/opacity";
 inline constexpr auto PosType = "image/posType";
 inline constexpr auto FolderExt = "image/folderExt";
-inline constexpr auto ComboEffect = "image/comboEffect";
+// 图片背景模式(互斥单选)：0=单图 1=随机，默认单图。
+inline constexpr auto Mode = "image/mode";
+// image/comboEffect(应用图片时叠加全窗口效果)与 effect/keepImage(应用特效时叠加图片)
+// 已废弃：图片与特效各自独立生效，不再互相覆盖。旧配置里的这两行留着不读不写，
+// 回滚旧版本仍可读取。
 inline constexpr auto Preset = "image/preset";
 inline constexpr auto CustomPath = "image/customPath";
 inline constexpr auto GalleryDir = "image/galleryDir";
@@ -38,7 +42,7 @@ inline constexpr auto ClearAddress = "effect/clearAddress";
 inline constexpr auto ClearBarBg = "effect/clearBarBg";
 inline constexpr auto ClearWinUIBg = "effect/clearWinUIBg";
 inline constexpr auto ShowLine = "effect/showLine";
-inline constexpr auto KeepImage = "effect/keepImage";
+// effect/keepImage(特效时叠加图片背景)已废弃，理由同上。
 }
 
 namespace Video {

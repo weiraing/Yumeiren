@@ -12,6 +12,7 @@
 
 #include "config/AppConfig.h"
 #include "config/ConfigKeys.h"
+#include "core/CachePaths.h"
 
 #include <windows.h>
 #include <psapi.h>
@@ -67,11 +68,9 @@ qint64 bootElapsedMs()
 
 QString logPath()
 {
-    // 与 appinfo::dataRoot() 同根，但避免反向依赖：直接按同一规则拼接
-    QString base = qEnvironmentVariable("LOCALAPPDATA");
-    if (base.isEmpty())
-        base = QDir::homePath() + QStringLiteral("/AppData/Local");
-    return base + QStringLiteral("/Yumeiren/logs/videowallpaper.log");
+    // 诊断日志属于可重新生成的运行时数据，随缓存一起落在 <程序目录>/.cache/logs；
+    // 不再写 %LOCALAPPDATA%\Yumeiren\logs。
+    return QDir(CachePaths::logs()).filePath(QStringLiteral("videowallpaper.log"));
 }
 
 void rotateIfNeeded()

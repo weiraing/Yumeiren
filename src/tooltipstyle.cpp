@@ -3,7 +3,7 @@
 #include <QApplication>
 #include <QFont>
 #include <QFontMetrics>
-#include <QLatin1String>
+#include <QString>
 #include <QVector>
 
 namespace {
@@ -35,11 +35,10 @@ bool isCjk(QChar c)
 // 汉字之间的任意位置。
 bool isPreferredAfter(QChar c)
 {
-    static const QLatin1String kTail("，。；：、！？）》”’%;,.)]}>");
-    for (const QChar &p : kTail)
-        if (p == c)
-            return true;
-    return c.unicode() == 0x3001 || c.unicode() == 0x3002; // 、。
+    // 全角标点直接写在表里：这些字符后面断行读起来最自然。
+    static const QString kTail =
+        QStringLiteral("，。；：、！？）》”’%;,.)]}>");
+    return kTail.contains(c);
 }
 
 // 能否在 i 之前断行。核心约束：纯 ASCII 连续段(路径、文件名、"1080p30"、

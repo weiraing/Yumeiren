@@ -39,6 +39,8 @@ const NumericRule kNumericRules[] = {
     {ConfigKeys::Image::Blur, 0, 0, 20},
     {ConfigKeys::Image::Opacity, 255, 30, 255},
     {ConfigKeys::Image::PosType, 6, 0, 6},
+    // 图片背景模式：0=单图(默认) 1=随机
+    {ConfigKeys::Image::Mode, 0, 0, 1},
     {ConfigKeys::Effect::Type, 1, 0, 4},
     {ConfigKeys::Effect::LightAlpha, 200, 0, 255},
     {ConfigKeys::Effect::DarkAlpha, 120, 0, 255},
@@ -50,12 +52,10 @@ const NumericRule kNumericRules[] = {
 
 const char *kBoolRules[] = {
     ConfigKeys::Image::FolderExt,
-    ConfigKeys::Image::ComboEffect,
     ConfigKeys::Effect::ClearAddress,
     ConfigKeys::Effect::ClearBarBg,
     ConfigKeys::Effect::ClearWinUIBg,
     ConfigKeys::Effect::ShowLine,
-    ConfigKeys::Effect::KeepImage,
     ConfigKeys::Video::WasPlaying,
     ConfigKeys::Video::PauseFullscreen,
     ConfigKeys::Video::PauseBattery,
@@ -228,7 +228,6 @@ void AppConfig::ensureDefaultsAndFix()
                 strcmp(key, ConfigKeys::Video::PauseFullscreen) == 0
                     || strcmp(key, ConfigKeys::Video::Reclaim) == 0
                     || strcmp(key, ConfigKeys::Video::AffinityLimit) == 0
-                    || strcmp(key, ConfigKeys::Image::ComboEffect) == 0
                     || strcmp(key, ConfigKeys::Effect::ClearAddress) == 0
                     || strcmp(key, ConfigKeys::Effect::ClearBarBg) == 0
                     || strcmp(key, ConfigKeys::Effect::ClearWinUIBg) == 0);

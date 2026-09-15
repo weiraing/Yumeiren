@@ -1,7 +1,10 @@
 #include "engine.h"
 
 #include "appinfo.h"
+#include "core/CachePaths.h"
+#include "videodiag.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -28,31 +31,43 @@ Engine &Engine::instance()
     return e;
 }
 
-QString Engine::dataRoot()
+QString Engine::dllRoot()
 {
-    return appinfo::dataRoot();
+    // Hook DLL 随缓存一起搬进程序目录：便携、且不再往 %LOCALAPPDATA% 写任何东西。
+    // 位置只取 applicationDirPath()，与当前工作目录无关。
+    return QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("dll"));
 }
 
-QString Engine::imageDllDir()  { return dataRoot() + QStringLiteral("/dll/ExplorerBgTool"); }
-QString Engine::effectDllDir() { return dataRoot() + QStringLiteral("/dll/ExplorerBlurMica"); }
+QString Engine::legacyDllRoot()
+{
+    // 迁移前的旧位置，仅用于识别残留注册。
+    return appinfo::dataRoot() + QStringLiteral("/dll");
+}
+
+QString Engine::imageDllDir()  { return dllRoot() + QStringLiteral("/ExplorerBgTool"); }
+QString Engine::effectDllDir() { return dllRoot() + QStringLiteral("/ExplorerBlurMica"); }
 QString Engine::imageDllPath()  { return imageDllDir() + QStringLiteral("/ExplorerBgTool.dll"); }
 QString Engine::effectDllPath() { return effectDllDir() + QStringLiteral("/ExplorerBlurMica.dll"); }
 QString Engine::imageIniPath()  { return imageDllDir() + QStringLiteral("/config.ini"); }
 QString Engine::effectIniPath() { return effectDllDir() + QStringLiteral("/config.ini"); }
-QString Engine::bgDir()   { return dataRoot() + QStringLiteral("/bg"); }
+QString Engine::bgDir()   { return CachePaths::media(); }
 QString Engine::processedImagePath() { return bgDir() + QStringLiteral("/bg_custom.png"); }
 QString Engine::wallpaperPath() { return bgDir() + QStringLiteral("/current_wallpaper.jpg"); }
+QString Engine::imagePoolDir() { return CachePaths::imagePool(); }
 
 void Engine::ensureDataDirs()
 {
+    // 渲染出的背景图是可重新生成的缓存，落在 <程序目录>/.cache/media。
+    QString cacheError;
+    if (!CachePaths::ensureDirectories(&cacheError))
+        videodiag::log(videodiag::Level::Error, cacheError, QStringLiteral("Cache"));
+    QDir().mkpath(dllRoot());
     QDir().mkpath(imageDllDir());
     QDir().mkpath(effectDllDir());
-    QDir().mkpath(bgDir());
 }
 
 bool Engine::extractDlls(QString *error)
 {
-    ensureDataDirs();
     struct Entry { const char *res; QString target; };
     const Entry entries[] = {
         {":/dlls/ExplorerBgTool.dll", imageDllPath()},
@@ -108,6 +123,12 @@ ComponentStatus Engine::queryStatus(const char *clsid, const QString &ourDll)
     st.ours = (native == ours);
     st.foreign = !st.ours;
     st.dangling = !QFileInfo::exists(path);
+    // 路径迁移后旧注册会指向 %LOCALAPPDATA%\Yumeiren/dll：单独标出来，
+    // 免得界面把它当成"其他程序占用"，用户不知道该重新点一次应用。
+    const QString legacy = QDir::fromNativeSeparators(legacyDllRoot().toLower());
+    st.stale = !st.ours
+               && (native == legacy
+                   || native.startsWith(legacy + QStringLiteral("/")));
     return st;
 }
 
@@ -122,6 +143,8 @@ QString Engine::statusText(const ComponentStatus &st)
         return QStringLiteral("残留注册(文件缺失)");
     if (st.ours)
         return QStringLiteral("已启用");
+    if (st.stale)
+        return QStringLiteral("旧目录注册(需重新应用)");
     return QStringLiteral("其他程序占用");
 }
 
@@ -246,8 +269,8 @@ bool Engine::writeIniFile(const QString &path, const QString &content, QString *
     return true;
 }
 
-bool Engine::writeImageConfig(const QString &imagePath, int posType, int imgAlpha,
-                              bool folderExt, QString *error)
+bool Engine::writeImageConfig(const QString &imageDir, int posType, int imgAlpha,
+                              bool folderExt, bool random, QString *error)
 {
     ensureDataDirs();
     if (!extractDlls(error))
@@ -259,12 +282,12 @@ bool Engine::writeImageConfig(const QString &imagePath, int posType, int imgAlph
     ini += QStringLiteral("folderExt=") + boolStr(folderExt) + QStringLiteral("\r\n");
     ini += QStringLiteral("noerror=true\r\n");
     ini += QStringLiteral("[image]\r\n");
-    ini += QStringLiteral("random=false\r\n");
+    ini += QStringLiteral("random=") + boolStr(random) + QStringLiteral("\r\n");
     ini += QStringLiteral("custom=false\r\n");
     ini += QStringLiteral("posType=") + QString::number(qBound(0, posType, 6)) + QStringLiteral("\r\n");
     ini += QStringLiteral("imgAlpha=") + QString::number(qBound(0, imgAlpha, 255)) + QStringLiteral("\r\n");
     ini += QStringLiteral("folder=") + QDir::toNativeSeparators(
-               QFileInfo(imagePath).absolutePath()) + QStringLiteral("\r\n");
+               QDir(imageDir).absolutePath()) + QStringLiteral("\r\n");
     return writeIniFile(imageIniPath(), ini, error);
 }
 

@@ -1,6 +1,7 @@
 #include "imageprocess.h"
 
 #include <QPainter>
+#include <QFontMetrics>
 #include <QtMath>
 #include <vector>
 
@@ -138,8 +139,9 @@ QImage ImageProcess::mockExplorerPreview(const QImage &processed, const QSize &n
                                          qreal canvasDpr, const QSize &realWindowSize,
                                          bool darkMode)
 {
-    const int W = qMax(240, canvasSize.width());
-    const int H = qMax(180, canvasSize.height());
+    // 下限取小一点，避免预览框缩小时被强行撑变形(宽高比由调用方锁定为桌面比例)。
+    const int W = qMax(160, canvasSize.width());
+    const int H = qMax(90, canvasSize.height());
     const qreal dpr = canvasDpr > 0 ? canvasDpr : 1.0;
     QImage canvas(int(W * dpr), int(H * dpr), QImage::Format_ARGB32_Premultiplied);
     canvas.setDevicePixelRatio(dpr);
@@ -208,7 +210,9 @@ QImage ImageProcess::mockExplorerPreview(const QImage &processed, const QSize &n
     // the reference window width (physical pixels), so the image's relative
     // size in the preview equals its relative size in the real explorer.
     const int contentTop = toolH + cmdH;
-    const int contentH = H - contentTop;
+    const int statusH = qRound(22 * s);        // 底部状态栏，让模拟窗口有个收尾
+    const int contentBottom = H - statusH;     // 内容区下边界，状态栏画在它下方
+    const int contentH = contentBottom - contentTop;
     const QRectF contentRect(0, contentTop, W, contentH);
     QImage img = processed;
     if (imgAlpha < 255) {
@@ -242,7 +246,7 @@ QImage ImageProcess::mockExplorerPreview(const QImage &processed, const QSize &n
             if (posType == 3 || posType == 4)     // 上排
                 y = contentTop;
             if (posType == 5 || posType == 6)     // 下排
-                y = H - scaled.height();
+                y = contentBottom - scaled.height();
             r = QRectF(x, y, scaled.width(), scaled.height());
         }
         p.save();
@@ -250,61 +254,107 @@ QImage ImageProcess::mockExplorerPreview(const QImage &processed, const QSize &n
         p.drawImage(r, img);
         p.restore();
     } else {
-        p.fillRect(0, contentTop, W, H - contentTop,
+        p.fillRect(0, contentTop, W, contentH,
                    darkMode ? QColor(26, 26, 28) : QColor(243, 244, 246));
     }
 
     // Sidebar (with the combined effect it is a translucent acrylic tint)
-    const int sideW = qRound(82 * s);
-    p.fillRect(0, contentTop, sideW, H - contentTop, sideTint);
-    p.setPen(barLine);
-    p.drawLine(sideW, contentTop, sideW, H);
-    p.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), qMax(5, qRound(7.5 * s))));
     const QStringList items = {QStringLiteral("主文件夹"), QStringLiteral("图库"),
-                               QStringLiteral("桌面"), QStringLiteral("下载"), QStringLiteral("文档")};
-    const int sidePadY = qRound(12 * s);
-    const int sideItemH = qRound(30 * s);
+                               QStringLiteral("桌面"), QStringLiteral("下载"), QStringLiteral("文档"),
+                               QStringLiteral("此电脑"), QStringLiteral("网络")};
+    const int sideIconX = qRound(14 * s);
     const int sideIconW = qRound(15 * s);
     const int sideIconH = qRound(12 * s);
-    const int sideTxtX = qRound(36 * s);
+    const int sideTxtX  = sideIconX + sideIconW + qRound(8 * s);
+    p.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), qMax(5, qRound(7.5 * s))));
+    // 字号有 5pt 下限，小画布下文字并不是按 s 等比缩小的，所以侧栏的宽度、
+    // 行高都改用真实字体度量，「主文件夹」才不会被分割线切掉。
+    const QFontMetrics sideFm(p.font());
+    int sideLabelW = 0;
+    for (const QString &it : items)
+        sideLabelW = qMax(sideLabelW, sideFm.horizontalAdvance(it));
+    const int sideW = qMin(sideTxtX + sideLabelW + qRound(10 * s), qRound(W * 0.32));
+    const int sideRowH  = qMax(qRound(16 * s), sideFm.height());
+    const int sideItemH = sideRowH + qRound(4 * s);
+    const int sidePadY  = qRound(12 * s);
+    p.fillRect(0, contentTop, sideW, contentBottom - contentTop, sideTint);
+    p.setPen(barLine);
+    p.drawLine(sideW, contentTop, sideW, contentBottom);
     for (int i = 0; i < items.size(); ++i) {
         const int y = contentTop + sidePadY + i * sideItemH;
-        if (y + qRound(16 * s) > H)
+        if (y + sideRowH > contentBottom)
             break;
         p.setPen(Qt::NoPen);
         p.setBrush(folder);
-        p.drawRoundedRect(qRound(14 * s), y + qRound(2 * s), sideIconW, sideIconH, qRound(2 * s), qRound(2 * s));
+        p.drawRoundedRect(sideIconX, y + (sideRowH - sideIconH) / 2, sideIconW, sideIconH,
+                          qRound(2 * s), qRound(2 * s));
         p.setPen(subText);
-        p.drawText(QRect(sideTxtX, y, sideW - sideTxtX - qRound(6 * s), qRound(16 * s)),
-                   Qt::AlignVCenter, items[i]);
+        p.drawText(QRectF(sideTxtX, y, sideW - sideTxtX - qRound(6 * s), sideRowH),
+                   Qt::AlignVCenter | Qt::ElideRight, items[i]);
     }
 
-    // Folder items grid (columns adapt to the canvas width)
-    p.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), qMax(5, qRound(7.5 * s))));
-    const int rows = contentH >= qRound(150 * s) ? 2 : 1;
-    const int cols = 3;
-    const qreal cellW = qreal(W - sideW - qRound(12 * s)) / cols;
-    const int folderW = qRound(42 * s);
-    const int folderH = qRound(30 * s);
-    const int tabW = qRound(20 * s);
-    const int tabH = qRound(7 * s);
-    const int rowSpacing = qRound(88 * s);
-    const int gridPadY = qRound(22 * s);
+    // Folder items grid: 先定网格，再定图标，最后按图标高度反推文件名字号。
+    // 顺序不能反 —— 一旦用文件名宽度去撑网格，就会出现「文字比文件夹还大」。
+    const int gridPadY = qRound(14 * s);
     const int gridPadX = qRound(6 * s);
+    const int rowTop = contentTop + gridPadY;
+    const int availW = W - sideW - gridPadX * 2;
+    const int availH = contentBottom - rowTop;
+    const QString folderName = QStringLiteral("文件夹");
+    const int cellW = qMax(18, qRound(92 * s));                 // 名义网格宽度，列距不再横向摊满
+    const int cols = qBound(2, availW / cellW, 10);
+    const qreal colW = qreal(availW) / cols;
+    const int folderW = qMax(9, qRound(colW * 0.58));
+    const int folderH = qMax(6, qRound(folderW / 1.38));
+    const int tabH    = qMax(2, qRound(folderH * 0.24));
+    const int tabW    = qMax(3, qRound(folderW * 0.46));
+    // 文件名字号只取图标高度的约三成，用像素字号锁定，不跟着字号下限一起膨胀。
+    QFont nameFont = p.font();
+    nameFont.setPixelSize(qBound(6, qRound(folderH * 0.28), 11));
+    p.setFont(nameFont);
+    const QFontMetrics nameFm(nameFont);
+    const int nameH   = qMax(6, nameFm.height());
+    const int cellH   = tabH + folderH + qRound(3 * s) + nameH; // 图标 + 文件名
+    const int rowPitch = cellH + qMax(qRound(6 * s), qRound(cellH * 0.16)); // 行距贴着内容
+    const int rows = qBound(1, (availH + rowPitch - cellH) / rowPitch, 2);
     for (int r = 0; r < rows; ++r) {
+        const int y = rowTop + r * rowPitch;
+        if (y >= contentBottom)
+            break;
         for (int c = 0; c < cols; ++c) {
-            const qreal x = sideW + gridPadX + c * cellW + (cellW - folderW) / 2.0;
-            const int y = contentTop + gridPadY + r * rowSpacing;
-            QColor g1 = folder, g2 = folder.darker(112);
+            const qreal x = sideW + gridPadX + c * colW + (colW - folderW) / 2.0;
             p.setPen(Qt::NoPen);
-            p.setBrush(g1);
-            p.drawRoundedRect(QRectF(x, y, folderW, folderH), qRound(3 * s), qRound(3 * s));
-            p.setBrush(g2);
-            p.drawRect(QRectF(x, y - qRound(5 * s), tabW, tabH));
+            p.setBrush(folder.darker(112));
+            p.drawRect(QRectF(x, y, tabW, tabH));
+            p.setBrush(folder);
+            p.drawRoundedRect(QRectF(x, y + tabH, folderW, folderH),
+                              qMax(1, qRound(3 * s)), qMax(1, qRound(3 * s)));
             p.setPen(subText);
-            p.drawText(QRectF(sideW + gridPadX + c * cellW, y + qRound(34 * s), cellW, qRound(14 * s)),
-                       Qt::AlignCenter, QStringLiteral("文件夹"));
+            p.drawText(QRectF(sideW + gridPadX + c * colW, y + tabH + folderH + qRound(3 * s),
+                              colW, nameH),
+                       Qt::AlignHCenter | Qt::AlignTop | Qt::ElideRight, folderName);
         }
+    }
+
+    // 底部状态栏：项目数 + 视图切换按钮，补住窗口最下方那条空白。
+    p.setPen(QPen(barLine, 1));
+    p.setBrush(Qt::NoBrush);
+    p.drawLine(0, contentBottom, W, contentBottom);
+    p.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), qMax(5, qRound(7 * s))));
+    p.setPen(subText);
+    p.drawText(QRect(sideW + qRound(10 * s), contentBottom, qRound(150 * s), statusH),
+               Qt::AlignVCenter, QStringLiteral("%1 个项目").arg(rows * cols));
+    const int btnW = qRound(18 * s);
+    const int btnH = qMax(6, statusH - qRound(8 * s));
+    const int btnX = W - qRound(30 * s);
+    const int btnY = contentBottom + (statusH - btnH) / 2;
+    p.setPen(QPen(barLine, 1));
+    p.setBrush(pillBg);
+    p.drawRoundedRect(btnX, btnY, btnW, btnH, qRound(2 * s), qRound(2 * s));
+    p.setPen(QPen(subText, 1));
+    for (int i = 1; i <= 2; ++i) {
+        const int ly = btnY + btnH * i / 3;
+        p.drawLine(btnX + qRound(4 * s), ly, btnX + btnW - qRound(4 * s), ly);
     }
     p.end();
     return canvas;

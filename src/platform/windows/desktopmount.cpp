@@ -7,6 +7,7 @@
 
 #include <windows.h>
 #include <tlhelp32.h>
+#include <vector>
 
 // Desktop hosts icons inside SHELLDLL_DefView on a WorkerW window. After
 // sending 0x052C to Progman, an extra WorkerW is spawned BEHIND that one; our
@@ -238,13 +239,53 @@ bool isOnBattery()
     return s.ACLineStatus == 0;
 }
 
+// 用 RelationProcessorCore 的 ProcessorMask 反查物理核分组，每组取编号最小的
+// 逻辑处理器，凑够 maxCores 个物理核。返回 0 表示不可用(API 失败、掩码为空等)，
+// 由调用方回退到「前 N 个逻辑号」。结果一定是当前进程亲和性掩码的子集。
+static DWORD_PTR distinctCoreAffinity(int maxCores)
+{
+    DWORD_PTR procMask = 0;
+    DWORD_PTR sysMask = 0;
+    if (!GetProcessAffinityMask(GetCurrentProcess(), &procMask, &sysMask) || !procMask)
+        return 0;
+
+    DWORD bytes = 0;
+    if (GetLogicalProcessorInformation(nullptr, &bytes)
+        || GetLastError() != ERROR_INSUFFICIENT_BUFFER || !bytes)
+        return 0;
+    std::vector<SYSTEM_LOGICAL_PROCESSOR_INFORMATION>
+        info(bytes / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION));
+    if (!GetLogicalProcessorInformation(info.data(), &bytes))
+        return 0;
+
+    DWORD_PTR picked = 0;
+    int cores = 0;
+    for (const SYSTEM_LOGICAL_PROCESSOR_INFORMATION &e : info) {
+        if (e.Relationship != RelationProcessorCore)
+            continue;
+        const DWORD_PTR inCore = DWORD_PTR(e.ProcessorMask) & procMask & ~picked;
+        if (!inCore)
+            continue; // 该物理核剩余的可用逻辑号已选过
+        picked |= inCore & (~inCore + 1); // 取该核里编号最小的逻辑处理器
+        if (++cores >= maxCores)
+            break;
+    }
+    return cores >= maxCores ? picked : 0;
+}
+
 bool applyProcessAffinityLimit(int maxCores)
 {
     SYSTEM_INFO si = {};
     GetSystemInfo(&si);
     if (si.dwNumberOfProcessors <= static_cast<DWORD>(maxCores))
         return false; // 核数本就不多，不限制
-    const DWORD_PTR mask = (1ULL << maxCores) - 1;
+    // 挑「每个物理核只占一个逻辑号」的掩码，而不是直接取前 N 个逻辑号。
+    // 本机(锐龙 16C32T)的 SMT 兄弟核相邻成对枚举：0/1 同属一个物理核，
+    // 旧掩码 0b1111 只有 2 个物理核 + 2 个超线程，解码线程全挤在两个核上
+    // 互抢执行端口与 L1/L2。逻辑核个数不变，QThread::idealThreadCount 仍是 N，
+    // 既保留原有降线程/降内存收益，又拿到接近一倍的真实吞吐。
+    const DWORD_PTR distinct = distinctCoreAffinity(maxCores);
+    const DWORD_PTR mask = distinct ? distinct : ((1ULL << maxCores) - 1);
     return SetProcessAffinityMask(GetCurrentProcess(), mask) != FALSE;
 }
 

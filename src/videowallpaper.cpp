@@ -187,6 +187,21 @@ VideoWallpaper::VideoWallpaper(QObject *parent) : QObject(parent)
     if (const int startMs = qEnvironmentVariableIntValue("YUMEIREN_AUTO_START_MS");
         startMs > 0)
         QTimer::singleShot(startMs, this, [this] { startPlaying(nullptr); });
+    // 暂停/恢复循环实验驱动(仅自动化测试使用)：每 N 毫秒切换一次 pauseResume()。
+    // 用于「暂停/恢复 ×100」与「暂停期间是否仍在渲染」两项取证——外部没有
+    // 稳定的入口驱动暂停按钮，只有 UI 点击。正常运行不设置该变量，零开销。
+    if (const int pauseMs = qEnvironmentVariableIntValue("YUMEIREN_AUTO_PAUSE_MS");
+        pauseMs > 0) {
+        auto *toggle = new QTimer(this);
+        toggle->setInterval(pauseMs);
+        connect(toggle, &QTimer::timeout, this, [this] {
+            videodiag::log(videodiag::Level::Info,
+                QStringLiteral("自动切换暂停: 即将 manualPaused=%1 → %2")
+                    .arg(isPlaying() ? 1 : 0).arg(isPlaying() ? 0 : 1));
+            pauseResume();
+        });
+        toggle->start();
+    }
 
     // 分辨率/DPI/显示器热插拔变化 → 防抖后重建布局(仅播放中有效)。
     // QScreen 没有 devicePixelRatioChanged 信号；DPI 变化会同时触发 geometryChanged。

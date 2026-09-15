@@ -10,6 +10,8 @@ struct ComponentStatus
     bool ours = false;            // registered path == our dll path
     bool foreign = false;         // registered but path points elsewhere
     bool dangling = false;        // registered but file does not exist
+    bool stale = false;           // registered path still points at the old
+                                  // %LOCALAPPDATA%\Yumeiren\dll location
     QString path;                 // registered path (raw)
 };
 
@@ -20,25 +22,37 @@ public:
     static Engine &instance();
 
     // --- paths ---
-    static QString dataRoot();            // %LOCALAPPDATA%\Yumeiren
+    // Hook DLL 及其 config.ini 的位置：随缓存迁移一起搬进程序目录，
+    // 不再使用 %LOCALAPPDATA%。注册表里存的是绝对路径，路径变化后需要重新注册
+    // (下一次「应用」会自动完成，需要管理员权限)。
+    static QString dllRoot();             // <程序目录>/dll
     static QString imageDllDir();         // dll/ExplorerBgTool
     static QString effectDllDir();        // dll/ExplorerBlurMica
+    // 迁移前的旧位置，只用于识别残留注册，不再写入。
+    static QString legacyDllRoot();       // %LOCALAPPDATA%\Yumeiren/dll
     static QString imageDllPath();
     static QString effectDllPath();
     static QString imageIniPath();
     static QString effectIniPath();
-    static QString bgDir();               // processed images
+    static QString bgDir();               // 处理后背景图缓存 = CachePaths::media()
     static QString processedImagePath();
     static QString wallpaperPath();
+    // 「随机」模式的图片池目录 = CachePaths::imagePool()。
+    // 与 bgDir 分开，避免池里的图被「单图」模式误当候选。
+    static QString imagePoolDir();
 
     void ensureDataDirs();
-    // Extract bundled DLLs from resources. A stale explorer.exe may hold the
-    // old DLL locked; in that case the existing file is kept.
+    // Extract bundled DLLs from resources into dllRoot(). A stale explorer.exe
+    // may hold an existing DLL locked; in that case the file on disk is kept.
+    // 调用前必须先确保目录(ensureDataDirs)，本函数不再自行建目录以免递归。
     bool extractDlls(QString *error);
 
     // --- image background (ExplorerBgTool.dll / explorerTool) ---
-    bool writeImageConfig(const QString &imagePath, int posType, int imgAlpha,
-                          bool folderExt, QString *error);
+    // imageDir 是 DLL 扫描图片的目录(只认 *.png / *.jpg，不递归)。
+    // random=false：目录里取固定一张(单图)；random=true：每打开一个资源管理器
+    // 窗口都从目录里随机换一张。
+    bool writeImageConfig(const QString &imageDir, int posType, int imgAlpha,
+                          bool folderExt, bool random, QString *error);
     bool registerImageDll(QString *error);
     ComponentStatus imageStatus() const;
 

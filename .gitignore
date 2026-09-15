@@ -3,6 +3,7 @@ build*/
 deploy/
 *.log
 *.bak
+CMakeCache.txt
 
 # user-specific
 *.user
@@ -12,16 +13,15 @@ deploy/
 
 # archives & temp
 *.zip
-.idea
+.idea/
 cmake-build-debug
 
-*.dll
-tools/perf/results/*.mp4
-loop_ydif*.csv
-
-tools/.cmsg.txt
 dist/
-tools/dumps/
-new-build
+tools/
+new-build/
 scripts
 tests
+docs
+
+# 软件自身缓存(<程序目录>\.cache)
+.cache/

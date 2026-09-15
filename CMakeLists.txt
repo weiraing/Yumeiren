@@ -24,6 +24,7 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets)
 set(YUMEIREN_SOURCES
     src/main.cpp
     src/appinfo.cpp
+    src/core/CachePaths.cpp
     src/config/AppConfig.cpp
     src/mainwindow.cpp
     src/tooltipstyle.cpp
@@ -74,7 +75,10 @@ qt_add_resources(YumeirenTest app_res
 )
 
 # QVideoSink A/B 实验探针(第二阶段内存归因；非产品组件，可整体删除)。
-qt_add_executable(SinkProbe WIN32
-    tools/sinkprobe/main.cpp
-)
-target_link_libraries(SinkProbe PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::MultimediaWidgets)
+# 探针源码不在仓库里时跳过该目标，产品目标 Yumeiren / YumeirenTest 照常构建。
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/sinkprobe/main.cpp")
+    qt_add_executable(SinkProbe WIN32
+        tools/sinkprobe/main.cpp
+    )
+    target_link_libraries(SinkProbe PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::MultimediaWidgets)
+endif()

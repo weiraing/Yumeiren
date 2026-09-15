@@ -1,11 +1,13 @@
 #include <QApplication>
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QThread>
 #include <QMessageBox>
 #include <QStyleFactory>
 
 #include "appinfo.h"
+#include "core/CachePaths.h"
 #include "config/AppConfig.h"
 #include "config/ConfigKeys.h"
 #include "mainwindow.h"
@@ -20,26 +22,36 @@ int main(int argc, char *argv[])
     QApplication::setApplicationName(appinfo::id());
     QApplication::setApplicationVersion(QStringLiteral("1.0.0"));
 
+    // 缓存目录迁移：软件自身产生的缓存(缩略图/渲染背景图/诊断日志)统一写入
+    // <程序目录>/.cache，位置只取决于 exe 所在目录，与当前工作目录无关。
+    // 必须先于 videodiag::init()：诊断日志本身就写在 .cache/logs 下。
+    // 创建失败只报错，不回退 AppData，也不改任何其他数据的位置。
+    QString cacheError;
+    const bool cacheReady = CachePaths::ensureDirectories(&cacheError);
+
     // 单实例守卫：两个实例会各建一套解码管线并互抢 WorkerW 挂载点。
     // Windows 上进程被强杀/崩溃后共享内存段会残留（引用计数无人递减），
     // 导致之后永远"已经在运行"——attach+detach 清掉残段后重试一次即可自愈；
     // 真有另一实例在跑时重试依旧失败，提示不变。
     videodiag::init(); // 守卫阶段即可记录诊断(幂等)
     videodiag::stage(QStringLiteral("Qt 应用对象创建"));
+    if (!cacheReady)
+        videodiag::log(videodiag::Level::Error, cacheError, QStringLiteral("Cache"));
 
     AppConfig::instance().load(); // 统一配置: 主窗口创建前加载(目录创建/迁移/校验)
     videodiag::stage(QStringLiteral("配置加载(含注册表迁移与校验)"));
 
-    // 资源友好模式(默认开)：限制进程到前 4 个逻辑核。解码线程数跟随
-    // QThread::idealThreadCount(受亲和性掩码影响)，实测(32核机,1080p30)
-    // 内存 -27%、显存 -36%、CPU 不变。在 QApplication 构造后立即设置，
-    // 使全部后续线程继承掩码；设置 video/affinityLimit=false 关闭。
+    // 资源友好模式(默认开)：限制进程到 4 个逻辑核，且优先分属 4 个不同物理核。
+    // 解码线程数跟随 QThread::idealThreadCount(受亲和性掩码影响)，实测
+    // (32核机,1080p30)内存 -27%、显存 -36%、CPU 不变。在 QApplication 构造后
+    // 立即设置，使全部后续线程继承掩码；video/affinityLimit=false 关闭。
     if (AppConfig::instance()
             .value(ConfigKeys::Video::AffinityLimit, true).toBool()) {
-        if (fbswin::applyProcessAffinityLimit(4))
+        if (fbswin::applyProcessAffinityLimit(4)) {
             videodiag::log(videodiag::Level::Info,
-                QStringLiteral("资源友好模式: 进程已限制到 4 个逻辑核"),
+                QStringLiteral("资源友好模式: 进程已限制到 4 个逻辑核(尽量分属不同物理核)"),
                 QStringLiteral("App"));
+        }
     } else {
         videodiag::log(videodiag::Level::Info,
             QStringLiteral("资源友好模式: 已关闭(全核运行)"),
@@ -61,8 +73,9 @@ int main(int argc, char *argv[])
         }
         // 守卫结果写按 PID 独立文件：主日志可能被已运行实例锁定
         {
-            QFile guardLog(appinfo::dataRoot() + QStringLiteral("/logs/guard_%1.log")
-                               .arg(QCoreApplication::applicationPid()));
+            QFile guardLog(QDir(CachePaths::logs())
+                               .filePath(QStringLiteral("guard_%1.log")
+                                             .arg(QCoreApplication::applicationPid())));
             if (guardLog.open(QIODevice::WriteOnly | QIODevice::Text))
                 guardLog.write(QStringLiteral("%1|%2\n")
                                    .arg(QDateTime::currentDateTime()

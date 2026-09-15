@@ -3,6 +3,7 @@
 #include "appinfo.h"
 #include "config/AppConfig.h"
 #include "config/ConfigKeys.h"
+#include "core/CachePaths.h"
 #include "videodiag.h"
 #include "videowallpaper.h"
 #include "tooltipstyle.h"
@@ -38,6 +39,8 @@
 #include <QPushButton>
 #include <QPainterPath>
 #include <QButtonGroup>
+#include <QProcess>
+#include <QStandardPaths>
 #include <QRadioButton>
 #include <QRegion>
 #include <QAbstractScrollArea>
@@ -252,6 +255,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     // the legacy import ran before this window existed; report what it carried over
     if (!appinfo::migrationNotes().isEmpty())
         setLog(appinfo::migrationNotes().join(QStringLiteral(" ")), false);
+    // 装在只读目录(如 C:\Program Files)时 .cache 建不起来：明确提示用户，
+    // 不静默回退到 AppData，也不改任何非缓存数据的位置。
+    QString cacheError;
+    if (!CachePaths::isWritable(&cacheError))
+        setLog(cacheError, true); // 诊断日志也写在 .cache 内，此时只能走界面日志
+    reportDllMigration();
     connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [this] {
         if (m_themeMode == 0)
             applyTheme(0);
@@ -468,12 +477,25 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
             updateGalleryGrid(); // 视口宽度变化时重算三列正方形网格
         } else if (m_previewLabel && obj == m_previewLabel
                    && m_previewLabel->size() != m_previewRenderSize) {
-            updateImagePreview(); // 预览区变化后按新尺寸重画
+            scheduleImagePreview(); // 拖动过程中合并重绘，松手后再按最终尺寸画一次
         } else if (m_imageSourceLabel && obj == m_imageSourceLabel) {
             setImageSourceText(m_sourceText); // 宽度变化后重新按两行省略
+        } else if (m_previewFrame && obj == m_previewFrame) {
+            updatePreviewAspect(); // 宽度变了就按桌面比例重算预览框高度
         }
     }
     return QMainWindow::eventFilter(obj, event);
+}
+
+// 预览重绘很贵(读图+平滑缩放+模拟窗口)，resize 风暴里只在停手后补一次。
+void MainWindow::scheduleImagePreview()
+{
+    if (!m_previewDebounce) {
+        m_previewDebounce = new QTimer(this);
+        m_previewDebounce->setSingleShot(true);
+        connect(m_previewDebounce, &QTimer::timeout, this, &MainWindow::updateImagePreview);
+    }
+    m_previewDebounce->start(60);
 }
 
 void MainWindow::setImageSourceText(const QString &text)
@@ -551,6 +573,9 @@ QWidget *MainWindow::buildImagePage()
     gallery->setItemDelegate(new GalleryDelegate(gallery));
     gallery->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     gallery->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    // 列宽由视口宽度反算(updateGalleryGrid)，若让网格的 sizeHint 再反过来参与横向分配，
+    // 会形成「宽度→列宽→sizeHint→宽度」的自激环：拖动右边框时界面无限重排直至未响应。
+    gallery->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
     connect(gallery, &QListWidget::currentRowChanged, this, [this](int row) {
         if (row >= 0)
             selectPreset(row);
@@ -606,11 +631,19 @@ QWidget *MainWindow::buildImagePage()
     auto *prevLay = new QVBoxLayout(prevFrame);
     prevLay->setContentsMargins(1, 1, 1, 1);
     m_previewLabel = new QLabel(prevFrame);
-    m_previewLabel->setAlignment(Qt::AlignCenter); // 画布按屏幕宽高比居中显示
-    m_previewLabel->setMinimumSize(1, 180);
+    m_previewLabel->setAlignment(Qt::AlignCenter); // 画布铺满预览框，居中仅作兜底
+    m_previewLabel->setMinimumSize(1, 1);
     m_previewLabel->installEventFilter(this); // 尺寸变化时按新比例重绘
     prevLay->addWidget(m_previewLabel, 1);
-    rightLay->addWidget(prevFrame, 1);
+    // 预览框宽高比锁死为桌面比例，保证「所见即所得」，不再随右侧卡片拉伸变形。
+    m_previewFrame = prevFrame;
+    m_previewFrame->installEventFilter(this);
+    rightLay->addWidget(prevFrame, 0);
+    // 桌面分辨率/主屏换了(外接屏、改缩放)比例要跟着重算。
+    if (QScreen *screen = QGuiApplication::primaryScreen())
+        connect(screen, &QScreen::geometryChanged, this, &MainWindow::updatePreviewAspect);
+    connect(qApp, &QApplication::screenAdded, this, &MainWindow::updatePreviewAspect);
+    connect(qApp, &QApplication::screenRemoved, this, &MainWindow::updatePreviewAspect);
 
     auto *adjTitleRow = new QHBoxLayout();
     adjTitleRow->setContentsMargins(0, 0, 0, 0);
@@ -707,12 +740,32 @@ QWidget *MainWindow::buildImagePage()
 
     m_folderExt = new QCheckBox(QStringLiteral("同时应用到文件打开/保存对话框"), rightCard);
     rightLay->addWidget(m_folderExt);
-    m_comboEffect = new QCheckBox(
-        QStringLiteral("叠加全窗口模糊/亚克力效果"), rightCard);
-    m_comboEffect->setToolTip(tooltipstyle::format(
-            QStringLiteral("启用 ExplorerBlurMica 作为整窗底色：图片覆盖文件列表区，"
-                           "侧边栏等其余区域显示模糊/亚克力效果并融入背景")));
-    rightLay->addWidget(m_comboEffect);
+
+    // 模式行：单图 / 随机(互斥单选，默认单图)。两个单选框同属 rightCard，
+    // Qt 自动互斥，与视频壁纸页的播放模式行同一写法。
+    auto *imgModeRow = new QHBoxLayout();
+    imgModeRow->setSpacing(6);
+    imgModeRow->addWidget(new QLabel(QStringLiteral("模式"), rightCard));
+    imgModeRow->addStretch(1);
+    m_imgModeSingle = new QRadioButton(QStringLiteral("单图"), rightCard);
+    m_imgModeSingle->setToolTip(tooltipstyle::format(QStringLiteral(
+            "点击应用后，所有资源管理器窗口固定使用当前选中的这一张背景图")));
+    m_imgModeRandom = new QRadioButton(QStringLiteral("随机"), rightCard);
+    m_imgModeRandom->setToolTip(tooltipstyle::format(QStringLiteral(
+            "点击应用后，每打开一个新窗口、进入或退出文件夹，"
+            "都从图片浏览列表里的图片中随机换一张作为背景")));
+    m_imgModeSingle->setChecked(true);
+    imgModeRow->addWidget(m_imgModeSingle);
+    imgModeRow->addWidget(m_imgModeRandom);
+    rightLay->addLayout(imgModeRow);
+
+    auto saveImageMode = [this] {
+        if (m_imgModeRandom && m_imgModeRandom->isChecked())
+            AppConfig::instance().setValue(ConfigKeys::Image::Mode, 1);
+        else
+            AppConfig::instance().setValue(ConfigKeys::Image::Mode, 0);
+    };
+    connect(m_imgModeSingle, &QRadioButton::toggled, this, saveImageMode);
 
     auto *btnRow = new QHBoxLayout();
     btnRow->setSpacing(10);
@@ -725,6 +778,8 @@ QWidget *MainWindow::buildImagePage()
     btnRow->addWidget(m_applyImageBtn, 1);
     btnRow->addWidget(resetBtn, 1);
     rightLay->addLayout(btnRow);
+    // 预览框高度改成按桌面比例锁定后不再吃纵向拉伸，剩余空间统一留到卡片底部。
+    rightLay->addStretch(1);
 
     lay->addWidget(rightCard, 5);
 
@@ -855,10 +910,6 @@ QWidget *MainWindow::buildEffectPage()
     grid->addLayout(optRow, 3, 0, 1, 4);
     cardLay->addLayout(grid);
 
-    m_keepImage = new QCheckBox(
-        QStringLiteral("叠加当前图片背景(使用“图片背景”页的图片与参数)"), card);
-    cardLay->addWidget(m_keepImage);
-
     connect(m_lightColorBtn, &QPushButton::clicked, this, [this] {
         QColor c = QColorDialog::getColor(m_lightColor, this, QStringLiteral("亮色模式混合色"));
         if (c.isValid()) {
@@ -932,7 +983,9 @@ QWidget *MainWindow::buildHelpPage()
         "可选扩展到文件打开、保存对话框。</p>"
         "<p style='color:#b9bcc4'>• <b>效果样式</b> —— 基于 Maplespe 的 ExplorerBlurMica(官方 2.0.1)，"
         "为窗口添加 Blur / Acrylic / Mica / MicaAlt 系统级背景效果，亮暗色模式自适应。</p>"
-        "<p style='color:#b9bcc4'>• 勾选“叠加全窗口效果”时，图片覆盖文件列表区，模糊/亚克力覆盖整个窗口，两者合成完整背景。</p>"
+        "<p style='color:#b9bcc4'>• 两项能力各自独立：只开图片、只开特效、或两个都开都可以。"
+        "两边的“应用”只写自己那份配置、只注册自己那个 DLL，不会关掉另一项；"
+        "两个都开时图片覆盖文件列表区，模糊/亚克力作为整窗底色。</p>"
         "<p style='color:#d5d8de'><b>生效方式</b>：程序需以管理员身份运行（自动弹出 UAC 确认）。"
         "点击“应用”后会写入配置、注册 DLL 并重启资源管理器；打开任意文件夹即可看到效果。</p>"
         "<p style='color:#d5d8de'><b>常见问题</b>：</p>"
@@ -1065,7 +1118,8 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     m_affinityBox = new QCheckBox(QStringLiteral("资源友好模式"), leftCard);
     m_affinityBox->setChecked(true);
     m_affinityBox->setToolTip(tooltipstyle::format(QStringLiteral(
-            "把本程序限制到最多 4 个逻辑核：解码线程与内存/显存占用随之下降\n"
+            "把本程序限制到最多 4 个逻辑核(优先落在不同物理核上)：解码线程与"
+            "内存/显存占用随之下降\n"
             "(实测 1080p 内存 -27%、显存 -36%，CPU 不变)。更改后重启生效。")));
     leftLay->addWidget(m_affinityBox);
     connect(m_affinityBox, &QCheckBox::toggled, this, [this](bool on) {
@@ -1106,8 +1160,17 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     fpsRow->addWidget(m_fpsBox, 1);
     leftLay->addLayout(fpsRow);
 
-    leftLay->addStretch(1);
-    lay->addWidget(leftCard);
+    // 左列两张卡片：上方视频壁纸参数，下方视频转码，中间留出明显间隙。
+    // 卡片高度改为随内容收缩(去掉卡内 addStretch)，空白集中到列尾。
+    auto *leftCol = new QWidget(page);
+    leftCol->setFixedWidth(250);
+    auto *leftColLay = new QVBoxLayout(leftCol);
+    leftColLay->setContentsMargins(0, 0, 0, 0);
+    leftColLay->setSpacing(18);
+    leftColLay->addWidget(leftCard);
+    leftColLay->addWidget(buildTranscodeCard(leftCol));
+    leftColLay->addStretch(1);
+    lay->addWidget(leftCol);
 
     // ---- right: playlist + vertical action strip ----
     auto *rightCard = new QFrame(page);
@@ -1135,6 +1198,9 @@ QWidget *MainWindow::buildVideoWallpaperPage()
         if (row >= 0 && row < vp.playlist().size())
             vp.switchToTrack(row);
     });
+    // “立即转码”只在恰好选中一个视频时可用，与启动/暂停/取消互不影响
+    connect(m_videoList, &QListWidget::itemSelectionChanged,
+            this, &MainWindow::updateTranscodeButton);
     listRow->addWidget(m_videoList, 1);
 
     auto *strip = new QVBoxLayout();
@@ -1193,6 +1259,381 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     refreshVideoList();
     scroll->setWidget(page);
     return scroll;
+}
+
+// ---------------------------------------------------------------------------
+// 视频转码(ffmpeg)：帧率重采样 + 可选去音频，输出落在源视频同目录。
+// 全程用 QProcess 异步跑，UI 不阻塞。
+// ---------------------------------------------------------------------------
+namespace {
+
+// 定位 ffmpeg.exe：优先程序目录及其常见子目录，最后回退系统 PATH。
+QString findFfmpeg()
+{
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        appDir + QStringLiteral("/ffmpeg.exe"),
+        appDir + QStringLiteral("/tools/ffmpeg.exe"),
+        appDir + QStringLiteral("/resources/ffmpeg.exe"),
+    };
+    for (const QString &c : candidates) {
+        if (QFileInfo::exists(c))
+            return QFileInfo(c).absoluteFilePath();
+    }
+    return QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+}
+
+// 编码器运行时探测(结果缓存)：有些发行版(例如 conda 构建)是 --disable-gpl，
+// 根本没有 libx264，所以不能写死；按 libx264 → libopenh264 → mpeg4 取首个可用。
+QString pickVideoEncoder()
+{
+    static QString cached;
+    if (!cached.isEmpty())
+        return cached;
+    const QString exe = findFfmpeg();
+    if (exe.isEmpty())
+        return cached;
+
+    QProcess probe;
+    probe.setProcessChannelMode(QProcess::MergedChannels);
+    probe.start(exe, {QStringLiteral("-hide_banner"), QStringLiteral("-encoders")});
+    // 这里在点击线程上等，所以超时给得很短：探测不出来就用 mpeg4，
+    // 它是 ffmpeg 自带的核心编码器，任何发行版都有，宁可画质差也不能卡住界面。
+    if (!probe.waitForFinished(1500)) {
+        probe.kill();
+        probe.waitForFinished(200);
+        cached = QStringLiteral("mpeg4");
+        return cached;
+    }
+
+    QStringList available;
+    const QString out = QString::fromUtf8(probe.readAllStandardOutput());
+    for (const QString &line : out.split(QLatin1Char('\n'))) {
+        const QString t = line.trimmed();
+        if (t.isEmpty())
+            continue;
+        // 视频编码器行形如：" V....D libx264    H.264 / AVC / MPEG-4 AVC ..."，
+        // 开头那个空格会被 trimmed 掉，所以只能按首字母 V 判断，再取第二个 token。
+        const QStringList tokens = t.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        if (tokens.size() < 2 || !tokens.at(0).startsWith(QLatin1Char('V')))
+            continue;
+        available << tokens.at(1);
+    }
+    for (const char *cand : {"libx264", "libopenh264", "mpeg4"}) {
+        const QString name = QString::fromLatin1(cand);
+        if (available.contains(name)) {
+            cached = name;
+            break;
+        }
+    }
+    if (cached.isEmpty() && !available.isEmpty())
+        cached = available.first();
+    return cached;
+}
+
+// "HH:MM:SS.xx" → 微秒，解析失败返回 -1。
+qint64 parseFfmpegTime(const QString &value)
+{
+    const QStringList parts = value.trimmed().split(QLatin1Char(':'));
+    if (parts.size() != 3)
+        return -1;
+    bool okH = false, okM = false, okS = false;
+    const int h = parts.at(0).toInt(&okH);
+    const int m = parts.at(1).toInt(&okM);
+    const double s = parts.at(2).toDouble(&okS);
+    if (!okH || !okM || !okS)
+        return -1;
+    return qint64((h * 3600 + m * 60) * 1000000.0 + s * 1000000.0);
+}
+
+} // namespace
+
+QWidget *MainWindow::buildTranscodeCard(QWidget *parent)
+{
+    auto *card = new QFrame(parent);
+    card->setObjectName(QStringLiteral("PageCard"));
+    auto *lay = new QVBoxLayout(card);
+    lay->setContentsMargins(14, 14, 14, 14);
+    lay->setSpacing(10);
+
+    auto *t = new QLabel(QStringLiteral("视频转码"), card);
+    t->setObjectName(QStringLiteral("GroupTitle"));
+    lay->addWidget(t);
+
+    auto *hint = new QLabel(
+        QStringLiteral("转码列表中选中的视频：重采样帧率、可选去掉音频，结果保存在源视频同目录。"),
+        card);
+    hint->setObjectName(QStringLiteral("HintLabel"));
+    hint->setWordWrap(true);
+    lay->addWidget(hint);
+
+    // 帧率：15/24/30/60 帧互斥单选，默认 24 帧(250px 卡片里排版很紧，行距压到 2)
+    auto *fpsRow = new QHBoxLayout();
+    fpsRow->setSpacing(2);
+    fpsRow->addWidget(new QLabel(QStringLiteral("帧率"), card));
+    m_tcFpsGroup = new QButtonGroup(this);
+    m_tcFpsGroup->setExclusive(true);
+    for (int fps : {15, 24, 30, 60}) {
+        auto *rb = new QRadioButton(QStringLiteral("%1帧").arg(fps), card);
+        rb->setToolTip(tooltipstyle::format(QStringLiteral(
+                "转码后每秒 %1 帧：帧率越低越省解码资源，桌面壁纸建议 15 或 24 帧").arg(fps)));
+        m_tcFpsGroup->addButton(rb, fps);
+        if (fps == 24)
+            rb->setChecked(true);
+        fpsRow->addWidget(rb);
+    }
+    lay->addLayout(fpsRow);
+
+    // 音频：无(默认，转码时丢掉音轨) / 有(保留并转 AAC)
+    auto *audioRow = new QHBoxLayout();
+    audioRow->setSpacing(6);
+    audioRow->addWidget(new QLabel(QStringLiteral("音频"), card));
+    m_tcAudioNo = new QRadioButton(QStringLiteral("无"), card);
+    m_tcAudioNo->setToolTip(tooltipstyle::format(QStringLiteral(
+            "不保留音频，输出文件不含音轨(桌面壁纸通常用不到声音)")));
+    m_tcAudioYes = new QRadioButton(QStringLiteral("有"), card);
+    m_tcAudioYes->setToolTip(tooltipstyle::format(QStringLiteral(
+            "保留音频并转成 AAC 160k；源视频没有音轨时输出仍然无声")));
+    m_tcAudioNo->setChecked(true);
+    auto *audioGroup = new QButtonGroup(this);
+    audioGroup->setExclusive(true);
+    audioGroup->addButton(m_tcAudioNo);
+    audioGroup->addButton(m_tcAudioYes);
+    audioRow->addWidget(m_tcAudioNo);
+    audioRow->addWidget(m_tcAudioYes);
+    audioRow->addStretch(1);
+    lay->addLayout(audioRow);
+
+    m_transcodeBtn = new QPushButton(QStringLiteral("立即转码"), card);
+    m_transcodeBtn->setObjectName(QStringLiteral("PrimaryButton"));
+    m_transcodeBtn->setMinimumHeight(36);
+    m_transcodeBtn->setEnabled(false); // 恰好选中一个视频才可点
+    m_transcodeBtn->setToolTip(tooltipstyle::format(QStringLiteral(
+            "先在右侧列表选中一个视频再点\n"
+            "输出名：{源文件名}_{帧率}fps_{无声0/有声1}.mp4，保存在源视频所在文件夹\n"
+            "转码完成后自动加入视频列表")));
+    connect(m_transcodeBtn, &QPushButton::clicked, this, &MainWindow::transcodeSelectedVideo);
+    lay->addWidget(m_transcodeBtn);
+
+    return card;
+}
+
+// 按钮可用性只取决于「是否恰好选中一个视频」与「是否正在转码」，
+// 与启动/暂停/取消三键互不影响。
+void MainWindow::updateTranscodeButton()
+{
+    if (!m_transcodeBtn)
+        return;
+    const bool busy = m_transcodeProc && m_transcodeProc->state() != QProcess::NotRunning;
+    if (busy) {
+        m_transcodeBtn->setEnabled(false);
+        return;
+    }
+    m_transcodeBtn->setText(QStringLiteral("立即转码"));
+    m_transcodeBtn->setEnabled(m_videoList && m_videoList->selectedItems().size() == 1);
+}
+
+void MainWindow::transcodeSelectedVideo()
+{
+    if (!m_videoList || !m_tcFpsGroup || !m_tcAudioNo || !m_tcAudioYes)
+        return;
+    if (m_transcodeProc && m_transcodeProc->state() != QProcess::NotRunning)
+        return; // 一次只跑一个转码任务
+
+    const auto selected = m_videoList->selectedItems();
+    if (selected.size() != 1) {
+        setLog(QStringLiteral("请先在右侧视频列表中选中一个视频，再点“立即转码”。"), true);
+        return;
+    }
+    const QString src = selected.first()->data(Qt::UserRole).toString();
+    const QFileInfo fi(src);
+    if (!fi.exists()) {
+        setLog(QStringLiteral("源视频不存在：%1").arg(QDir::toNativeSeparators(src)), true);
+        return;
+    }
+    const QString exe = findFfmpeg();
+    if (exe.isEmpty()) {
+        setLog(QStringLiteral("未找到 ffmpeg.exe：请把它放到程序目录或加入 PATH 后重试。"), true);
+        return;
+    }
+    const QString encoder = pickVideoEncoder();
+    if (encoder.isEmpty()) {
+        setLog(QStringLiteral("ffmpeg 没有可用的视频编码器(libx264 / libopenh264 / mpeg4)。"), true);
+        return;
+    }
+
+    const int fps = m_tcFpsGroup->checkedId();
+    const bool keepAudio = m_tcAudioYes->isChecked();
+    const QString dst = fi.absolutePath() + QLatin1Char('/')
+                        + QStringLiteral("%1_%2fps_%3.mp4")
+                              .arg(fi.completeBaseName()).arg(fps).arg(keepAudio ? 1 : 0);
+
+    QStringList args;
+    args << QStringLiteral("-hide_banner") << QStringLiteral("-nostdin")
+         << QStringLiteral("-loglevel") << QStringLiteral("info")
+         << QStringLiteral("-y") << QStringLiteral("-i") << src
+         << QStringLiteral("-map") << QStringLiteral("0:v:0")
+         << QStringLiteral("-vf") << QStringLiteral("fps=%1").arg(fps)
+         << QStringLiteral("-c:v") << encoder;
+    if (encoder == QLatin1String("libx264"))
+        args << QStringLiteral("-preset") << QStringLiteral("veryfast")
+             << QStringLiteral("-crf") << QStringLiteral("23");
+    else
+        args << QStringLiteral("-b:v") << QStringLiteral("6M"); // openh264/mpeg4 只吃码率
+    args << QStringLiteral("-pix_fmt") << QStringLiteral("yuv420p")
+         << QStringLiteral("-movflags") << QStringLiteral("+faststart");
+    if (keepAudio)
+        args << QStringLiteral("-map") << QStringLiteral("0:a:0?")
+             << QStringLiteral("-c:a") << QStringLiteral("aac")
+             << QStringLiteral("-b:a") << QStringLiteral("160k");
+    else
+        args << QStringLiteral("-an");
+    args << dst;
+
+    if (!m_transcodeProc) {
+        m_transcodeProc = new QProcess(this);
+        m_transcodeProc->setProcessChannelMode(QProcess::MergedChannels);
+        connect(m_transcodeProc, &QProcess::readyReadStandardOutput,
+                this, &MainWindow::onTranscodeOutput);
+        connect(m_transcodeProc, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
+                this, [this](int code, QProcess::ExitStatus status) {
+                    onTranscodeFinished(code, status != QProcess::NormalExit);
+                });
+        connect(m_transcodeProc, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+            if (error != QProcess::FailedToStart)
+                return; // 其余错误走 finished 统一收尾，避免重复报错
+            setLog(QStringLiteral("ffmpeg 启动失败：%1").arg(m_transcodeProc->errorString()), true);
+            m_transcodeDst.clear();
+            updateTranscodeButton();
+        });
+    }
+
+    m_transcodeSrc = src;
+    m_transcodeDst = dst;
+    // 同名输出可能已经存在(重复转码同一个视频)，失败时只能清理本次写的半成品
+    m_transcodeHadOutput = QFileInfo::exists(dst);
+    m_transcodeTotalUs = 0;
+    m_transcodeBuf.clear();
+    m_transcodeErrTail.clear();
+    m_transcodeBtn->setText(QStringLiteral("转码中 0%"));
+    m_transcodeBtn->setEnabled(false);
+    setLog(QStringLiteral("开始转码：%1 → %2（%3帧 · %4 · %5）")
+               .arg(fi.fileName(), QFileInfo(dst).fileName(), QString::number(fps),
+                    keepAudio ? QStringLiteral("有音频") : QStringLiteral("无音频"), encoder),
+           false);
+    m_transcodeProc->start(exe, args);
+}
+
+// ffmpeg 的进度行以 \r 分隔、普通日志以 \n 分隔，两种都当一行切出来。
+void MainWindow::onTranscodeOutput()
+{
+    if (!m_transcodeProc)
+        return;
+    m_transcodeBuf += m_transcodeProc->readAllStandardOutput();
+
+    auto handleLine = [this](const QString &raw) {
+        const QString line = raw.trimmed();
+        if (line.isEmpty())
+            return;
+        if (m_transcodeTotalUs <= 0) {
+            const int at = line.indexOf(QStringLiteral("Duration:"));
+            if (at >= 0) {
+                int end = line.indexOf(QLatin1Char(','), at);
+                if (end < 0)
+                    end = line.size();
+                m_transcodeTotalUs = parseFfmpegTime(line.mid(at + 9, end - (at + 9)));
+            }
+        }
+        const int at = line.indexOf(QStringLiteral("time="));
+        if (at >= 0 && m_transcodeTotalUs > 0 && m_transcodeBtn) {
+            QString value = line.mid(at + 5);
+            const int sp = value.indexOf(QLatin1Char(' '));
+            if (sp >= 0)
+                value = value.left(sp);
+            const qint64 cur = parseFfmpegTime(value);
+            if (cur >= 0) {
+                const int pct = int(qBound(0.0,
+                                           double(cur) * 100.0 / double(m_transcodeTotalUs),
+                                           99.0));
+                m_transcodeBtn->setText(QStringLiteral("转码中 %1%").arg(pct));
+                return;
+            }
+        }
+        // 非进度行留最后几行，失败时回显给用户定位原因
+        m_transcodeErrTail += line + QLatin1Char('\n');
+        if (m_transcodeErrTail.size() > 1500)
+            m_transcodeErrTail = m_transcodeErrTail.right(1500);
+    };
+
+    int from = 0;
+    for (;;) {
+        const int cr = m_transcodeBuf.indexOf('\r', from);
+        const int lf = m_transcodeBuf.indexOf('\n', from);
+        int idx = -1;
+        if (cr >= 0 && lf >= 0)
+            idx = qMin(cr, lf);
+        else if (cr >= 0)
+            idx = cr;
+        else if (lf >= 0)
+            idx = lf;
+        if (idx < 0)
+            break;
+        handleLine(QString::fromUtf8(m_transcodeBuf.constData() + from, idx - from));
+        from = idx + 1;
+    }
+    m_transcodeBuf = m_transcodeBuf.mid(from);
+}
+
+void MainWindow::onTranscodeFinished(int exitCode, bool crashed)
+{
+    const QFileInfo out(m_transcodeDst);
+    const bool ok = !crashed && exitCode == 0 && out.exists() && out.size() > 0;
+    if (ok) {
+        addVideoToPlaylist(out.absoluteFilePath());
+        setLog(QStringLiteral("转码完成：%1").arg(out.fileName()), false);
+    } else {
+        if (out.exists() && !m_transcodeHadOutput)
+            QFile::remove(out.absoluteFilePath()); // 半成品留在目录里只会误导
+        QString reason = crashed ? QStringLiteral("ffmpeg 异常退出")
+                                 : QStringLiteral("ffmpeg 返回错误码 %1").arg(exitCode);
+        const QString tail = m_transcodeErrTail.trimmed();
+        if (!tail.isEmpty())
+            reason += QStringLiteral("：%1").arg(tail.section(QLatin1Char('\n'), -2).trimmed());
+        setLog(QStringLiteral("转码失败（%1）").arg(reason), true);
+    }
+    m_transcodeSrc.clear();
+    m_transcodeDst.clear();
+    m_transcodeHadOutput = false;
+    m_transcodeTotalUs = 0;
+    m_transcodeBuf.clear();
+    m_transcodeErrTail.clear();
+    updateTranscodeButton();
+}
+
+// 把转码结果并入播放列表并持久化，同时选中它，方便连续操作。
+void MainWindow::addVideoToPlaylist(const QString &path)
+{
+    QStringList list = VideoWallpaper::instance().playlist();
+    if (!list.contains(path))
+        list.append(path);
+    VideoWallpaper::instance().setPlaylist(list);
+    AppConfig &st = AppConfig::instance();
+    st.setValue(ConfigKeys::Video::Playlist, list);
+    refreshVideoList();
+
+    if (m_videoList) {
+        for (int i = 0; i < m_videoList->count(); ++i) {
+            if (m_videoList->item(i)->data(Qt::UserRole).toString() != path)
+                continue;
+            m_videoList->clearSelection();
+            // Qt6 的 QAbstractItemView 没有 SelectCurrent，直接改条目选中态最稳
+            m_videoList->item(i)->setSelected(true);
+            m_videoList->setCurrentRow(i);
+            m_videoList->scrollToItem(m_videoList->item(i), QAbstractItemView::EnsureVisible);
+            break;
+        }
+    }
+    updateTranscodeButton();
 }
 
 QWidget *MainWindow::buildWebWallpaperPage()
@@ -1329,10 +1770,11 @@ QString MainWindow::galleryThumbPath(const QString &image) const
                         QString::number(fi.lastModified().toMSecsSinceEpoch());
     const QString hash = QString::fromLatin1(
         QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Md5).toHex());
-    QDir().mkpath(Engine::dataRoot() + QStringLiteral("/thumbs"));
     // v2: PNG 保留透明通道(旧 JPEG 缩略图作废)
-    return Engine::dataRoot() + QStringLiteral("/thumbs/") + hash
-           + QStringLiteral("_v2.png");
+    // 图库缩略图缓存统一落在 <程序目录>/.cache/thumbnails(见 CachePaths)。
+    CachePaths::ensureDirectories();
+    return QDir(CachePaths::thumbnails())
+        .filePath(hash + QStringLiteral("_v2.png"));
 }
 
 void MainWindow::rebuildGallery()
@@ -1465,6 +1907,28 @@ void MainWindow::pickWallpaper()
     updateImagePreview();
 }
 
+// 预览框宽高比锁死为主屏(桌面)比例：宽度由右侧卡片决定，高度按比例反算，
+// 这样预览里的模拟资源管理器窗口和真实桌面是同一种形状，所见即所得。
+void MainWindow::updatePreviewAspect()
+{
+    if (!m_previewFrame)
+        return;
+    const int frameW = m_previewFrame->width();
+    if (frameW < 2)          // 还没布局过(隐藏/宽度为 0)，等第一次 Resize 再算
+        return;
+    qreal aspect = 16.0 / 9.0;
+    if (const QScreen *screen = QGuiApplication::primaryScreen()) {
+        const QRect sg = screen->geometry(); // 逻辑像素，DPR 在比值里自动抵消
+        if (sg.height() > 0)
+            aspect = qreal(sg.width()) / sg.height();
+    }
+    const int want = qMax(90, qRound(frameW / aspect));
+    // 迟滞 3px：滚动条/网格的 1~2px 宽度抖动不值得改高度，
+    // 否则「高度→滚动条→宽度→高度」会锁死在两个状态之间来回翻转。
+    if (qAbs(want - m_previewFrame->height()) >= 3)
+        m_previewFrame->setFixedHeight(want);
+}
+
 void MainWindow::updateImagePreview()
 {
     if (!m_previewLabel || !m_brightness)  // still constructing the page
@@ -1475,10 +1939,19 @@ void MainWindow::updateImagePreview()
     else if (!m_customImage.isEmpty())
         path = m_customImage;
 
-    QImage src(path);
-    const QSize native = src.size();
-    if (!src.isNull() && src.width() > 900)
-        src = src.scaledToWidth(900, Qt::SmoothTransformation); // fast preview path
+    // 源图按“路径+修改时间”缓存：调参和拖动窗口会反复重画，磁盘解码只做一次。
+    const qint64 mtime = QFileInfo(path).lastModified().toMSecsSinceEpoch();
+    const QString srcKey = path + QLatin1Char('#') + QString::number(mtime);
+    if (srcKey != m_previewSrcKey) {
+        QImage decoded(path);
+        m_previewSrcNative = decoded.size();
+        if (!decoded.isNull() && decoded.width() > 900)
+            decoded = decoded.scaledToWidth(900, Qt::SmoothTransformation);
+        m_previewSrcCache = decoded;
+        m_previewSrcKey = srcKey;
+    }
+    const QImage src = m_previewSrcCache;
+    const QSize native = m_previewSrcNative;
     QImage processed = ImageProcess::adjust(src, m_brightness->value() / 100.0,
                                             m_contrast->value() / 100.0, m_blur->value());
     processed = ImageProcess::rotateAroundY(processed, m_rotate->value());
@@ -1488,28 +1961,18 @@ void MainWindow::updateImagePreview()
     const double pct = m_scale ? m_scale->value() / 100.0 : 1.0;
     const QSize effNative(qRound(native.width() * pct), qRound(native.height() * pct));
 
-    // 真实参照：主屏(物理像素)。预览画布宽高比与主屏一致，
-    // 随预览区宽度等比例缩放，在预览区内居中。
-    double screenRatio = 16.0 / 9.0;
+    // 真实参照：主屏(物理像素)，用来把图片按真实比例画进预览。
     QSize realWin(1920, 1080);
     if (const QScreen *screen = QGuiApplication::primaryScreen()) {
         const QRect sg = screen->geometry();
-        screenRatio = double(sg.width()) / double(sg.height());
         const qreal sdpr = screen->devicePixelRatio();
         realWin = QSize(int(sg.width() * sdpr), int(sg.height() * sdpr));
     }
 
+    // 画布铺满整个预览框。预览框本身已被 updatePreviewAspect() 锁成桌面宽高比，
+    // 所以这里不再需要居中留白，也不会出现上下两条灰底。
     const QSize labelSize = m_previewLabel->size();
-    QSize mock(380, qRound(380 / screenRatio));
-    if (labelSize.width() >= 80 && labelSize.height() >= 80) {
-        int w = labelSize.width();
-        int h = qRound(w / screenRatio);
-        if (h > labelSize.height()) { // 预览区高度不足时以高度为准等比缩小
-            h = labelSize.height();
-            w = qRound(h * screenRatio);
-        }
-        mock = QSize(qMax(80, w), qMax(60, h));
-    }
+    const QSize mock(qMax(160, labelSize.width()), qMax(90, labelSize.height()));
     m_previewRenderSize = labelSize;
     const qreal dpr = m_previewLabel->devicePixelRatioF();
 
@@ -1558,7 +2021,6 @@ void MainWindow::resetImageParams()
     m_opacity->setValue(255);
     setPosMode(6); // 默认右下
     m_folderExt->setChecked(false);
-    m_comboEffect->setChecked(false);
     saveImageSettings();
     setLog(QStringLiteral("参数已恢复默认值，点击“应用图片背景”生效。"), false);
 }
@@ -1681,9 +2143,9 @@ void MainWindow::setStatusChips()
     m_imageChip->setText(Engine::statusText(img));
     m_effectChip->setText(Engine::statusText(eff));
     m_imageChip->setProperty("data-ok", img.ours ? 1 : 0);
-    m_imageChip->setProperty("data-warn", img.dangling ? 1 : 0);
+    m_imageChip->setProperty("data-warn", (img.dangling || img.stale) ? 1 : 0);
     m_effectChip->setProperty("data-ok", eff.ours ? 1 : 0);
-    m_effectChip->setProperty("data-warn", eff.dangling ? 1 : 0);
+    m_effectChip->setProperty("data-warn", (eff.dangling || eff.stale) ? 1 : 0);
     m_imageChip->style()->unpolish(m_imageChip);
     m_imageChip->style()->polish(m_imageChip);
     m_effectChip->style()->unpolish(m_effectChip);
@@ -1696,6 +2158,31 @@ void MainWindow::setStatusChips()
     m_adminLabel->style()->unpolish(m_adminLabel);
     m_adminLabel->style()->polish(m_adminLabel);
     m_osLabel->setText(Engine::windowsProductName());
+}
+
+void MainWindow::reportDllMigration()
+{
+    const ComponentStatus img = Engine::instance().imageStatus();
+    const ComponentStatus eff = Engine::instance().effectStatus();
+    videodiag::log(videodiag::Level::Info,
+                   QStringLiteral("Hook DLL 目录 %1 | 图片 %2 | 特效 %3")
+                       .arg(QDir::toNativeSeparators(Engine::dllRoot()),
+                            Engine::statusText(img), Engine::statusText(eff)),
+                   QStringLiteral("Engine"));
+    if (!img.stale && !eff.stale)
+        return;
+
+    // 注册表里的 InprocServer32 存的是绝对路径，目录搬家后旧注册指向的位置只能靠
+    // 重新注册覆盖(需要管理员权限，且 Explorer 会重启)。这里只把新 DLL 预先投放好，
+    // 让用户点一次「应用」就能完成迁移，不自行提权，也不回退到旧目录。
+    Engine::instance().ensureDataDirs();
+    QString derr;
+    if (!Engine::instance().extractDlls(&derr))
+        setLog(derr, true);
+    setLog(QStringLiteral("Hook DLL 已改用程序目录(%1)，检测到注册表仍指向旧位置，"
+                          "点一次「应用图片背景」或「应用特效」即可完成迁移(需要管理员权限)。")
+               .arg(QDir::toNativeSeparators(Engine::dllRoot())),
+           false);
 }
 
 void MainWindow::refreshStatus()
@@ -2076,8 +2563,16 @@ void MainWindow::loadSettings()
     m_posMode = qBound(0, s.value(ConfigKeys::Image::PosType, 6).toInt(), 6);
     setPosMode(m_posMode);
     m_folderExt->setChecked(s.value(ConfigKeys::Image::FolderExt, false).toBool());
-    m_comboEffect->setChecked(s.value(ConfigKeys::Image::ComboEffect, true).toBool());
-    m_keepImage->setChecked(s.value(ConfigKeys::Effect::KeepImage, false).toBool());
+    {
+        // 恢复模式选择。加载期间屏蔽 toggled，免得回写配置打断本次读取。
+        const int imgMode = qBound(0, s.value(ConfigKeys::Image::Mode, 0).toInt(), 1);
+        QSignalBlocker blockSingle(m_imgModeSingle);
+        QSignalBlocker blockRandom(m_imgModeRandom);
+        if (imgMode == 1)
+            m_imgModeRandom->setChecked(true);
+        else
+            m_imgModeSingle->setChecked(true);
+    }
     // 图片浏览目录：优先恢复用户上次选择的目录，否则默认 软件目录/media/image
     const QString savedDir = s.value(ConfigKeys::Image::GalleryDir).toString();
     if (!savedDir.isEmpty() && QDir(savedDir).exists())
@@ -2168,7 +2663,8 @@ void MainWindow::saveImageSettings()
     s.setValue(ConfigKeys::Image::Opacity, m_opacity->value());
     s.setValue(ConfigKeys::Image::PosType, m_posMode);
     s.setValue(ConfigKeys::Image::FolderExt, m_folderExt->isChecked());
-    s.setValue(ConfigKeys::Image::ComboEffect, m_comboEffect->isChecked());
+    s.setValue(ConfigKeys::Image::Mode,
+               m_imgModeRandom && m_imgModeRandom->isChecked() ? 1 : 0);
     s.setValue(ConfigKeys::Image::Preset, m_selectedPreset);
     s.setValue(ConfigKeys::Image::CustomPath, m_customImage);
     s.setValue(ConfigKeys::Image::GalleryDir, m_presetDir);
@@ -2186,33 +2682,101 @@ void MainWindow::saveEffectSettings()
     s.setValue(ConfigKeys::Effect::ClearBarBg, m_clearBarBg->isChecked());
     s.setValue(ConfigKeys::Effect::ClearWinUIBg, m_clearWinUIBg->isChecked());
     s.setValue(ConfigKeys::Effect::ShowLine, m_showLine->isChecked());
-    s.setValue(ConfigKeys::Effect::KeepImage, m_keepImage->isChecked());
 }
 
 void MainWindow::applyImage()
 {
+    const bool randomMode = m_imgModeRandom && m_imgModeRandom->isChecked();
     QString path;
-    if (m_selectedPreset >= 0 && m_selectedPreset < m_presets.size())
-        path = m_presets[m_selectedPreset].res;
-    else if (!m_customImage.isEmpty())
-        path = m_customImage;
-    if (path.isEmpty()) {
-        setLog(QStringLiteral("请先在图片浏览中选择图片，或使用“选择图片…”"), true);
-        return;
+    if (!randomMode) {
+        if (m_selectedPreset >= 0 && m_selectedPreset < m_presets.size())
+            path = m_presets[m_selectedPreset].res;
+        else if (!m_customImage.isEmpty())
+            path = m_customImage;
+        if (path.isEmpty()) {
+            setLog(QStringLiteral("请先在图片浏览中选择图片，或使用“选择图片…”"), true);
+            return;
+        }
     }
 
     m_applyImageBtn->setEnabled(false);
-    setLog(QStringLiteral("正在处理图片…"), false);
+    setLog(randomMode ? QStringLiteral("正在生成随机图片池…")
+                      : QStringLiteral("正在处理图片…"), false);
     QCoreApplication::processEvents();
 
     QString err;
     Engine::instance().ensureDataDirs();
-    QImage src(path);
-    if (src.isNull()) {
-        setLog(QStringLiteral("图片读取失败"), true);
+
+    // DLL 只扫描 folder 目录里的 *.png / *.jpg：单图指向单张成品图所在目录，
+    // 随机指向图片池目录，两者互不串台。
+    QString imageDir;
+    if (randomMode) {
+        int count = 0;
+        if (!buildRandomImagePool(&count, &err)) {
+            setLog(err, true);
+            m_applyImageBtn->setEnabled(true);
+            return;
+        }
+        imageDir = Engine::imagePoolDir();
+        setLog(QStringLiteral("随机图片池已生成 %1 张，正在写入配置…").arg(count), false);
+    } else {
+        QImage src(path);
+        if (src.isNull()) {
+            setLog(QStringLiteral("图片读取失败"), true);
+            m_applyImageBtn->setEnabled(true);
+            return;
+        }
+        const QImage processed = applyImageParams(src);
+        if (!processed.save(Engine::processedImagePath(), "PNG")) {
+            setLog(QStringLiteral("处理后的图片保存失败"), true);
+            m_applyImageBtn->setEnabled(true);
+            return;
+        }
+        imageDir = QFileInfo(Engine::processedImagePath()).absolutePath();
+        setLog(QStringLiteral("正在写入配置…"), false);
+    }
+    QCoreApplication::processEvents();
+
+    // posType: 0..3 corners, 4 center, 5 stretch, 6 zoom&fill
+    static const int posMap[] = {6, 4, 5, 0, 1, 2, 3};
+    int posType = posMap[qBound(0, m_posMode, 6)];
+
+    if (!Engine::instance().writeImageConfig(imageDir, posType,
+                                             m_opacity->value(), m_folderExt->isChecked(),
+                                             randomMode, &err)) {
+        setLog(err, true);
         m_applyImageBtn->setEnabled(true);
         return;
     }
+    setLog(QStringLiteral("正在注册 DLL(需要管理员权限)…"), false);
+    QCoreApplication::processEvents();
+
+    // 只动图片 Hook：特效 Hook 的注册状态与配置原样保留，两页互不影响。
+    saveImageSettings();
+    if (!Engine::instance().registerImageDll(&err)) {
+        setLog(err, true);
+        m_applyImageBtn->setEnabled(true);
+        return;
+    }
+    if (m_folderExt->isChecked()) {
+        // folderExt is read at DLL load; re-register so it takes effect now.
+        Engine::instance().unregisterImageDll(nullptr);
+        Engine::instance().registerImageDll(&err);
+    }
+
+    setLog(QStringLiteral("正在重启资源管理器…"), false);
+    QCoreApplication::processEvents();
+    Engine::restartExplorer(nullptr);
+    refreshStatus();
+    setLog(randomMode
+               ? QStringLiteral("随机图片背景已应用！每打开或切换一个文件夹窗口都会换一张。")
+               : QStringLiteral("图片背景已应用！打开任意文件夹即可查看效果。"),
+           false);
+    m_applyImageBtn->setEnabled(true);
+}
+
+QImage MainWindow::applyImageParams(const QImage &src) const
+{
     QImage processed = ImageProcess::adjust(src, m_brightness->value() / 100.0,
                                             m_contrast->value() / 100.0, m_blur->value());
     processed = ImageProcess::rotateAroundY(processed, m_rotate->value());
@@ -2224,55 +2788,59 @@ void MainWindow::applyImage()
         const QSize target(qRound(processed.width() * pct), qRound(processed.height() * pct));
         processed = processed.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
-    if (!processed.save(Engine::processedImagePath(), "PNG")) {
-        setLog(QStringLiteral("处理后的图片保存失败"), true);
-        m_applyImageBtn->setEnabled(true);
-        return;
+    return processed;
+}
+
+bool MainWindow::buildRandomImagePool(int *count, QString *error)
+{
+    if (count)
+        *count = 0;
+    if (m_presets.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("图片浏览列表为空，随机模式没有可用图片；"
+                                    "请先用「选择文件夹」导入图片。");
+        return false;
     }
 
-    setLog(QStringLiteral("正在写入配置…"), false);
-    QCoreApplication::processEvents();
-
-    // posType: 0..3 corners, 4 center, 5 stretch, 6 zoom&fill
-    static const int posMap[] = {6, 4, 5, 0, 1, 2, 3};
-    int posType = posMap[qBound(0, m_posMode, 6)];
-
-    if (!Engine::instance().writeImageConfig(Engine::processedImagePath(), posType,
-                                             m_opacity->value(), m_folderExt->isChecked(), &err)) {
-        setLog(err, true);
-        m_applyImageBtn->setEnabled(true);
-        return;
+    const QString dir = Engine::imagePoolDir();
+    QDir pool(dir);
+    if (!pool.exists() && !QDir().mkpath(dir)) {
+        if (error)
+            *error = QStringLiteral("无法创建随机图片池目录：%1").arg(dir);
+        return false;
     }
-    setLog(QStringLiteral("正在注册 DLL(需要管理员权限)…"), false);
-    QCoreApplication::processEvents();
+    // 旧池先清空：图库可能换过目录，残留的图会继续被随机抽到。
+    for (const QFileInfo &old : pool.entryInfoList({QStringLiteral("*.png"),
+                                                    QStringLiteral("*.jpg")}, QDir::Files))
+        QFile::remove(old.absoluteFilePath());
 
-    saveImageSettings();
-    if (!m_comboEffect->isChecked())
-        Engine::instance().unregisterEffectDll(nullptr); // exclusive mode
-    if (!Engine::instance().registerImageDll(&err)) {
-        setLog(err, true);
-        m_applyImageBtn->setEnabled(true);
-        return;
-    }
-    if (m_folderExt->isChecked()) {
-        // folderExt is read at DLL load; re-register so it takes effect now.
-        Engine::instance().unregisterImageDll(nullptr);
-        Engine::instance().registerImageDll(&err);
-    }
-    if (m_comboEffect->isChecked()) {
-        // Layer the whole-window blur/mica backdrop under the image.
-        if (!Engine::instance().writeEffectConfig(currentEffectConfig(), &err)
-            || !Engine::instance().registerEffectDll(&err)) {
-            setLog(QStringLiteral("图片背景已注册，但叠加效果失败：%1").arg(err), true);
+    int made = 0;
+    for (const PresetImage &preset : m_presets) {
+        QImage src(preset.res);
+        if (src.isNull())
+            continue; // 坏图/格式不支持：跳过，不让整批失败
+        const QImage processed = applyImageParams(src);
+        const QString out = dir + QStringLiteral("/bg_%1.png")
+                                        .arg(made + 1, 3, 10, QLatin1Char('0'));
+        if (!processed.save(out, "PNG")) {
+            if (error)
+                *error = QStringLiteral("随机图片池写入失败：%1").arg(out);
+            return false;
         }
+        ++made;
+        setLog(QStringLiteral("正在生成随机图片池 (%1/%2)…")
+                   .arg(made).arg(m_presets.size()), false);
+        QCoreApplication::processEvents();
     }
 
-    setLog(QStringLiteral("正在重启资源管理器…"), false);
-    QCoreApplication::processEvents();
-    Engine::restartExplorer(nullptr);
-    refreshStatus();
-    setLog(QStringLiteral("图片背景已应用！打开任意文件夹即可查看效果。"), false);
-    m_applyImageBtn->setEnabled(true);
+    if (made == 0) {
+        if (error)
+            *error = QStringLiteral("图片浏览列表里的图片都读取失败，无法生成随机池。");
+        return false;
+    }
+    if (count)
+        *count = made;
+    return true;
 }
 
 void MainWindow::applyEffect()
@@ -2292,28 +2860,12 @@ void MainWindow::applyEffect()
     setLog(QStringLiteral("正在注册 DLL(需要管理员权限)…"), false);
     QCoreApplication::processEvents();
 
+    // 只动特效 Hook：图片 Hook 的注册状态与配置原样保留，两页互不影响。
     saveEffectSettings();
-    if (!m_keepImage->isChecked())
-        Engine::instance().unregisterImageDll(nullptr); // exclusive mode
     if (!Engine::instance().registerEffectDll(&err)) {
         setLog(err, true);
         m_applyEffectBtn->setEnabled(true);
         return;
-    }
-    if (m_keepImage->isChecked()) {
-        // Re-apply the image hook with the last used picture and parameters.
-        const QString img = Engine::processedImagePath();
-        if (QFileInfo::exists(img)) {
-            static const int posMap[] = {6, 4, 5, 0, 1, 2, 3};
-            AppConfig &s = AppConfig::instance();
-            if (!Engine::instance().writeImageConfig(
-                    img, posMap[qBound(0, s.value(ConfigKeys::Image::PosType, 0).toInt(), 6)],
-                    s.value(ConfigKeys::Image::Opacity, 255).toInt(),
-                    s.value(ConfigKeys::Image::FolderExt, false).toBool(), &err)
-                || !Engine::instance().registerImageDll(&err)) {
-                setLog(QStringLiteral("效果已注册，但叠加图片失败：%1").arg(err), true);
-            }
-        }
     }
 
     setLog(QStringLiteral("正在重启资源管理器…"), false);
@@ -2503,6 +3055,7 @@ void MainWindow::refreshVideoList()
                                             ? QStringLiteral("播放中") : QStringLiteral("停止")));
     updateVideoButtons();
     updatePlayingHighlight();
+    updateTranscodeButton();  // 列表重建后选中项已失效，“立即转码”要跟着置灰
 }
 
 // 正在播放(含暂停/自动挂起，恢复时仍是这一曲)的条目以底色高亮，便于辨别当前曲目

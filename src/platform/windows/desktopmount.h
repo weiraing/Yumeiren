@@ -52,9 +52,10 @@ bool isOnBattery();
 bool activateExistingInstanceWindow(const QString &mainWindowTitle,
                                     QString *reason = nullptr);
 
-// 资源友好模式：把进程亲和性限制到前 maxCores 个逻辑核。解码线程数跟随
-// QThread::idealThreadCount(受掩码影响)，实测(32核机,1080p30)内存-27%、
-// 显存-36%、CPU不变。核数<=maxCores 时不做任何修改，返回 false。
+// 资源友好模式：把进程亲和性限制到 maxCores 个逻辑核，并优先让它们分属不同
+// 物理核(避开 SMT 兄弟对)。解码线程数跟随 QThread::idealThreadCount(受掩码
+// 影响)，实测(32核机,1080p30)内存-27%、显存-36%、CPU不变。
+// 逻辑核总数<=maxCores 时不做任何修改，返回 false。
 bool applyProcessAffinityLimit(int maxCores);
 
 // 单实例唯一运行权：命名互斥锁实现。进程退出(含强杀/崩溃)时内核自动释放，

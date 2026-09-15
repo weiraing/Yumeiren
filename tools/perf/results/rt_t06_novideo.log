@@ -1,96 +1,0 @@
-[16:39:13.547][INFO][tid=14996][App] ==== 进程启动 pid=32116 diag=on ver=1.0.0 ====
-[16:39:13.548][INFO][tid=14996][Startup] 阶段 进程启动→诊断初始化 用时 +29ms 累计 29ms
-[16:39:13.548][INFO][tid=14996][Startup] 阶段 Qt 应用对象创建 用时 +0ms 累计 29ms
-[16:39:13.610][INFO][tid=14996][Config] 配置读取: path=C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/config/.ini exists=1 size=26820527 keys=41 wasPlaying=true
-[16:39:13.611][INFO][tid=14996][Config] 配置已加载: C:/Users/rain/Documents/ExplorerBg/FolderBgStudio/build/config/.ini
-[16:39:13.611][INFO][tid=14996][Startup] 阶段 配置加载(含注册表迁移与校验) 用时 +63ms 累计 92ms
-[16:39:13.611][INFO][tid=14996][App] 资源友好模式: 进程已限制到 4 个逻辑核
-[16:39:13.612][INFO][tid=14996][Startup] 阶段 单实例守卫与旧配置导入 用时 +2ms 累计 94ms
-[16:39:13.612][INFO][tid=14996][Startup] 阶段 样式与内嵌资源加载 用时 +0ms 累计 94ms
-[16:39:13.613][INFO][tid=14996][Startup] VideoWallpaper 初始化完成 uptime=95ms
-[16:39:13.613][INFO][tid=14996][Startup] 阶段 视频壁纸单例初始化完成 用时 +1ms 累计 95ms
-[16:39:13.613][DEBUG][tid=14996][Lifecycle] timer-start QTimer=0x19fe4352840 1000ms evaluateSuspend
-[16:39:13.613][DEBUG][tid=14996][Lifecycle] timer-start QTimer=0x19fe4352f00 30000ms trimMemory
-[16:39:13.613][INFO][tid=14996][VideoWallpaper] session=1 play index=1/2 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvudio_only.mp4 resumePos=-1
-[16:39:13.880][DEBUG][tid=14996][VideoWallpaper] 创建输出: players=1/0 widgets=1/0 audios=1/0
-[16:39:13.880][DEBUG][tid=14996][Lifecycle] create QMediaPlayer=0x19fe4352aa0 player widget=19fe43756b0 audio=19fe43529e0
-[16:39:13.880][DEBUG][tid=14996][Lifecycle] bind QVideoWidget=0x19fe43756b0 player=0x19fe4352aa0
-[16:39:13.936][DEBUG][tid=14996][VideoWallpaper] session=1 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvudio_only.mp4
-[16:39:13.936][DEBUG][tid=14996][VideoWallpaper] setLoops(Once) player=19fe4352aa0 widget=19fe43756b0 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonv%07udio_only.mp4
-[16:39:13.936][DEBUG][tid=14996][VideoWallpaper] setPlaybackRate(1)
-[16:39:13.936][INFO][tid=14996][Startup] 阶段 壁纸状态恢复已发起(视频管线后台起跑) 用时 +322ms 累计 417ms
-[16:39:14.304][INFO][tid=14996][Startup] 阶段 主窗口控件树构建完成(UI 初始化) 用时 +368ms 累计 785ms
-[16:39:14.578][INFO][tid=14996][VideoWallpaper] 恢复播放: reasons=0 manualPaused=0
-[16:39:14.578][DEBUG][tid=14996][VideoWallpaper] setPlaybackRate(1)
-[16:39:14.578][DEBUG][tid=14996][VideoWallpaper] setPlaybackRate(1)
-[16:39:14.578][DEBUG][tid=14996][VideoWallpaper] setLoops(Once) player=19fe4352aa0 widget=19fe43756b0 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonv%07udio_only.mp4
-[16:39:14.578][DEBUG][tid=14996][VideoWallpaper] setLoops(Once) player=19fe4352aa0 widget=19fe43756b0 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonv%07udio_only.mp4
-[16:39:14.578][INFO][tid=14996][VideoWallpaper] 恢复播放: reasons=0 manualPaused=0
-[16:39:14.578][INFO][tid=14996][Startup] 阶段 设置回填完成(含图库与显示器枚举) 用时 +274ms 累计 1059ms
-[16:39:14.722][DEBUG][tid=14996][Lifecycle] create MainWindow=0x9f879ff6f0 size=1109x995
-[16:39:14.722][INFO][tid=14996][Startup] 阶段 主窗口构造完成(含 UI 初始化) 用时 +144ms 累计 1203ms
-[16:39:14.731][INFO][tid=14996][Startup] 阶段 主窗口首次显示 用时 +9ms 累计 1212ms
-[16:39:14.731][WARNING][tid=14996][VideoWallpaper] session=1 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvudio_only.mp4 reason=格式不支持 detail=Could not open file
-[16:39:14.731][DEBUG][tid=14996][VideoWallpaper] session=1 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideonvudio_only.mp4
-[16:39:14.731][DEBUG][tid=14996][VideoWallpaper] setPlaybackRate(1)
-[16:39:14.731][DEBUG][tid=14996][VideoWallpaper] session=1 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvudio_only.mp4
-[16:39:14.814][INFO][tid=14996][VideoWallpaper] 恢复播放: reasons=0 manualPaused=0
-[16:39:15.231][DEBUG][tid=14996][VideoWallpaper] session=1 metaDataChanged file=
-[16:39:15.231][DEBUG][tid=14996][VideoWallpaper] setPlaybackRate(1)
-[16:39:15.231][DEBUG][tid=14996][VideoWallpaper] session=1 mediaStatus=0 file=
-[16:39:15.231][INFO][tid=14996][VideoWallpaper] session=2 play index=1/2 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvudio_only.mp4 resumePos=-1
-[16:39:15.236][DEBUG][tid=14996][VideoWallpaper] session=2 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvudio_only.mp4
-[16:39:15.236][DEBUG][tid=14996][VideoWallpaper] setLoops(Once) player=19fe4352aa0 widget=19fe43756b0 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonv%07udio_only.mp4
-[16:39:15.236][DEBUG][tid=14996][VideoWallpaper] setPlaybackRate(1)
-[16:39:15.237][WARNING][tid=14996][VideoWallpaper] session=2 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvudio_only.mp4 reason=格式不支持 detail=Could not open file
-[16:39:15.237][DEBUG][tid=14996][VideoWallpaper] session=2 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideonvudio_only.mp4
-[16:39:15.237][DEBUG][tid=14996][VideoWallpaper] setPlaybackRate(1)
-[16:39:15.237][DEBUG][tid=14996][VideoWallpaper] session=2 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvudio_only.mp4
-[16:39:15.604][INFO][tid=14996][VideoWallpaper] 恢复播放: reasons=0 manualPaused=0
-[16:39:16.608][INFO][tid=14996][VideoWallpaper] 恢复播放: reasons=0 manualPaused=0
-[16:39:16.737][DEBUG][tid=14996][VideoWallpaper] session=2 metaDataChanged file=
-[16:39:16.737][DEBUG][tid=14996][VideoWallpaper] setPlaybackRate(1)
-[16:39:16.737][DEBUG][tid=14996][VideoWallpaper] session=2 mediaStatus=0 file=
-[16:39:16.737][INFO][tid=14996][VideoWallpaper] session=3 play index=1/2 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvudio_only.mp4 resumePos=-1
-[16:39:16.740][DEBUG][tid=14996][VideoWallpaper] session=3 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvudio_only.mp4
-[16:39:16.740][DEBUG][tid=14996][VideoWallpaper] setLoops(Once) player=19fe4352aa0 widget=19fe43756b0 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonv%07udio_only.mp4
-[16:39:16.740][DEBUG][tid=14996][VideoWallpaper] setPlaybackRate(1)
-[16:39:16.740][WARNING][tid=14996][VideoWallpaper] session=3 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvudio_only.mp4 reason=格式不支持 detail=Could not open file
-[16:39:16.740][WARNING][tid=14996][VideoWallpaper] session=3 曲目不可播 track=1 fails=1 dead=1 reason=格式不支持
-[16:39:16.740][DEBUG][tid=14996][VideoWallpaper] session=3 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideonvudio_only.mp4
-[16:39:16.740][DEBUG][tid=14996][VideoWallpaper] setPlaybackRate(1)
-[16:39:16.740][DEBUG][tid=14996][VideoWallpaper] session=3 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvudio_only.mp4
-[16:39:16.947][INFO][tid=14996][VideoWallpaper] session=4 play index=2/2 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4 resumePos=-1
-[16:39:16.950][DEBUG][tid=14996][VideoWallpaper] session=4 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
-[16:39:16.950][DEBUG][tid=14996][VideoWallpaper] setLoops(Once) player=19fe4352aa0 widget=19fe43756b0 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonvnv_1080p30.mp4
-[16:39:16.950][DEBUG][tid=14996][VideoWallpaper] setPlaybackRate(1)
-[16:39:16.950][WARNING][tid=14996][VideoWallpaper] session=4 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4 reason=格式不支持 detail=Could not open file
-[16:39:16.951][DEBUG][tid=14996][VideoWallpaper] session=4 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
-[16:39:16.951][DEBUG][tid=14996][VideoWallpaper] setPlaybackRate(1)
-[16:39:16.951][DEBUG][tid=14996][VideoWallpaper] session=4 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
-[16:39:17.458][DEBUG][tid=14996][VideoWallpaper] session=4 metaDataChanged file=
-[16:39:17.458][DEBUG][tid=14996][VideoWallpaper] setPlaybackRate(1)
-[16:39:17.458][DEBUG][tid=14996][VideoWallpaper] session=4 mediaStatus=0 file=
-[16:39:17.458][INFO][tid=14996][VideoWallpaper] session=5 play index=2/2 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4 resumePos=-1
-[16:39:17.460][DEBUG][tid=14996][VideoWallpaper] session=5 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
-[16:39:17.460][DEBUG][tid=14996][VideoWallpaper] setLoops(Once) player=19fe4352aa0 widget=19fe43756b0 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonvnv_1080p30.mp4
-[16:39:17.461][DEBUG][tid=14996][VideoWallpaper] setPlaybackRate(1)
-[16:39:17.461][WARNING][tid=14996][VideoWallpaper] session=5 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4 reason=格式不支持 detail=Could not open file
-[16:39:17.461][DEBUG][tid=14996][VideoWallpaper] session=5 metaDataChanged file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
-[16:39:17.461][DEBUG][tid=14996][VideoWallpaper] setPlaybackRate(1)
-[16:39:17.461][DEBUG][tid=14996][VideoWallpaper] session=5 mediaStatus=7 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
-[16:39:17.614][INFO][tid=14996][VideoWallpaper] 恢复播放: reasons=0 manualPaused=0
-[16:39:18.608][INFO][tid=14996][VideoWallpaper] 恢复播放: reasons=0 manualPaused=0
-[16:39:18.970][DEBUG][tid=14996][VideoWallpaper] session=5 metaDataChanged file=
-[16:39:18.970][DEBUG][tid=14996][VideoWallpaper] setPlaybackRate(1)
-[16:39:18.970][DEBUG][tid=14996][VideoWallpaper] session=5 mediaStatus=0 file=
-[16:39:18.970][INFO][tid=14996][VideoWallpaper] session=6 play index=2/2 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4 resumePos=-1
-[16:39:18.972][DEBUG][tid=14996][VideoWallpaper] session=6 mediaStatus=1 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4
-[16:39:18.972][DEBUG][tid=14996][VideoWallpaper] setLoops(Once) player=19fe4352aa0 widget=19fe43756b0 source=file:///C:sers%0DainocumentsxplorerBgolderBgStudio%08uildedia%0Bideonvnv_1080p30.mp4
-[16:39:18.972][DEBUG][tid=14996][VideoWallpaper] setPlaybackRate(1)
-[16:39:18.972][WARNING][tid=14996][VideoWallpaper] session=6 媒体错误 file=sersainocumentsxplorerBgolderBgStudiouildediaideonvnv_1080p30.mp4 reason=格式不支持 detail=Could not open file
-[16:39:18.972][WARNING][tid=14996][VideoWallpaper] session=6 曲目不可播 track=2 fails=1 dead=2 reason=格式不支持
-[16:39:18.973][DEBUG][tid=14996][Lifecycle] timer-stop QTimer=0x19fe4352840 
-[16:39:18.973][DEBUG][tid=14996][Lifecycle] timer-stop QTimer=0x19fe4352f00 
-[16:39:18.976][INFO][tid=14996][Lifecycle] 管线卸载 n=1 累计 players=1/1 widgets=1/1 audios=1/1
-[16:39:18.992][INFO][tid=14996][VideoWallpaper] stopAll: 管线已卸载 session=6
