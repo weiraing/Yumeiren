@@ -9,6 +9,19 @@
 
 namespace kanban {
 
+namespace {
+
+// 进程级的上下文世代发号器。刻意用单调计数而不是 context() 指针：指针会随
+// QOpenGLContext 对象释放被复用，一旦复用就等于「换了上下文却当成没换」，
+// 而那种误判的表现是「第二次启动画面空白」——偶发、且极难定位。
+quint64 nextGlContextGeneration()
+{
+    static quint64 s_next = 1;
+    return s_next++;
+}
+
+} // namespace
+
 KanbanOpenGLView::KanbanOpenGLView(QWidget *parent)
     : QOpenGLWidget(parent)
 {
@@ -49,6 +62,10 @@ void KanbanOpenGLView::initializeGL()
 {
     // 上下文已当前化：此刻才允许创建 Cubism/纹理资源。
     makeCurrent();
+    // 先领一个新的世代号再发 contextReady：控制器是在 contextReady 里装载模型的，
+    // 而装载会建 Cubism 渲染器、进而碰那份进程级着色器缓存 —— 它必须已经能看到
+    // 新世代号，否则会把上一个上下文的死 id 当成自己的。
+    m_contextGeneration = nextGlContextGeneration();
     // 这三行日志是排查「桌面上一片空白」的第一现场：上下文有没有建起来、
     // 拿到的是哪个 GL 版本、尺寸是不是 0，全靠它们区分。
     videodiag::log(videodiag::Level::Info,
@@ -103,6 +120,12 @@ QSize KanbanOpenGLView::glPixelSize() const
 {
     return QSize(int(qRound64(width() * devicePixelRatioF())),
                  int(qRound64(height() * devicePixelRatioF())));
+}
+
+quint64 KanbanOpenGLView::glContextGeneration() const
+{
+    // 还没首绘时是 0，此时 context() 尚不存在，渲染器据此跳过换代判断。
+    return m_contextGeneration;
 }
 
 void KanbanOpenGLView::paintGL()

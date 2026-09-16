@@ -40,6 +40,21 @@ struct KanbanGlHost
     virtual void glDoneCurrent() = 0;
     // 绘制面尺寸，设备像素(=Cubism 渲染器/FBO 需要的真实像素)。
     virtual QSize glPixelSize() const = 0;
+
+    // GL 上下文的世代号：宿主每新建一次上下文递增一次，进程内单调、不复用。
+    //
+    // 为什么渲染器需要知道这件事：Cubism 有一份**进程级**的全局 GL 缓存
+    // (CubismShader_OpenGLES2 单例，里面存的是着色器 program id)，而 program
+    // 只在创建它的那个上下文里有效。看板娘「取消 → 启用」会换一个全新上下文，
+    // 单例却还活着 —— 没有世代号，渲染器就分不清「同一个上下文又用了一次」和
+    // 「换上下文了」，而后者必须把那份缓存丢掉重建，否则新上下文沿用死 id，
+    // glUseProgram 静默失败，桌面上什么都没有。
+    //
+    // 刻意不用 QOpenGLContext* 当身份：对象释放后地址会被复用，复用一次就是
+    // 「换了上下文却当成没换」，正是最难查的那种偶发故障。
+    // 返回 0 表示「还没有 GL 上下文」——软件宿主与尚未首绘的 GL 视图都走
+    // 这条默认实现，它们没有上下文，也就没有「缓存作废」可言。
+    virtual quint64 glContextGeneration() const { return 0; }
 };
 
 class KanbanRenderer

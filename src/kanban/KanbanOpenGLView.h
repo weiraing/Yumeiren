@@ -38,6 +38,7 @@ public:
     bool glMakeCurrent() override;
     void glDoneCurrent() override;
     QSize glPixelSize() const override;
+    quint64 glContextGeneration() const override;
 
 signals:
     // GL 上下文已在当前线程就绪：控制器此时才允许 initialize + loadModel。
@@ -53,6 +54,10 @@ private:
     // 首帧 paintGL 只记一次日志：这是「上下文建好了」到「画面真的出来了」
     // 之间唯一的分界点，每帧刷屏就没用了。
     bool m_firstPaintDone = false;
+    // 本视图所承载的那个 GL 上下文的世代号，在 initializeGL 里领一次。
+    // 渲染器靠它认出「Cubism 的进程级着色器缓存属于上一个上下文、已经作废」，
+    // 详见 KanbanGlHost::glContextGeneration()。
+    quint64 m_contextGeneration = 0;
 };
 
 } // namespace kanban

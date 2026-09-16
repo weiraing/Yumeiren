@@ -69,8 +69,10 @@
 #include "Motion/CubismPoseUpdater.hpp"
 #include "Motion/CubismUpdateScheduler.hpp"
 #include "Physics/CubismPhysics.hpp"
+#include "Rendering/CubismRenderer.hpp"
 #include "Rendering/OpenGL/CubismOffscreenManager_OpenGLES2.hpp"
 #include "Rendering/OpenGL/CubismRenderer_OpenGLES2.hpp"
+#include "Rendering/OpenGL/CubismShader_OpenGLES2.hpp"
 #include "Type/csmMap.hpp"
 #include "Utils/CubismString.hpp"
 
@@ -250,6 +252,67 @@ int randomBelow(int bound)
     return dist(randomEngine());
 }
 
+// ============================================================================
+// 进程级全局 GL 缓存：谁在用、什么时候必须丢
+//
+// Cubism 把着色器做成了**进程级单例**(CubismShader_OpenGLES2)，一次编译、
+// 全局复用。这在「一个上下文活到进程结束」的移动端是合理的，但看板娘会
+// 「取消 → 启用」：取消时窗口连同 GL 上下文一起销毁，启用时是一个全新上下文，
+// 而单例还活着。program id 只属于创建它的上下文，于是新上下文里：
+//   · GenerateShaders() 开头的 if (_shaderSets.GetSize() > 0) return; 直接短路，
+//     压根不会重新编译；
+//   · 后续每个绘制都沿用死 id，glUseProgram 静默失败。
+// 症状极具迷惑性 —— 模型装载、纹理上传、30fps 的 DrawFrame 全部正常，
+// 只有桌面上什么都没有(实测同一块区域的「不同颜色数」从 18021 掉到 1031)。
+//
+// 所以必须记住「这份缓存是给哪一代上下文建的」，换代就丢掉重来。
+// 0 表示还没有缓存(进程刚起来，或已经被丢掉)。
+// ============================================================================
+quint64 g_shaderCacheGeneration = 0;
+
+// 丢掉 Cubism 的进程级全局 GL 缓存，让下一次 CreateRenderer 在新上下文里
+// 重新抓 GL 入口、重新编译全部着色器。
+//
+// 调用前提：g_shaderCacheGeneration != 0，也就是「单例一定已经存在」。
+// 不满足时 GetInstance() 会当场新建单例并立刻编译几百个着色器，纯属浪费，
+// 在没有当前上下文的时候甚至是一次崩溃。调用方 syncCubismShaderCache() 用
+// 上面那个全局量把关，别绕过它直接调。
+//
+// 顺序不能反：
+//   ① ReleaseInvalidShaderProgram() 只做 C++ 侧的 CSM_DELETE 与清空，全程不碰 GL。
+//      它同时保证单例析构里的 ReleaseShaderProgram() 变成空循环 —— 那是唯一会发
+//      glDeleteProgram 的地方，而此刻旧上下文多半已经不在了，对着死上下文发 GL
+//      调用比漏一次释放严重得多。
+//   ② StaticRelease() 复位 Windows GL 函数指针的抓取标志(s_isFirstInitializeGlFunctions
+//      等)，并丢弃单例；下一次 CreateRenderer 会在新上下文里重新 wglGetProcAddress。
+//      这一条同样重要：那些 PFNGL* 是 wglGetProcAddress 抓来的，在部分驱动上是
+//      上下文相关的，不重抓就等于拿着旧上下文的入口画新上下文。
+// 只调 ② 会在上下文已死时发出 glDeleteProgram；只调 ① 则单例仍在。两个都要。
+void resetCubismGlobalGlState()
+{
+    CubismShader_OpenGLES2::GetInstance()->ReleaseInvalidShaderProgram();
+    CubismRenderer::StaticRelease();
+}
+
+// 上下文换代检查：generation 是宿主当前上下文的世代号，0 表示还没有上下文。
+//
+// 放在「建渲染器之前」而不是「销毁上下文之时」，理由是只有这里能确定
+// 「上下文真的换了」—— 渲染器每次启停都是新对象，没有跨启停的记忆；而旧上下文
+// 是怎么没的(正常停止、启动失败、异常路径)在这里都不重要，换代就一定成立。
+void syncCubismShaderCache(quint64 generation)
+{
+    if (generation == 0) {
+        return;
+    }
+    if (g_shaderCacheGeneration != 0 && g_shaderCacheGeneration != generation) {
+        logInfo(QStringLiteral("GL 上下文已换代(%1 → %2)，丢弃 Cubism 着色器缓存并重建")
+                    .arg(g_shaderCacheGeneration)
+                    .arg(generation));
+        resetCubismGlobalGlState();
+    }
+    g_shaderCacheGeneration = generation;
+}
+
 // 把上下文的借用收敛成一个作用域：进入前保证 current，出去时只归还自己借的。
 //
 // paintGL 期间 Qt 已经把上下文当前化，此时既不必再 makeCurrent，
@@ -361,7 +424,9 @@ public:
     bool Setup(const QString &modelJsonPath, QString *outError);
 
     // 建渲染器并把纹理传上 GPU。必须在 GlScope 里调用。
-    bool EnsureGl(const QSize &pixelSize, QString *outError);
+    // contextGeneration 是宿主当前上下文的世代号(0 = 还没有上下文)，
+    // 用来判断 Cubism 那份进程级着色器缓存是否已经随着旧上下文作废。
+    bool EnsureGl(const QSize &pixelSize, quint64 contextGeneration, QString *outError);
     void ReleaseGl();
 
     void UpdateSelf(float deltaSeconds);
@@ -656,7 +721,8 @@ CubismIdHandle KanbanCubismModel::GetId(const csmChar *name)
 
 // —— GPU 侧 ——
 
-bool KanbanCubismModel::EnsureGl(const QSize &pixelSize, QString *outError)
+bool KanbanCubismModel::EnsureGl(const QSize &pixelSize, quint64 contextGeneration,
+                                 QString *outError)
 {
     if (!_model) {
         if (outError) {
@@ -676,6 +742,11 @@ bool KanbanCubismModel::EnsureGl(const QSize &pixelSize, QString *outError)
             return false;
         }
     }
+
+    // 换代检查必须在 CreateRenderer() 之前：那一步内部会
+    // CubismShader_OpenGLES2::GetInstance() 把着色器单例取出来，晚了就来不及了。
+    // 「取消看板娘 → 再启用只剩一个空白窗口」的根因就落在这里。
+    syncCubismShaderCache(contextGeneration);
 
     CreateRenderer(static_cast<csmUint32>(pixelSize.width()),
                    static_cast<csmUint32>(pixelSize.height()), 1);
@@ -1256,7 +1327,7 @@ bool Live2DRenderer::loadModel(const QString &modelJsonPath, QString *outError)
         const QSize pixels = m_d->host->glPixelSize();
         if (scope.ok() && pixels.width() > 0 && pixels.height() > 0) {
             QString glError;
-            if (model->EnsureGl(pixels, &glError)) {
+            if (model->EnsureGl(pixels, m_d->host->glContextGeneration(), &glError)) {
                 m_d->glBuilt = true;
                 m_d->pixelSize = pixels;
             } else {
@@ -1332,7 +1403,7 @@ void Live2DRenderer::render()
 
     if (!m_d->glBuilt) {
         QString glError;
-        if (!model->EnsureGl(pixels, &glError)) {
+        if (!model->EnsureGl(pixels, m_d->host->glContextGeneration(), &glError)) {
             // 只报一次，否则 30fps 的时钟会把日志刷满同一句话。
             if (m_d->pixelSize != pixels) {
                 logWarn(QStringLiteral("GL 资源建立失败：%1").arg(glError));
