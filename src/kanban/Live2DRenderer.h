@@ -67,6 +67,10 @@ public:
     void render() override;
     void paint(QPainter *painter, const QSize &logicalSize) override;
 
+    // 视图把 GL 宿主交下来(见 KanbanGlHost)。两份实现都要给定义：
+    // 未接入 SDK 的那一份什么都不做，接入的那一份存进 Private。
+    void setGlHost(KanbanGlHost *host) override;
+
     void pointerMove(const QPointF &pos) override;
     void pointerClick(const QPointF &pos) override;
     bool playNextMotion() override;

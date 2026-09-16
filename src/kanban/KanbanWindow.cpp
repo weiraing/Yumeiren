@@ -89,6 +89,8 @@ void KanbanWindow::attachRenderer(KanbanRenderer *renderer)
         }
 #endif
     }
+    // 视图可能刚被 ensureView() 重建，宿主指针统一在此交回渲染器。
+    m_renderer->setGlHost(dynamic_cast<KanbanGlHost *>(m_view));
 }
 
 void KanbanWindow::detachRenderer()
@@ -101,6 +103,16 @@ void KanbanWindow::ensureView()
     if (m_view) {
         // 先摘出布局再删：布局持有指针，直接 delete 会让布局短暂指空。
         static_cast<QVBoxLayout *>(layout())->removeWidget(m_view);
+        // deleteLater 意味着旧视图还能活到本轮事件循环结束；期间万一来了一次
+        // paintGL，它手里的渲染器可能已经被控制器销毁(降级、换后端)。先松手。
+        if (auto *sw = qobject_cast<KanbanSoftwareView *>(m_view)) {
+            sw->setRenderer(nullptr);
+        }
+#ifdef YUMEIREN_WITH_LIVE2D
+        else if (auto *gl = qobject_cast<KanbanOpenGLView *>(m_view)) {
+            gl->setRenderer(nullptr);
+        }
+#endif
         m_view->deleteLater();
         m_view = nullptr;
     }

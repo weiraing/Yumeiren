@@ -19,6 +19,29 @@ class QPainter;
 
 namespace kanban {
 
+// GL 宿主能力：让渲染器能在「非 paintGL 时机」把 GL 上下文取回来。
+//
+// 为什么需要它：QOpenGLWidget 只在 initializeGL/resizeGL/paintGL 里替我们
+// 当前化上下文，而模型装载、换模型这些动作发生在定时器/设置变更里，
+// 此刻 glGenTextures 会静默失败。Qt 6 的 QOpenGLWidget 有公开 makeCurrent，
+// 所以由视图实现这三个方法，渲染器用完即 doneCurrent，不长期持有上下文。
+// 接口刻意不出现任何 Qt GL 类型：软件后端与非 GL 构建零成本。
+struct KanbanGlHost
+{
+    virtual ~KanbanGlHost() = default;
+
+    // 上下文是否已经创建(视图尚未首绘时为 false)。
+    virtual bool glHostReady() const = 0;
+    // 本宿主的上下文此刻是否已在当前线程当前化。paintGL 期间恒为 true，
+    // 此时既不能重复 makeCurrent 更不能 doneCurrent，否则视图自己的绘制状态被拆。
+    virtual bool glIsCurrent() const = 0;
+    // 借上下文：成功返回 true。用完必须与 glDoneCurrent 成对。
+    virtual bool glMakeCurrent() = 0;
+    virtual void glDoneCurrent() = 0;
+    // 绘制面尺寸，设备像素(=Cubism 渲染器/FBO 需要的真实像素)。
+    virtual QSize glPixelSize() const = 0;
+};
+
 class KanbanRenderer
 {
 public:
@@ -52,6 +75,9 @@ public:
 
     // 软件路径的绘制入口；painter 已裁剪到窗口客户区，坐标系为逻辑像素。
     virtual void paint(QPainter *painter, const QSize &logicalSize) = 0;
+
+    // GL 宿主(仅 Live2D 后端需要)。软件后端忽略即可。
+    virtual void setGlHost(KanbanGlHost *host) { Q_UNUSED(host) }
 
     // —— 交互 ——
     // 鼠标移动(逻辑像素，窗口坐标)：Live2D 后端据此做视线/头部跟随。

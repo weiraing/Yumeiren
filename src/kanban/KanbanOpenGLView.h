@@ -15,11 +15,13 @@
 
 #include <QOpenGLWidget>
 
+#include "kanban/KanbanRenderer.h" // KanbanGlHost 基类需要完整定义
+
 namespace kanban {
 
 class KanbanRenderer;
 
-class KanbanOpenGLView : public QOpenGLWidget
+class KanbanOpenGLView : public QOpenGLWidget, public KanbanGlHost
 {
     Q_OBJECT
 
@@ -29,6 +31,13 @@ public:
 
     void setRenderer(KanbanRenderer *renderer);
     KanbanRenderer *renderer() const { return m_renderer; }
+
+    // —— KanbanGlHost：渲染器在 paintGL 之外取用上下文的入口 ——
+    bool glHostReady() const override;
+    bool glIsCurrent() const override;
+    bool glMakeCurrent() override;
+    void glDoneCurrent() override;
+    QSize glPixelSize() const override;
 
 signals:
     // GL 上下文已在当前线程就绪：控制器此时才允许 initialize + loadModel。

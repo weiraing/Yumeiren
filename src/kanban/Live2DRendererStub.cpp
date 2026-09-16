@@ -67,6 +67,11 @@ void Live2DRenderer::resize(int width, int height, float devicePixelRatio)
 void Live2DRenderer::update(float) {}
 void Live2DRenderer::render() {}
 void Live2DRenderer::paint(QPainter *, const QSize &) {}
+
+void Live2DRenderer::setGlHost(KanbanGlHost *)
+{
+    // 本构建连 GL 宿主视图都不存在，收到宿主指针也无事可做。
+}
 void Live2DRenderer::pointerMove(const QPointF &) {}
 void Live2DRenderer::pointerClick(const QPointF &) {}
 
