@@ -790,27 +790,12 @@ QWidget *MainWindow::buildWallpaperPage()
 void MainWindow::addVideos()
 {
     const QString videoDir = QCoreApplication::applicationDirPath()
-                             + QStringLiteral("/media/video");
+                             + QStringLiteral("/data/video");
     QDir().mkpath(videoDir);
-    const QStringList nameFilters = {
-        QStringLiteral("*.mp4"),  QStringLiteral("*.webm"), QStringLiteral("*.mkv"),
-        QStringLiteral("*.avi"),  QStringLiteral("*.mov"),  QStringLiteral("*.wmv")};
 
-    // 先尝试选择文件；若取消则尝试选择文件夹
     QStringList files = QFileDialog::getOpenFileNames(
         this, QStringLiteral("选择视频文件"), videoDir,
         QStringLiteral("视频文件 (*.mp4 *.webm *.mkv *.avi *.mov *.wmv);;所有文件 (*)"));
-
-    if (files.isEmpty()) {
-        // 用户未选文件，尝试选择文件夹
-        QString dir = QFileDialog::getExistingDirectory(
-            this, QStringLiteral("选择视频文件夹"), videoDir);
-        if (dir.isEmpty())
-            return;
-        QDirIterator it(dir, nameFilters, QDir::Files, QDirIterator::Subdirectories);
-        while (it.hasNext())
-            files.append(it.next());
-    }
 
     if (files.isEmpty())
         return;
@@ -824,12 +809,12 @@ void MainWindow::addVideos()
     refreshVideoList();
 }
 
-// 扫描软件目录 media/video(含子目录)下的视频文件，去重后并入播放列表。
+// 扫描软件目录 data/video(含子目录)下的视频文件，去重后并入播放列表。
 // 只增不删：不影响现有条目与正在播放的曲目(setPlaylist 按文件名保持当前曲)。
 void MainWindow::scanVideoDir()
 {
     const QString videoDir = QCoreApplication::applicationDirPath()
-                             + QStringLiteral("/media/video");
+                             + QStringLiteral("/data/video");
     const QStringList nameFilters = {
         QStringLiteral("*.mp4"),  QStringLiteral("*.webm"), QStringLiteral("*.mkv"),
         QStringLiteral("*.avi"),  QStringLiteral("*.mov"),  QStringLiteral("*.wmv")};
