@@ -1,4 +1,4 @@
-#include "appinfo.h"
+#include "app/AppInfo.h"
 
 #include "config/AppConfig.h"
 #include "core/CachePaths.h"

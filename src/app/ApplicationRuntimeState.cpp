@@ -1,6 +1,6 @@
 #include "app/ApplicationRuntimeState.h"
 
-#include "videodiag.h"
+#include "core/Diagnostics.h"
 
 ApplicationRuntimeState &ApplicationRuntimeState::instance()
 {

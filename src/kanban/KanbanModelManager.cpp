@@ -9,7 +9,7 @@
 #include <QJsonObject>
 #include <QSet>
 
-#include "videodiag.h"
+#include "core/Diagnostics.h"
 
 namespace kanban {
 
@@ -58,7 +58,7 @@ void collectModelJsons(const QDir &dir, int depth, QStringList *out)
 QString KanbanModelManager::defaultModelsRoot()
 {
     return QDir(QCoreApplication::applicationDirPath())
-        .absoluteFilePath(QStringLiteral("data/kanban/models"));
+        .absoluteFilePath(QStringLiteral("data/models"));
 }
 
 bool KanbanModelManager::validateModelJson(const QString &jsonPath, ModelInfo *out)

@@ -11,8 +11,8 @@
 
 #include <memory>
 
-#include "engine.h"
-#include "imageprocess.h"
+#include "engine/Engine.h"
+#include "core/ImageProcess.h"
 
 namespace kanban {
 class KanbanController;

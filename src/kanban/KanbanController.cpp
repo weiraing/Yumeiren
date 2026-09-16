@@ -13,7 +13,7 @@
 #include "kanban/KanbanWindow.h"
 #include "kanban/Live2DRenderer.h"
 #include "kanban/PlaceholderRenderer.h"
-#include "videodiag.h"
+#include "core/Diagnostics.h"
 
 namespace kanban {
 

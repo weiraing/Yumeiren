@@ -5,7 +5,7 @@
 #include <QOpenGLContext>
 
 #include "kanban/KanbanRenderer.h"
-#include "videodiag.h"
+#include "core/Diagnostics.h"
 
 namespace kanban {
 

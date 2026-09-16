@@ -20,6 +20,8 @@ dist/
 tools/
 new-build/
 live2d-build/
+data/
+third_party/
 scripts
 tests
 # docs 整体不入库，但看板娘/托盘的开发与测试文档要跟着代码走(任务书 §15)。

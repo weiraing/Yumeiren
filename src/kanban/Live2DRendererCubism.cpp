@@ -39,7 +39,7 @@
 
 #include "kanban/KanbanRenderer.h"
 #include "kanban/Live2DRenderer.h"
-#include "videodiag.h"
+#include "core/Diagnostics.h"
 
 #include "CubismDefaultParameterId.hpp"
 #include "CubismFramework.hpp"

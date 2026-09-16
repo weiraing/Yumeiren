@@ -15,7 +15,7 @@
 #ifdef YUMEIREN_WITH_LIVE2D
 #include "kanban/KanbanOpenGLView.h"
 #endif
-#include "videodiag.h"
+#include "core/Diagnostics.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>

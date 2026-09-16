@@ -23,19 +23,34 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets)
 
 set(YUMEIREN_SOURCES
     src/main.cpp
-    src/appinfo.cpp
-    src/core/CachePaths.cpp
-    src/config/AppConfig.cpp
-    src/mainwindow.cpp
-    src/tooltipstyle.cpp
-    src/imageprocess.cpp
-    src/engine.cpp
-    src/videowallpaper.cpp
-    src/videodiag.cpp
-    src/platform/windows/desktopmount.cpp
+    # app/ module
+    src/app/AppInfo.cpp
     src/app/ApplicationRuntimeState.cpp
     src/app/ApplicationShutdown.cpp
+    # config/ module
+    src/config/AppConfig.cpp
+    # core/ module
+    src/core/CachePaths.cpp
+    src/core/Diagnostics.cpp
+    src/core/ImageProcess.cpp
+    # engine/ module
+    src/engine/Engine.cpp
+    # ui/ module
+    src/ui/MainWindow.cpp
+    src/ui/MainWindowImagePage.cpp
+    src/ui/MainWindowEffectPage.cpp
+    src/ui/MainWindowVideoPage.cpp
+    src/ui/MainWindowKanbanPage.cpp
+    src/ui/TooltipStyle.cpp
+    # wallpaper/ module
+    src/wallpaper/VideoWallpaper.cpp
+    src/wallpaper/VideoWallpaperOutput.cpp
+    src/wallpaper/VideoWallpaperSettings.cpp
+    # platform/ module
+    src/platform/windows/desktopmount.cpp
+    # tray/ module
     src/tray/SystemTrayController.cpp
+    # kanban/ module
     src/kanban/KanbanAnimationClock.cpp
     src/kanban/KanbanController.cpp
     src/kanban/KanbanModelManager.cpp
@@ -101,6 +116,12 @@ set(APP_RESOURCES
     resources/light.qss
     resources/dlls/ExplorerBgTool.dll
     resources/dlls/ExplorerBlurMica.dll
+)
+
+# 复制 data/ 目录到编译输出目录（仅当 build/data/models 不存在时触发）
+add_custom_command(TARGET Yumeiren POST_BUILD
+    COMMAND powershell -Command "if (!(Test-Path '${CMAKE_BINARY_DIR}/data/models')) { Remove-Item -Path '${CMAKE_BINARY_DIR}/data' -Recurse -ErrorAction SilentlyContinue; Copy-Item -Path '${CMAKE_SOURCE_DIR}/data' -Destination '${CMAKE_BINARY_DIR}/data' -Recurse; Write-Host 'Copied data/ to build directory' } else { Write-Host 'data/ already exists in build directory' }"
+    COMMENT "Copying data/ directory to build output if needed"
 )
 
 qt_add_resources(Yumeiren app_res

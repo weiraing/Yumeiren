@@ -5,7 +5,7 @@
 #include <QPainterPath>
 #include <QtMath>
 
-#include "videodiag.h"
+#include "core/Diagnostics.h"
 
 namespace kanban {
 

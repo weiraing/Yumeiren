@@ -1,8 +1,8 @@
-#include "engine.h"
+#include "engine/Engine.h"
 
-#include "appinfo.h"
+#include "app/AppInfo.h"
 #include "core/CachePaths.h"
-#include "videodiag.h"
+#include "core/Diagnostics.h"
 
 #include <QCoreApplication>
 #include <QDir>

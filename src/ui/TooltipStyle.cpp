@@ -1,4 +1,4 @@
-#include "tooltipstyle.h"
+#include "ui/TooltipStyle.h"
 
 #include <QApplication>
 #include <QFont>

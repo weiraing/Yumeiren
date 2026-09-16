@@ -29,7 +29,7 @@ struct ModelInfo {
 class KanbanModelManager
 {
 public:
-    // 默认模型根目录：<程序目录>/data/kanban/models。
+    // 默认模型根目录：<程序目录>/data/models。
     // 刻意不放进 .cache：模型是用户资产，清缓存不该把它们带走。
     static QString defaultModelsRoot();
 

@@ -1,4 +1,4 @@
-#include "videodiag.h"
+#include "core/Diagnostics.h"
 
 #include <QApplication>
 #include <QDateTime>

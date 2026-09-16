@@ -11,7 +11,7 @@
 // 这层抽象唯一的存在理由。
 #include "kanban/Live2DRenderer.h"
 
-#include "videodiag.h"
+#include "core/Diagnostics.h"
 
 namespace kanban {
 

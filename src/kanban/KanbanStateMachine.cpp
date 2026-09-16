@@ -8,7 +8,7 @@
 //     且任何一种交互态都允许被 Paused / Stopping 抢占(用户随时能暂停或取消)。
 #include "kanban/KanbanStateMachine.h"
 
-#include "videodiag.h"
+#include "core/Diagnostics.h"
 
 namespace kanban {
 

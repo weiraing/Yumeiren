@@ -4,7 +4,7 @@
 #include <QElapsedTimer>
 
 #include "config/AppConfig.h"
-#include "videodiag.h"
+#include "core/Diagnostics.h"
 
 ApplicationShutdown &ApplicationShutdown::instance()
 {

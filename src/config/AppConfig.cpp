@@ -8,7 +8,7 @@
 #include <QRegularExpression>
 #include <QTimer>
 
-#include <videodiag.h>
+#include "core/Diagnostics.h"
 
 #include <windows.h>
 

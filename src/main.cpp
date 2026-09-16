@@ -6,14 +6,14 @@
 #include <QMessageBox>
 #include <QStyleFactory>
 
-#include "appinfo.h"
+#include "app/AppInfo.h"
 #include "core/CachePaths.h"
 #include "config/AppConfig.h"
 #include "config/ConfigKeys.h"
-#include "mainwindow.h"
+#include "ui/MainWindow.h"
 #include "platform/windows/desktopmount.h"
-#include "videodiag.h"
-#include "videowallpaper.h"
+#include "core/Diagnostics.h"
+#include "wallpaper/VideoWallpaper.h"
 
 int main(int argc, char *argv[])
 {

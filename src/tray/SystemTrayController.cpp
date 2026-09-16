@@ -15,12 +15,12 @@
 
 #include "app/ApplicationRuntimeState.h"
 #include "app/ApplicationShutdown.h"
-#include "appinfo.h"
+#include "app/AppInfo.h"
 #include "config/AppConfig.h"
 #include "config/ConfigKeys.h"
 #include "kanban/KanbanController.h"
-#include "videodiag.h"
-#include "videowallpaper.h"
+#include "core/Diagnostics.h"
+#include "wallpaper/VideoWallpaper.h"
 
 namespace {
 
