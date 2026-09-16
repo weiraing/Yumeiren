@@ -74,6 +74,10 @@ public:
     void pointerMove(const QPointF &pos) override;
     void pointerClick(const QPointF &pos) override;
     bool playNextMotion() override;
+    // 表情走 ExpressionMotionManager，与动作的 MotionManager 互不抢占优先级，
+    // 所以「切表情」不会打断正在播的动作(见 KanbanRenderer 的说明)。
+    int expressionCount() const override;
+    bool playNextExpression() override;
 
     void pause() override;
     void resume() override;

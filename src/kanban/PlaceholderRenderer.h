@@ -14,6 +14,8 @@
 
 #include "kanban/KanbanRenderer.h"
 
+#include <QImage>
+
 namespace kanban {
 
 class PlaceholderRenderer : public KanbanRenderer
@@ -37,6 +39,11 @@ public:
     void pointerClick(const QPointF &pos) override;
     bool playNextMotion() override;
 
+    // 占位后端也有表情(见 .cpp 的 kExpressions)：降级路径下右键菜单的
+    // 「切换表情」不该变成死按钮，界面行为不因后端而不同。
+    int expressionCount() const override;
+    bool playNextExpression() override;
+
     void pause() override { m_paused = true; }
     void resume() override { m_paused = false; }
     void shutdown() override;
@@ -55,6 +62,7 @@ private:
     int m_height = 480;
     float m_dpr = 1.0f;
     QString m_modelName;
+    QImage m_modelTexture;  // 模型纹理，用于占位渲染器显示不同模型
 
     float m_time = 0.0f;        // 累计动画时间(暂停时不涨)
     float m_blinkLeft = 0.0f;   // 0=睁眼 1=闭眼
@@ -63,6 +71,7 @@ private:
     QPointF m_gazeTarget;
     TimedMotion m_motion;
     bool m_motionActive = false;
+    int m_expressionIndex = 0; // 见 kExpressions，索引即「当前表情」
 };
 
 } // namespace kanban

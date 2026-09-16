@@ -74,6 +74,7 @@ signals:
     void scaleStepped(int steps); // 滚轮：+1 放大 / -1 缩小
     void pauseResumeRequested();
     void playNextRequested();
+    void nextExpressionRequested();
     void nextModelRequested();
     void hideRequested();
     void settingsRequested();
@@ -89,6 +90,9 @@ protected:
 
 private:
     void ensureView();
+    // 让子视图把手里的渲染器指针放掉。视图是 deleteLater 的、比窗口多活一会儿，
+    // 期间任何一次绘制都会用到这个指针 —— 见实现处的说明。
+    void releaseViewRenderer();
     void applyTopmostStyle();
     void applyMouseThroughStyle();
 

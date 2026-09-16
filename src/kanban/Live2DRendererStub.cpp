@@ -80,6 +80,18 @@ bool Live2DRenderer::playNextMotion()
     return false;
 }
 
+int Live2DRenderer::expressionCount() const
+{
+    // 0 = 本后端没有表情。控制器据此切到占位渲染器(它有写死的几个表情)，
+    // 于是「切换表情」这个入口在未接入 SDK 的构建里也不会是死的。
+    return 0;
+}
+
+bool Live2DRenderer::playNextExpression()
+{
+    return false;
+}
+
 void Live2DRenderer::pause() { m_paused = true; }
 void Live2DRenderer::resume() { m_paused = false; }
 

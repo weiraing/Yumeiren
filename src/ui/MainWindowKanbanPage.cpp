@@ -84,6 +84,13 @@ QWidget *MainWindow::buildKanbanPage()
         m_kanban->playNext();
         updateKanbanControls();
     });
+    m_kanbanExprBtn = new QPushButton(QStringLiteral("切换表情"), leftCard);
+    m_kanbanExprBtn->setMinimumHeight(40);
+    m_kanbanExprBtn->setEnabled(false);
+    connect(m_kanbanExprBtn, &QPushButton::clicked, this, [this] {
+        m_kanban->playNextExpression();
+        updateKanbanControls();
+    });
     m_kanbanStopBtn = new QPushButton(QStringLiteral("取消"), leftCard);
     m_kanbanStopBtn->setObjectName(QStringLiteral("DangerButton"));
     m_kanbanStopBtn->setMinimumHeight(40);
@@ -95,6 +102,7 @@ QWidget *MainWindow::buildKanbanPage()
     leftLay->addWidget(m_kanbanStartBtn);
     leftLay->addWidget(m_kanbanPauseBtn);
     leftLay->addWidget(m_kanbanNextBtn);
+    leftLay->addWidget(m_kanbanExprBtn);
     leftLay->addWidget(m_kanbanStopBtn);
 
     m_kanbanStatus = new QLabel(QStringLiteral("未启动"), leftCard);
@@ -420,6 +428,7 @@ void MainWindow::refreshKanbanModels()
 {
     if (!m_kanbanModelCombo)
         return;
+    m_kanban->refreshModels(); // 触发实际扫描，而非仅读缓存
     const QString current = m_kanban->modelPath();
     const QVector<kanban::ModelInfo> models = m_kanban->validModelList();
 
@@ -457,6 +466,15 @@ void MainWindow::updateKanbanControls()
     m_kanbanPauseBtn->setEnabled(running);
     m_kanbanPauseBtn->setText(paused ? QStringLiteral("继续") : QStringLiteral("暂停"));
     m_kanbanNextBtn->setEnabled(running && !paused);
+    // 表情入口：当前模型/后端没有表情就置灰，并把原因写进提示 —— 一个不解释
+    // 原因的灰按钮，用户只会当成 bug；写清楚「当前模型没有表情文件」，
+    // 他就能自己换一个带表情的模型。
+    const int exprCount = m_kanban->expressionCount();
+    m_kanbanExprBtn->setEnabled(running && !paused && exprCount > 0);
+    m_kanbanExprBtn->setToolTip(exprCount > 0
+                                    ? QStringLiteral("当前模型有 %1 个表情，点击逐个切换")
+                                          .arg(exprCount)
+                                    : QStringLiteral("当前模型没有表情文件"));
     m_kanbanStopBtn->setEnabled(running || failed);
 
     QString status = QStringLiteral("状态：%1").arg(m_kanban->stateText());

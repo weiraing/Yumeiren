@@ -45,6 +45,9 @@ public:
     bool live2dAvailable() const;
     QString currentModelName() const { return m_currentModelName; }
     QStringList modelNames() const;
+    // 当前渲染器的表情数(0 = 没有表情)。界面据此决定「切换表情」入口是否可用；
+    // 问的是渲染器而不是模型表，因为真正能不能切由后端说了算。
+    int expressionCount() const;
     // 界面下拉框用：有效模型的完整信息(名称/路径/贴图与动作计数)，顺序与
     // modelNames() 一致。只给名字不够 —— 用户要能看出哪个模型是「空壳」。
     QVector<ModelInfo> validModelList() const;
@@ -57,6 +60,7 @@ public:
     void pauseResume(); // 暂停/恢复(不销毁窗口)
     void stop();        // 取消看板娘：停帧、释放模型、关窗、复位
     void playNext();    // 下一个动作；没有动作则换下一个可用模型(§7.4)
+    void playNextExpression(); // 下一个表情；没有表情就静默返回(不换模型)
     void showWindow();  // 暂时隐藏后重新显示(不重启)
     void hideWindow();  // 隐藏但保持已装载状态与运行语义
 
@@ -104,7 +108,8 @@ private:
     bool ensureWindow();
     void destroyWindow();
     bool pickRenderer();                 // Live2D 可用则用，否则占位
-    bool initializeAndLoad();            // GL 上下文就绪后执行
+    bool initializeAndLoad();            // 只做需要当前 GL 上下文的部分
+    bool activateKanban();               // 收尾：定尺寸/起时钟/广播，不能跑在 GL 回调里
     bool fallbackToPlaceholder();        // Live2D 失败时降级
     void enterError(const QString &reason);
     void publishState();
@@ -113,6 +118,7 @@ private:
     void handleClicked(const QPointF &localPos);
     void handleScaleStepped(int steps);
     void saveGeometry();
+    void placeWindowFromConfig(); // 建窗后、挂视图前：给窗口一个非零尺寸与落点
     void applyScaleToWindow();
 
     KanbanStateMachine m_machine;

@@ -17,6 +17,18 @@
 
 int main(int argc, char *argv[])
 {
+    // 必须早于 QApplication 构造：Qt 的上屏路径(QRhiGles2)会初始化一个
+    // 「已编译着色器二进制磁盘缓存」(QOpenGLProgramBinaryCache)，而它的 load()
+    // 是**持锁做文件读写**的。只要那次读盘被卡住(权限受限、网络盘、杀软或沙箱的
+    // 文件拦截)，这把锁就永远不还，主线程随后在 QPlatformBackingStore::rhiFlush
+    // 里等它 —— 整个 GUI 线程死锁。
+    //
+    // 实测症状极具迷惑性：看板娘窗口的位置/尺寸都对、GL 上下文建起来了、纹理也
+    // 传上去了、首帧 paintGL 正常返回，然后事件循环再无任何响应，且一行错误日志
+    // 都没有。关掉磁盘缓存只是让 Qt 每次重新编译它自己那几个上屏着色器(毫秒级)，
+    // 换掉「桌面应用不该依赖磁盘缓存可写」这个隐患。
+    qputenv("QT_DISABLE_SHADER_DISK_CACHE", QByteArrayLiteral("1"));
+
     QApplication app(argc, argv);
     QApplication::setOrganizationName(appinfo::id());
     QApplication::setApplicationName(appinfo::id());

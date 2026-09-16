@@ -1,6 +1,8 @@
 #include "kanban/PlaceholderRenderer.h"
 
+#include <QDir>
 #include <QFileInfo>
+#include <QImage>
 #include <QPainter>
 #include <QPainterPath>
 #include <QtMath>
@@ -28,6 +30,25 @@ const MotionDef kMotions[] = {
     {"wave", 1.2f},
 };
 
+// 表情表：占位渲染器没有 exp3.json，表情是写死的脸部形变组合。
+// 命名与 Live2D 侧的语义对齐，接入 SDK 后逐项换成真表情即可。
+// 字段含义都相对「默认脸」而言，全部在 paint() 里叠加到既有形变上。
+struct ExpressionDef {
+    const char *name;
+    float eyeOpen;    // 睁眼高度倍率：0.4≈半闭、1.25≈瞪大
+    bool arcEyes;     // 画成上弯弧(开心时的「^ ^」)，盖过 eyeOpen
+    float mouthOpen;  // 常态开口度，与动作带来的开口度相加
+    float mouthCurve; // 嘴角方向：正=上扬、负=下撇，绝对值=幅度
+    int petalTone;    // 花瓣发色偏移(-255..255)，给表情一点整体色温差
+};
+const ExpressionDef kExpressions[] = {
+    {"default", 1.00f, false, 0.00f, 1.0f, 0},
+    {"happy", 0.55f, true, 0.35f, 1.9f, 14},
+    {"sleepy", 0.38f, false, 0.05f, -0.4f, -10},
+    {"surprised", 1.25f, false, 0.70f, 0.15f, 0},
+};
+constexpr int kExpressionCount = int(sizeof(kExpressions) / sizeof(kExpressions[0]));
+
 } // namespace
 
 bool PlaceholderRenderer::initialize(QString *outError)
@@ -39,6 +60,7 @@ bool PlaceholderRenderer::initialize(QString *outError)
     m_blinkLeft = 0.0f;
     m_nextBlinkIn = 2.0f;
     m_motionActive = false;
+    m_expressionIndex = 0; // 重新初始化 = 回到默认脸，免得「重启后还是上次那副表情」
     videodiag::log(videodiag::Level::Info,
                    QStringLiteral("占位渲染器初始化完成(QPainter 直绘，无位图搬运)"),
                    QStringLiteral("Live2D"));
@@ -56,6 +78,36 @@ bool PlaceholderRenderer::loadModel(const QString &modelJsonPath, QString *outEr
     m_modelName = QFileInfo(modelJsonPath).completeBaseName();
     if (m_modelName.endsWith(QStringLiteral(".model3")))
         m_modelName.chop(7);
+
+    // 尝试加载模型纹理：优先 textures/texture_00.png，其次同目录下同名 .png
+    m_modelTexture = QImage();
+    const QDir modelDir = QFileInfo(modelJsonPath).absoluteDir();
+    const QStringList textureCandidates = {
+        QStringLiteral("textures/texture_00.png"),
+        QStringLiteral("textures/texture_0.png"),
+        m_modelName + QStringLiteral(".png"),
+    };
+    for (const QString &rel : textureCandidates) {
+        const QString path = modelDir.filePath(rel);
+        if (QFileInfo::exists(path)) {
+            m_modelTexture = QImage(path);
+            if (!m_modelTexture.isNull()) {
+                // 预乘 alpha，加速后续绘制
+                m_modelTexture = m_modelTexture.convertToFormat(QImage::Format_RGBA8888_Premultiplied);
+                videodiag::log(videodiag::Level::Info,
+                    QStringLiteral("[Kanban] 占位渲染器加载纹理: %1 (%2x%3)")
+                        .arg(path).arg(m_modelTexture.width()).arg(m_modelTexture.height()),
+                    QStringLiteral("Live2D"));
+                break;
+            }
+        }
+    }
+    if (m_modelTexture.isNull()) {
+        videodiag::log(videodiag::Level::Warning,
+            QStringLiteral("[Kanban] 占位渲染器未找到纹理，使用默认花朵: %1").arg(modelJsonPath),
+            QStringLiteral("Live2D"));
+    }
+
     if (outError)
         outError->clear();
     return true;
@@ -64,6 +116,7 @@ bool PlaceholderRenderer::loadModel(const QString &modelJsonPath, QString *outEr
 void PlaceholderRenderer::unloadModel()
 {
     m_modelName.clear();
+    m_modelTexture = QImage();
     m_motionActive = false;
 }
 
@@ -135,6 +188,26 @@ bool PlaceholderRenderer::playNextMotion()
     return true;
 }
 
+int PlaceholderRenderer::expressionCount() const
+{
+    return kExpressionCount;
+}
+
+bool PlaceholderRenderer::playNextExpression()
+{
+    if (!m_ready || kExpressionCount <= 0) {
+        return false;
+    }
+    // 顺序轮转而不是随机：用户点「切换表情」是想把几个表情看一遍，
+    // 随机抽样会连着撞同一个，看起来像没生效。
+    m_expressionIndex = (m_expressionIndex + 1) % kExpressionCount;
+    videodiag::log(videodiag::Level::Debug,
+                   QStringLiteral("占位渲染器切表情：%1")
+                       .arg(QString::fromLatin1(kExpressions[m_expressionIndex].name)),
+                   QStringLiteral("Live2D"));
+    return true;
+}
+
 void PlaceholderRenderer::shutdown()
 {
     m_ready = false;
@@ -144,14 +217,14 @@ void PlaceholderRenderer::shutdown()
 
 // —— 绘制 ——
 //
-// 构图：一朵虞美人(罂粟科)拟人形象站在画面下半部，四片花瓣是头发，
-// 深色花心与雄蕊圈化成头饰，叶子当裙摆。全部矢量路径。
+// 如果已加载模型纹理则居中绘制纹理+呼吸缩放+摆动；否则绘制默认虞美人花朵。
 void PlaceholderRenderer::paint(QPainter *painter, const QSize &logicalSize)
 {
     if (!m_ready || !painter)
         return;
     painter->save();
     painter->setRenderHint(QPainter::Antialiasing, true);
+    painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
 
     const qreal w = logicalSize.width();
     const qreal h = logicalSize.height();
@@ -183,6 +256,34 @@ void PlaceholderRenderer::paint(QPainter *painter, const QSize &logicalSize)
 
     const qreal cx = w * 0.5 + sway * w * 0.012 + m_gaze.x() * w * 0.01;
     const qreal baseY = h * 0.93 + hop;
+
+    // 当前表情：只影响脸(眼/嘴)与花瓣色温，不影响姿态 —— 姿态归动作与呼吸，
+    // 两者分属不同通道，才可能出现「一边蹦跳一边笑」这种自然组合。
+    const ExpressionDef &ex = kExpressions[qBound(0, m_expressionIndex, kExpressionCount - 1)];
+
+    // —— 有纹理时：绘制纹理角色 ——
+    if (!m_modelTexture.isNull()) {
+        painter->save();
+        // 缩放：纹理高度占画面 75%，保持宽高比
+        const qreal texScale = (h * 0.75) / m_modelTexture.height();
+        const qreal drawW = m_modelTexture.width() * texScale;
+        const qreal drawH = m_modelTexture.height() * texScale;
+        // 呼吸缩放 + 挤压
+        const qreal breathScale = 1.0 + breath * 0.015;
+        const qreal finalW = drawW * squash * breathScale;
+        const qreal finalH = drawH * breathScale;
+        // 位置：底部对齐 baseY，水平居中，加摆动偏移
+        const qreal dx = cx - finalW * 0.5;
+        const qreal dy = baseY - finalH;
+        const QRectF dst(dx, dy, finalW, finalH);
+        painter->drawImage(dst, m_modelTexture);
+        painter->restore();
+        painter->restore();
+        return;
+    }
+
+    // —— 无纹理时：绘制默认虞美人花朵 ——
+
     const qreal bodyH = h * 0.62 * (1.0 + breath * 0.012) * squash;
     const qreal headR = qMin(w, h) * 0.19;
     const qreal headCy = baseY - bodyH - headR * 0.35;
@@ -269,17 +370,31 @@ void PlaceholderRenderer::paint(QPainter *painter, const QSize &logicalSize)
         painter->drawPath(fringe);
     }
 
-    // 眼睛：睁开高度按 1-blink 缩放，画成短弧即得「闭眼」效果
+    // 眼睛：睁开高度按 1-blink 缩放，画成短弧即得「闭眼」效果。
+    // 表情在此基础上再乘一个倍率，或直接换成上弯弧(开心脸的「^ ^」)。
     {
         const qreal eyeY = headCy + headR * 0.12;
         const qreal eyeDx = headR * 0.38;
         const qreal open = 1.0 - double(m_blinkLeft);
-        const qreal eyeH = qMax(0.6, headR * 0.22 * open);
+        const qreal eyeH = qMax(0.6, headR * 0.22 * open * double(ex.eyeOpen));
         const qreal eyeW = headR * 0.16;
+        // 眨眼到一半以下时一律退化成弧线，这样「笑眼 + 眨眼」不会互相打架。
+        const bool asArc = ex.arcEyes && open > 0.55;
         painter->setPen(Qt::NoPen);
         for (int side = -1; side <= 1; side += 2) {
             const QPointF c(cx + side * eyeDx + m_gaze.x() * headR * 0.05,
                             eyeY + m_gaze.y() * headR * 0.04);
+            if (asArc) {
+                QPainterPath arc;
+                arc.moveTo(c.x() - eyeW * 1.35, c.y() + eyeH * 0.9);
+                arc.quadTo(c.x(), c.y() - eyeH * 1.5, c.x() + eyeW * 1.35, c.y() + eyeH * 0.9);
+                painter->setBrush(Qt::NoBrush);
+                painter->setPen(QPen(QColor(0x2b, 0x1c, 0x24), qMax(1.0, headR * 0.055),
+                                     Qt::SolidLine, Qt::RoundCap));
+                painter->drawPath(arc);
+                painter->setPen(Qt::NoPen);
+                continue;
+            }
             painter->setBrush(QColor(0x2b, 0x1c, 0x24));
             painter->drawEllipse(c, eyeW, eyeH);
             if (open > 0.35) { // 高光只在睁眼时画
@@ -290,12 +405,14 @@ void PlaceholderRenderer::paint(QPainter *painter, const QSize &logicalSize)
         }
     }
 
-    // 嘴：一条小弧，tap 动作时张开
+    // 嘴：一条小弧，动作时张开；表情决定常态开口度与嘴角朝向(正=上扬/笑)。
     {
         const qreal mouthY = headCy + headR * 0.55;
         QPainterPath mouth;
         const qreal mw = headR * 0.22;
-        const qreal drop = headR * 0.10 + headR * 0.12 * mouthOpen;
+        const qreal curve = double(ex.mouthCurve);
+        const qreal drop = (headR * 0.10 + headR * 0.12 * (mouthOpen + double(ex.mouthOpen)))
+                           * curve;
         mouth.moveTo(cx - mw, mouthY);
         mouth.quadTo(cx, mouthY + drop, cx + mw, mouthY);
         mouth.quadTo(cx, mouthY + drop * 0.35, cx - mw, mouthY);

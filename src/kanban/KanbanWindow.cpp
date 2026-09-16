@@ -28,6 +28,19 @@ constexpr const char *kModule = "KanbanWindow";
 constexpr int kDragThresholdPx = 4;   // 超过这个位移算拖动，不算点击
 constexpr int kScreenMarginPx = 24;   // 首次落位离屏幕右/下边的留白
 constexpr int kMinWindowEdgePx = 120; // 缩放下限：防止滚轮把窗口搓没
+
+// 矩形是否至少有一部分落在某块屏幕的可用区里。用来识别「上次存的位置已经
+// 不在任何屏幕上」(换分辨率 / 拔副屏 / 远程桌面重连)。
+bool isOnAnyScreen(const QRect &rect)
+{
+    const QList<QScreen *> screens = QGuiApplication::screens();
+    for (QScreen *screen : screens) {
+        if (screen && screen->availableGeometry().intersects(rect)) {
+            return true;
+        }
+    }
+    return false;
+}
 } // namespace
 
 KanbanWindow::KanbanWindow(QWidget *parent)
@@ -95,7 +108,33 @@ void KanbanWindow::attachRenderer(KanbanRenderer *renderer)
 
 void KanbanWindow::detachRenderer()
 {
+    // 视图必须一起松手，这是取消看板娘不崩的关键一步。
+    //
+    // 控制器的顺序是：detachRenderer() → deleteLater() → m_renderer.reset()。
+    // 也就是说本函数返回后渲染器立刻被销毁，而窗口只是「排期删除」，子视图
+    // （QOpenGLWidget / 软件视图）还活着，手里那份指针已经悬空。之后：
+    //   · 视图再来一次 paintGL/paint —— 绘制期间本来就可能有待处理的重绘请求；
+    //   · 或者窗口真被销毁时，视图析构里的 m_renderer->setGlHost(nullptr)；
+    // 都会踩到已释放的内存。实测表现是点「取消」后进程直接消失，
+    // 退出码 0xC0000005(访问违例)，日志停在「已停止并释放资源」那一行。
+    releaseViewRenderer();
     m_renderer = nullptr;
+}
+
+// 视图与窗口对渲染器的引用必须同生共死：任何一处漏掉，剩下的那一份就是野指针。
+void KanbanWindow::releaseViewRenderer()
+{
+    if (!m_view) {
+        return;
+    }
+    if (auto *sw = qobject_cast<KanbanSoftwareView *>(m_view)) {
+        sw->setRenderer(nullptr);
+    }
+#ifdef YUMEIREN_WITH_LIVE2D
+    else if (auto *gl = qobject_cast<KanbanOpenGLView *>(m_view)) {
+        gl->setRenderer(nullptr);
+    }
+#endif
 }
 
 void KanbanWindow::ensureView()
@@ -105,14 +144,7 @@ void KanbanWindow::ensureView()
         static_cast<QVBoxLayout *>(layout())->removeWidget(m_view);
         // deleteLater 意味着旧视图还能活到本轮事件循环结束；期间万一来了一次
         // paintGL，它手里的渲染器可能已经被控制器销毁(降级、换后端)。先松手。
-        if (auto *sw = qobject_cast<KanbanSoftwareView *>(m_view)) {
-            sw->setRenderer(nullptr);
-        }
-#ifdef YUMEIREN_WITH_LIVE2D
-        else if (auto *gl = qobject_cast<KanbanOpenGLView *>(m_view)) {
-            gl->setRenderer(nullptr);
-        }
-#endif
+        releaseViewRenderer();
         m_view->deleteLater();
         m_view = nullptr;
     }
@@ -249,11 +281,15 @@ void KanbanWindow::placeFromConfig(int x, int y, int width, int height)
     if (width >= kMinWindowEdgePx) {
         resize(width, qMax(height, kMinWindowEdgePx));
     }
-    if (x >= 0 && y >= 0) {
+    // 存过的坐标未必还落在屏幕上：换分辨率、拔掉副屏、远程桌面重连都会让上次的
+    // 位置失效。那时如果照搬，看板娘就是「在运行、窗口也在，但人看不见」。
+    // 判据取「与任一屏幕的可用区有交集」而不是「完全在屏幕内」—— 用户把窗口
+    // 拖到边缘、一半露在外面是合法用法，不该被强行拉回来。
+    if (x >= 0 && y >= 0 && isOnAnyScreen(QRect(QPoint(x, y), size()))) {
         move(x, y);
         return;
     }
-    // 首次启动：贴主屏可用区右下角，避开任务栏。
+    // 首次启动(或位置已失效)：贴主屏可用区右下角，避开任务栏。
     QScreen *screen = QGuiApplication::primaryScreen();
     if (!screen) {
         return;
@@ -358,11 +394,20 @@ bool KanbanWindow::eventFilter(QObject *watched, QEvent *event)
     }
     case QEvent::ContextMenu: {
         auto *ce = static_cast<QContextMenuEvent *>(event);
-        QMenu menu(this);
+        // 刻意不给父对象。给 this 的话，窗口一旦在 menu.exec() 期间被销毁，
+        // Qt 会顺着父子关系把栈上的 menu 也 delete 掉 —— 对栈地址调 free，
+        // 之后栈帧展开还会再析构一次，属于必崩的写法。
+        QMenu menu;
         QAction *pauseAct = menu.addAction(QStringLiteral("暂停 / 恢复"));
         connect(pauseAct, &QAction::triggered, this, &KanbanWindow::pauseResumeRequested);
         QAction *nextAct = menu.addAction(QStringLiteral("播放下一个动作"));
         connect(nextAct, &QAction::triggered, this, &KanbanWindow::playNextRequested);
+        QAction *exprAct = menu.addAction(QStringLiteral("切换表情"));
+        // 没有表情的模型(Natori / ariu 这类)就把入口置灰：一个点了没反应的
+        // 菜单项，比一个灰掉的菜单项更让人怀疑程序坏了。数量问当前渲染器，
+        // 换后端(占位渲染器也有表情)后这里自动跟着变。
+        exprAct->setEnabled(m_renderer && m_renderer->expressionCount() > 0);
+        connect(exprAct, &QAction::triggered, this, &KanbanWindow::nextExpressionRequested);
         QAction *modelAct = menu.addAction(QStringLiteral("切换模型"));
         connect(modelAct, &QAction::triggered, this, &KanbanWindow::nextModelRequested);
         menu.addSeparator();
@@ -379,9 +424,19 @@ bool KanbanWindow::eventFilter(QObject *watched, QEvent *event)
         menu.addSeparator();
         QAction *settingAct = menu.addAction(QStringLiteral("打开主界面设置"));
         connect(settingAct, &QAction::triggered, this, &KanbanWindow::settingsRequested);
+
+        // 「取消看板娘」不能在 exec() 里直接发出去：接收方会销毁本窗口，而此刻
+        // 我们还待在 menu.exec() 的嵌套事件循环里 —— 窗口一没，栈上的 menu 与
+        // 本函数栈帧就都失去依托。先只记下意图，等 exec 返回、嵌套循环退干净了
+        // 再发信号。
+        bool quitAsked = false;
         QAction *quitAct = menu.addAction(QStringLiteral("取消看板娘"));
-        connect(quitAct, &QAction::triggered, this, &KanbanWindow::quitRequested);
+        connect(quitAct, &QAction::triggered, this, [&quitAsked] { quitAsked = true; });
+
         menu.exec(ce->globalPos());
+        if (quitAsked) {
+            emit quitRequested();
+        }
         return true;
     }
     default:

@@ -3,22 +3,26 @@
 # 为什么单独一个文件：SDK 与 GLEW 都受各自许可约束、且不进仓库，
 # 这里的逻辑只在 -D YUMEIREN_WITH_LIVE2D=ON 时才需要读，主 CMakeLists 保持干净。
 #
-# 产出两个静态库 + 一个 Core 导入库，并把运行期 DLL 复制到可执行文件旁边：
-#   yumeiren_glew            —— GLEW 静态库(只取 Cubism 需要的类型与扩展标志)
+# 产出两个静态库 + Core 运行库的接线，并把运行期 DLL 复制到可执行文件旁边：
+#   yumeiren_glew             —— GLEW 静态库(只取 Cubism 需要的类型与扩展标志)
 #   yumeiren_cubism_framework —— Cubism Framework 静态库(仅 OpenGL 渲染路径)
-#   Live2DCubismCore          —— SHARED IMPORTED(MinGW 导入库 + 运行期 DLL)
+#   Live2DCubismCore          —— INTERFACE 目标，把 Core 的 DLL 与头文件带下去
 #
-# 关键取舍(都已对着 SDK 源码核对)：
+# 关键取舍(都已对着 SDK 源码与本地工具链核对)：
 #   1. 不用 SDK 自带的 CMake：它的 Framework/CMakeLists.txt 依赖一堆
 #      FRAMEWORK_* 缓存变量与平台目录推导，MinGW 下改动量比我们自己 glob 还大；
 #   2. 只要 OpenGL 渲染路径：Rendering/{D3D9,D3D11,Metal,Vulkan} 整体排除；
 #   3. GL 上下文由 Qt(QOpenGLWidget)提供，所以不需要 GLFW；
-#   4. Core 官方只给 MSVC 的 .lib。MinGW 用 gendef+dlltool 现场生成导入库，
-#      避免去链 MSVC 静态库(CRT 不匹配)。
+#   4. Core 官方只给 MSVC 的 .lib/.dll。MinGW 下不去链 MSVC 导入库(CRT 不匹配)，
+#      也刻意不用 gendef+dlltool 现场生成 .a —— 那套工具在部分 MinGW 发行版里
+#      并不随编译器安装(本机 CLion 自带的那份就没有)。改成把 .dll 直接放到
+#      链接行上：GNU ld 会自己读 PE 导出表，效果与导入库完全一致。
 
-set(YUMEIREN_CUBISM_SDK "C:/Users/rain/Documents/ExplorerBg/sdk/CubismSdkForNative-5-r.5"
+# 默认指向仓库内已解压的 third_party/(见 docs/dev/REFACTORING_GUIDE.md 的目录规范)。
+# 两者都可用 -D 覆盖，指向仓库外的 SDK/GLEW 副本也能工作。
+set(YUMEIREN_CUBISM_SDK "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cubism"
     CACHE PATH "Cubism Native SDK 根目录(需含 Framework/ 与 Core/)")
-set(YUMEIREN_GLEW_ROOT "C:/Users/rain/Documents/ExplorerBg/ref/QtLive2dDesktop-master/live2d/glew"
+set(YUMEIREN_GLEW_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/glew"
     CACHE PATH "GLEW 源码根目录(需含 include/GL/glew.h 与 src/glew.c)")
 
 function(yumeiren_live2d_dependencies out_sources out_libraries out_dlls)
@@ -28,11 +32,12 @@ function(yumeiren_live2d_dependencies out_sources out_libraries out_dlls)
     if(NOT EXISTS "${YUMEIREN_CUBISM_SDK}/Framework/src/CubismFramework.cpp")
         message(FATAL_ERROR
             "YUMEIREN_WITH_LIVE2D=ON，但在 ${YUMEIREN_CUBISM_SDK} 没找到 Cubism Framework。"
-            "请用 -D YUMEIREN_WITH_LIVE2D=<SDK 路径> 指向解压后的 SDK。")
+            "请把 SDK 解压到 third_party/cubism，或用 -D YUMEIREN_CUBISM_SDK=<SDK 路径> 指定。")
     endif()
     if(NOT EXISTS "${YUMEIREN_GLEW_ROOT}/src/glew.c")
         message(FATAL_ERROR
-            "在 ${YUMEIREN_GLEW_ROOT} 没找到 GLEW 源码(Cubism 的 Windows GL 渲染器硬依赖它)。")
+            "在 ${YUMEIREN_GLEW_ROOT} 没找到 GLEW 源码(Cubism 的 Windows GL 渲染器硬依赖它)。"
+            "请把 GLEW 源码放到 third_party/glew，或用 -D YUMEIREN_GLEW_ROOT=<GLEW 路径> 指定。")
     endif()
 
     find_package(Qt6 REQUIRED COMPONENTS OpenGL OpenGLWidgets)
@@ -54,42 +59,19 @@ function(yumeiren_live2d_dependencies out_sources out_libraries out_dlls)
         endif()
     endif()
 
-    # —— Core：MinGW 导入库(gendef + dlltool) ——
+    # —— Core：把 DLL 直接交给链接器 ——
     set(_core_dll "${YUMEIREN_CUBISM_SDK}/Core/dll/windows/x86_64/Live2DCubismCore.dll")
     if(NOT EXISTS "${_core_dll}")
         message(FATAL_ERROR "没找到 64 位 Core 运行库：${_core_dll}")
     endif()
-    get_filename_component(_mingw_bin "${CMAKE_CXX_COMPILER}" DIRECTORY)
-    find_program(YUMEIREN_GENEDEF gendef HINTS "${_mingw_bin}")
-    find_program(YUMEIREN_DLLTOOL dlltool HINTS "${_mingw_bin}")
-    if(NOT YUMEIREN_GENEDEF OR NOT YUMEIREN_DLLTOOL)
-        message(FATAL_ERROR
-            "需要 gendef 与 dlltool 才能给 MinGW 生成 Live2DCubismCore 的导入库，"
-            "请在 MinGW 的 bin 目录里找到它们(通常随编译器一起装好)。")
-    endif()
-
-    set(_core_lib_dir "${CMAKE_BINARY_DIR}/cubism-core")
-    file(MAKE_DIRECTORY "${_core_lib_dir}")
-    set(_core_lib "${_core_lib_dir}/libLive2DCubismCore.a")
-    if(NOT EXISTS "${_core_lib}")
-        execute_process(COMMAND "${YUMEIREN_GENEDEF}" "${_core_dll}"
-            WORKING_DIRECTORY "${_core_lib_dir}" RESULT_VARIABLE _rc)
-        if(NOT _rc EQUAL 0)
-            message(FATAL_ERROR "gendef 解析 ${_core_dll} 失败")
-        endif()
-        execute_process(COMMAND "${YUMEIREN_DLLTOOL}"
-            -d Live2DCubismCore.def -l libLive2DCubismCore.a -D Live2DCubismCore.dll
-            WORKING_DIRECTORY "${_core_lib_dir}" RESULT_VARIABLE _rc)
-        if(NOT _rc EQUAL 0)
-            message(FATAL_ERROR "dlltool 生成 Core 导入库失败")
-        endif()
-    endif()
 
     if(NOT TARGET Live2DCubismCore)
-        add_library(Live2DCubismCore SHARED IMPORTED GLOBAL)
-        set_target_properties(Live2DCubismCore PROPERTIES
-            IMPORTED_IMPLIB "${_core_lib}"
-            IMPORTED_LOCATION "${_core_dll}")
+        add_library(Live2DCubismCore INTERFACE)
+        target_include_directories(Live2DCubismCore INTERFACE
+            "${YUMEIREN_CUBISM_SDK}/Core/include")
+        # 注意：这里给的是 .dll 而不是 .lib/.a。GNU ld 能直接读 PE 导出表，
+        # 所以不需要导入库；写成绝对路径可避免被当成 -l 参数去找同名库。
+        target_link_libraries(Live2DCubismCore INTERFACE "${_core_dll}")
     endif()
 
     # —— Framework：只用 OpenGL 渲染路径 ——
@@ -125,10 +107,22 @@ function(yumeiren_live2d_dependencies out_sources out_libraries out_dlls)
     set(${out_libraries} Qt6::OpenGL Qt6::OpenGLWidgets yumeiren_cubism_framework
         PARENT_SCOPE)
     set(${out_dlls} "${_core_dll}" PARENT_SCOPE)
+    set(YUMEIREN_CUBISM_SHADER_DIR
+        "${YUMEIREN_CUBISM_SDK}/Framework/src/Rendering/OpenGL/Shaders/Standard"
+        PARENT_SCOPE)
 endfunction()
 
-# 把 Core 运行库复制到可执行文件旁边：Live2DCubismCore.dll 不复制进去，
-# 程序会在装载模型时直接崩在导出符号解析上，且报错信息毫无参考价值。
+# 运行期需要两样东西躺在可执行文件旁边，少一样都是「编译通过但一片空白」：
+#
+#   1. Live2DCubismCore.dll —— 不复制，程序会在装载模型时直接崩在导出符号解析上，
+#      且报错信息毫无参考价值；
+#   2. FrameworkShaders/   —— Cubism 的 GL 着色器不在代码里，而在运行期由
+#      CubismShader_OpenGLES2::GenerateShaders() 逐个读盘(见
+#      Framework/src/Rendering/OpenGL/CubismShader_OpenGLES2.cpp 里的
+#      "FrameworkShaders/VertShaderSrc.vert" 等常量)。缺目录时它只往日志里写
+#      "Failed to load vertex shader"，然后拿着 ShaderProgram=0 一路画下去 ——
+#      界面上什么都看不到，也不报错。
+#      官方示例 proj.win.cmake/CMakeLists.txt 里有同样的 copy_directory 步骤。
 function(yumeiren_deploy_cubism target)
     if(NOT YUMEIREN_CUBISM_RUNTIME_DLLS)
         return()
@@ -139,4 +133,16 @@ function(yumeiren_deploy_cubism target)
             COMMENT "复制 Live2DCubismCore.dll"
             VERBATIM)
     endforeach()
+
+    if(YUMEIREN_CUBISM_SHADER_DIR AND EXISTS "${YUMEIREN_CUBISM_SHADER_DIR}")
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${YUMEIREN_CUBISM_SHADER_DIR}" "$<TARGET_FILE_DIR:${target}>/FrameworkShaders"
+            COMMENT "复制 Cubism 运行期着色器到 FrameworkShaders/"
+            VERBATIM)
+    else()
+        message(WARNING
+            "没找到 Cubism 的 Standard 着色器目录，Live2D 会加载失败并画不出东西："
+            "${YUMEIREN_CUBISM_SHADER_DIR}")
+    endif()
 endfunction()

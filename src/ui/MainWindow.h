@@ -46,7 +46,7 @@ private slots:
     void selectHeaderTab(int index);
     void selectWallTab(int index);
     void addVideos();
-    void scanVideoDir(); // 扫描软件目录 media/video 下的视频并入列表
+    void scanVideoDir(); // 扫描软件目录 data/video 下的视频并入列表
     void removeSelectedVideos();
     void clearVideos();
     void startVideo();
@@ -279,6 +279,7 @@ private:
     QPushButton *m_kanbanStartBtn = nullptr;
     QPushButton *m_kanbanPauseBtn = nullptr;
     QPushButton *m_kanbanNextBtn = nullptr;
+    QPushButton *m_kanbanExprBtn = nullptr;
     QPushButton *m_kanbanStopBtn = nullptr;
     QLabel *m_kanbanStatus = nullptr;
     QLabel *m_kanbanLog = nullptr;

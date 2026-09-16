@@ -4,6 +4,7 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QScreen>
+#include <QTimer>
 
 #include "app/ApplicationRuntimeState.h"
 #include "config/AppConfig.h"
@@ -24,6 +25,9 @@ constexpr int kMaxEdgePx = 2400;  // 上限：防止滚轮搓出超大 surface
 constexpr int kBaseWidthPx = 320; // scale=100% 时的窗口宽
 constexpr int kBaseHeightPx = 480;
 constexpr int kScaleStepPercent = 5; // 滚轮一格 = 5%
+// 等 GL 上下文的上限。超时说明这台机器/这次会话根本拿不到 GL 宿主，
+// 继续等下去就是状态机卡在 Starting —— 用户看到的正是「点了没反应」。
+constexpr int kGlReadyTimeoutMs = 5000;
 } // namespace
 
 KanbanController::KanbanController(QObject *parent)
@@ -154,6 +158,11 @@ bool KanbanController::ensureWindow()
         return true;
     }
     m_window = new KanbanWindow(nullptr);
+    // 顺序是硬要求：先给窗口一个非零尺寸，再挂视图。
+    // QOpenGLWidget 只在尺寸非零时才去创建上下文并回调 initializeGL，而窗口尺寸
+    // 此前只有 applyScaleToWindow() 会给 —— 它却挂在「等 GL 就绪」之后。
+    // 两边互等，表现就是窗口永远 0x0、桌面上什么都没有。
+    placeWindowFromConfig();
     m_window->attachRenderer(m_renderer.get());
     m_window->setAlwaysOnTop(m_alwaysOnTop);
     m_window->setMouseThrough(m_mouseThrough);
@@ -190,6 +199,8 @@ bool KanbanController::ensureWindow()
     connect(m_window, &KanbanWindow::scaleStepped, this, &KanbanController::handleScaleStepped);
     connect(m_window, &KanbanWindow::pauseResumeRequested, this, &KanbanController::pauseResume);
     connect(m_window, &KanbanWindow::playNextRequested, this, &KanbanController::playNext);
+    connect(m_window, &KanbanWindow::nextExpressionRequested, this,
+            &KanbanController::playNextExpression);
     connect(m_window, &KanbanWindow::nextModelRequested, this, [this] {
         // 「切换模型」与「播放下一个动作」是两件事：前者强制换模型。
         const ModelInfo *next = m_models.nextValidAfter(m_modelPath);
@@ -218,11 +229,11 @@ bool KanbanController::start()
     if (!m_machine.transition(State::Starting, "start")) {
         return false;
     }
-    publishState();
 
     if (m_models.validModels().isEmpty()) {
         refreshModels();
     }
+    publishState();
     if (!pickRenderer()) {
         enterError(QStringLiteral("无可用渲染后端"));
         return false;
@@ -236,13 +247,32 @@ bool KanbanController::start()
         // GL 资源必须在持有上下文的线程创建：先 show 触发 initializeGL，
         // 真正的 initialize/loadModel 在 onGlContextReady 里做。
         m_waitingGl = true;
+        videodiag::log(videodiag::Level::Info,
+                       QStringLiteral("[Kanban] 等待 GL 上下文就绪(后端 %1)").arg(m_backendName),
+                       QLatin1String(kModule));
         m_window->show();
         publishState();
+        // 兜底：initializeGL 迟迟不来(驱动不给 3.3 上下文、远程桌面、窗口没能
+        // 真正上屏)时不能把状态机永远吊在 Starting。宁可降级成占位动画，
+        // 也不能让用户面对一个「没有任何反馈」的看板娘。
+        QTimer::singleShot(kGlReadyTimeoutMs, this, [this] {
+            if (!m_waitingGl) {
+                return;
+            }
+            m_waitingGl = false;
+            videodiag::log(videodiag::Level::Warning,
+                           QStringLiteral("[Kanban] 等待 GL 上下文超时(%1ms)，降级为内置占位动画")
+                               .arg(kGlReadyTimeoutMs),
+                           QLatin1String(kModule));
+            if (!fallbackToPlaceholder()) {
+                enterError(QStringLiteral("GL 上下文未就绪，且降级失败"));
+            }
+        });
         return true;
     }
     // 软件渲染后端不需要等 GL 上下文，直接初始化；成功后窗口才允许露出，
     // 否则初始化失败会留一个透明空壳在桌面上。
-    if (!initializeAndLoad()) {
+    if (!initializeAndLoad() || !activateKanban()) {
         return false;
     }
     showWindow();
@@ -251,13 +281,30 @@ bool KanbanController::start()
 
 void KanbanController::onGlContextReady()
 {
+    videodiag::log(videodiag::Level::Debug,
+                   QStringLiteral("[Kanban] 收到 GL 上下文就绪信号(waitingGl=%1)").arg(m_waitingGl),
+                   QLatin1String(kModule));
     if (!m_waitingGl) {
         return;
     }
     m_waitingGl = false;
-    if (!initializeAndLoad() && !fallbackToPlaceholder()) {
-        enterError(QStringLiteral("GL 后端初始化失败"));
+
+    // 本函数由 QOpenGLWidget::initializeGL() 直接调进来，此刻正处在 Qt 的绘制
+    // 流程里，只允许做「必须有当前 GL 上下文」的事：建渲染器、解码并上传纹理。
+    // 其余收尾(改窗口尺寸、起时钟、发信号)一律排到本轮事件循环之后再跑。
+    if (!initializeAndLoad()) {
+        QTimer::singleShot(0, this, [this] {
+            if (!fallbackToPlaceholder()) {
+                enterError(QStringLiteral("GL 后端初始化失败"));
+            }
+        });
+        return;
     }
+    QTimer::singleShot(0, this, [this] {
+        if (!activateKanban()) {
+            enterError(QStringLiteral("看板娘启动收尾失败"));
+        }
+    });
 }
 
 bool KanbanController::initializeAndLoad()
@@ -303,12 +350,30 @@ bool KanbanController::initializeAndLoad()
     }
 
     if (m_window) {
-        m_window->attachRenderer(m_renderer.get());
         m_window->setModelDisplayName(m_currentModelName);
+    }
+    return true;
+}
+
+// 启动收尾：挂视图、按缩放定窗口尺寸、转 Idle、起时钟、广播状态。
+//
+// 单独成函数是为了能在「GL 上下文就绪」之外的地方跑：GL 后端的那次
+// initializeAndLoad() 是在 QOpenGLWidget::initializeGL() 里被回调的，也就是
+// Qt 的绘制流程内部，那里绝不能改窗口尺寸 —— 会在绘制途中触发 resize 与重入的
+// paintGL，Qt 的 FBO 被边画边重建，结果是桌面上一片空白。所以收尾一律排到
+// 本轮事件循环之后再执行。
+bool KanbanController::activateKanban()
+{
+    if (!m_renderer) {
+        return false;
+    }
+    if (m_window) {
+        // 降级路径会在这里把 GL 视图换成软件视图，所以不能挪到 ensureWindow 里。
+        m_window->attachRenderer(m_renderer.get());
     }
     applyScaleToWindow();
 
-    if (!m_machine.transition(State::Idle, "initializeAndLoad")) {
+    if (!m_machine.transition(State::Idle, "activateKanban")) {
         return false;
     }
     m_clock->setTargetFps(m_targetFps);
@@ -331,7 +396,8 @@ bool KanbanController::fallbackToPlaceholder()
     m_renderer = std::make_unique<PlaceholderRenderer>();
     m_backendName = QStringLiteral("内置占位动画");
     emit backendChanged(m_backendName);
-    return initializeAndLoad();
+    // 占位后端不碰 GL，但收尾仍走同一条路：activateKanban 会 attach 软件视图。
+    return initializeAndLoad() && activateKanban();
 }
 
 bool KanbanController::retry()
@@ -422,7 +488,17 @@ void KanbanController::destroyWindow()
         return;
     }
     saveGeometry();
+    // 三步顺序都是有理由的，别合并：
+    //  1) detachRenderer() 让视图松手。控制器在本函数之后马上 m_renderer.reset()，
+    //     而窗口只是排期删除，视图还活着 —— 不松手就是野指针。
+    //  2) hide() 立刻不可见。deleteLater() 只是排期，窗口在那之前一直可见，
+    //     期间任何一次重绘都可能落到已经被销毁的渲染器上；隐藏后窗口不再
+    //     产生绘制事件，这一条路被彻底堵死。顺带用户点「取消」也是立刻消失，
+    //     而不是等事件循环转到删除那一步。
+    //  3) 最后才排期销毁：不能在这里直接 delete —— 本函数可能是从窗口自己的
+    //     事件处理里进来的（右键菜单的「取消看板娘」），删掉 this 等于自杀。
     m_window->detachRenderer();
+    m_window->hide();
     m_window->deleteLater();
     m_window = nullptr;
 }
@@ -449,6 +525,26 @@ void KanbanController::playNext()
         return;
     }
     m_machine.transition(State::Idle, "playNextNoop");
+}
+
+int KanbanController::expressionCount() const
+{
+    // 问渲染器而不是模型表：能不能切表情，最终由后端说了算(占位后端也有几个)。
+    return m_renderer ? m_renderer->expressionCount() : 0;
+}
+
+void KanbanController::playNextExpression()
+{
+    if (!m_machine.isRunning() || m_machine.isPaused() || !m_renderer) {
+        return;
+    }
+    // 表情与动作是两个独立通道，所以这里既不换模型也不进 Error：
+    // 没有表情就静默返回(界面上的入口本来就该是灰的，走到这里说明是快捷键
+    // 或托盘触发)。动作那边「没动作就换模型」是 §7.4 明确要求的兜底，
+    // 表情没有这条要求 —— 为了看表情而把用户的模型换掉，是更糟的体验。
+    if (m_renderer->playNextExpression()) {
+        m_machine.transition(State::Clicked, "playNextExpression");
+    }
 }
 
 void KanbanController::showWindow()
@@ -575,6 +671,32 @@ void KanbanController::setScalePercent(int percent)
     emit settingsChanged();
 }
 
+// 建窗时的首次落位。尺寸口径与 applyScaleToWindow() 完全一致(都从
+// m_scalePercent 推)，所以 GL 就绪后那次 applyScaleToWindow() 不会让窗口跳一下。
+void KanbanController::placeWindowFromConfig()
+{
+    if (!m_window) {
+        return;
+    }
+    AppConfig &cfg = AppConfig::instance();
+    // 位置只在用户真的挪过窗口后才有意义；没存过就交给窗口贴主屏右下角(-1)。
+    const int x = cfg.value(QString::fromLatin1(ConfigKeys::Kanban::PosX), -1).toInt();
+    const int y = cfg.value(QString::fromLatin1(ConfigKeys::Kanban::PosY), -1).toInt();
+
+    const double s = m_scalePercent / 100.0;
+    const int w = qBound(kMinEdgePx, int(kBaseWidthPx * s), kMaxEdgePx);
+    const int h = qBound(kMinEdgePx, int(kBaseHeightPx * s), kMaxEdgePx);
+
+    m_window->placeFromConfig(x, y, w, h);
+    videodiag::log(videodiag::Level::Debug,
+                   QStringLiteral("[Kanban] 窗口首次落位 %1x%2 @(%3,%4)")
+                       .arg(m_window->width())
+                       .arg(m_window->height())
+                       .arg(m_window->x())
+                       .arg(m_window->y()),
+                   QLatin1String(kModule));
+}
+
 void KanbanController::applyScaleToWindow()
 {
     if (!m_window) {
@@ -585,10 +707,16 @@ void KanbanController::applyScaleToWindow()
     const int h = qBound(kMinEdgePx, int(kBaseHeightPx * s), kMaxEdgePx);
 
     // 以「底边中心」为锚：角色站在桌面上，缩放时脚不该离地或陷进屏幕。
-    const QPoint anchor = m_window->geometry().bottomLeft()
-                          + QPoint(m_window->width() / 2, m_window->height());
+    //
+    // 注意 bottomLeft() 的 y 已经是「顶边 + 高度」了，这里只能再补横向的半宽。
+    // 早先多写了一次 height，锚点落到顶边下方 2 倍身高处，于是每执行一次本函数
+    // 窗口就往下走一整个身高(479 → 958 → 1437 → 1916)，几次之后彻底掉出屏幕 ——
+    // 表现就是「看板娘在运行、窗口枚举得到、但桌面上什么都没有」。
+    const QRect before = m_window->geometry();
+    const QPoint bottomCenter(before.x() + before.width() / 2,
+                              before.y() + before.height());
     m_window->resize(w, h);
-    m_window->move(anchor.x() - w / 2, anchor.y() - h);
+    m_window->move(bottomCenter.x() - w / 2, bottomCenter.y() - h);
     saveGeometry();
 }
 

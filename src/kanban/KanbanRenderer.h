@@ -87,6 +87,18 @@ public:
     // 播放下一个动作；返回动作名表示确实播了，返回 false 表示没有可播动作。
     virtual bool playNextMotion() = 0;
 
+    // —— 表情 ——
+    // 与动作分开是刻意的：Cubism 里表情走 ExpressionMotionManager、动作走
+    // MotionManager，两者互不抢占优先级，所以「切表情」不该打断正在播的动作。
+    //
+    // expressionCount() 返回 0 表示「本后端/本模型没有表情」。界面拿它把入口
+    // 置灰 —— 一个点了没反应的菜单项，比一个灰掉的菜单项更让人怀疑程序坏了。
+    // 两个后端都要给真值：占位后端也有几个写死的表情，降级路径的功能面
+    // 不该因为后端不同而缩水。
+    virtual int expressionCount() const { return 0; }
+    // 切到下一个表情(循环)。返回 false 表示没有可切的表情，调用方静默返回即可。
+    virtual bool playNextExpression() { return false; }
+
     virtual void pause() = 0;
     virtual void resume() = 0;
     // 释放全部后端资源；调用后允许再次 initialize()(允许用户重试)。

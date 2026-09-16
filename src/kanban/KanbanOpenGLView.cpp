@@ -49,7 +49,18 @@ void KanbanOpenGLView::initializeGL()
 {
     // 上下文已当前化：此刻才允许创建 Cubism/纹理资源。
     makeCurrent();
-    m_contextReadySent = false;
+    // 这三行日志是排查「桌面上一片空白」的第一现场：上下文有没有建起来、
+    // 拿到的是哪个 GL 版本、尺寸是不是 0，全靠它们区分。
+    videodiag::log(videodiag::Level::Info,
+                   QStringLiteral("[KanbanGL] initializeGL 上下文就绪：%1 / %2 / 绘制面 %3x%4")
+                       .arg(QString::fromLatin1(reinterpret_cast<const char *>(
+                                glGetString(GL_VERSION))),
+                            QString::fromLatin1(reinterpret_cast<const char *>(
+                                glGetString(GL_RENDERER))))
+                       .arg(glPixelSize().width())
+                       .arg(glPixelSize().height()),
+                   QStringLiteral("KanbanGL"));
+    m_firstPaintDone = false;
     emit contextReady();
     doneCurrent();
 }
@@ -96,8 +107,23 @@ QSize KanbanOpenGLView::glPixelSize() const
 
 void KanbanOpenGLView::paintGL()
 {
+    const bool firstPaint = !m_firstPaintDone;
+    if (firstPaint) {
+        m_firstPaintDone = true;
+        // 「initializeGL 触发了」不等于「画面出来了」：中间还隔着一次 paintGL。
+        // 桌面上什么都没有时，这一行能立刻把两者分开。
+        videodiag::log(videodiag::Level::Info,
+                       QStringLiteral("[KanbanGL] 首帧 paintGL(绘制面 %1x%2)")
+                           .arg(glPixelSize().width())
+                           .arg(glPixelSize().height()),
+                       QStringLiteral("KanbanGL"));
+    }
     if (m_renderer && m_renderer->usesOpenGL()) {
         m_renderer->render();
+    }
+    if (firstPaint) {
+        videodiag::log(videodiag::Level::Debug, QStringLiteral("[KanbanGL] 首帧 paintGL 返回"),
+                       QStringLiteral("KanbanGL"));
     }
 }
 

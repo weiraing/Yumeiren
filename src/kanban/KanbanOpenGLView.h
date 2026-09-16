@@ -50,7 +50,9 @@ protected:
 
 private:
     KanbanRenderer *m_renderer = nullptr;
-    bool m_contextReadySent = false;
+    // 首帧 paintGL 只记一次日志：这是「上下文建好了」到「画面真的出来了」
+    // 之间唯一的分界点，每帧刷屏就没用了。
+    bool m_firstPaintDone = false;
 };
 
 } // namespace kanban

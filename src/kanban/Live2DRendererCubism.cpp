@@ -30,12 +30,15 @@
 #include <vector>
 
 #include <QByteArray>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
 #include <QStringList>
 #include <QVector>
+
+#include <string>
 
 #include "kanban/KanbanRenderer.h"
 #include "kanban/Live2DRenderer.h"
@@ -104,6 +107,14 @@ void logWarn(const QString &text)
     videodiag::log(videodiag::Level::Warning, logLine(text), QLatin1String(kModule));
 }
 
+// 交互路径专用：点击/表情这类「用户看得见、日志里却什么都没有」的动作，
+// 必须留下可查的痕迹。否则「点了没反应」只能靠猜是命中区没配、动作组没配，
+// 还是压根没收到点击。
+void logDebug(const QString &text)
+{
+    videodiag::log(videodiag::Level::Debug, logLine(text), QLatin1String(kModule));
+}
+
 // Cubism(Core 与 Framework 共用这一个回调)的日志出口。
 // 刻意在 StartUp 之前就把指针交出去：SDK 在 StartUp 内部就会打印 Core 版本号，
 // 那行日志正是「接的是哪个内核」的最硬证据，必须落到 videodiag 里。
@@ -161,6 +172,69 @@ public:
 KanbanCubismAllocator g_allocator;
 CubismFramework::Option g_option;
 
+// ── 运行期读盘回调 ────────────────────────────────────────────────────
+//
+// Cubism 的 GL 着色器不在代码里，而在运行期逐个读盘：CubismShader_OpenGLES2::
+// GenerateShaders() 会用常量路径("FrameworkShaders/VertShaderSrc.vert" 等)回调
+// 宿主提供的 LoadFileFunction 去要字节。框架自己不读文件，官方示例填的是
+// LAppPal::LoadFileAsBytes，这里给等价实现 —— 少了这两个回调，框架在
+// GenerateShaders 里只会写一行 "File loader is not set."，然后拿着
+// ShaderProgram=0 一路画下去：不崩、不报错、桌面上什么都没有。
+//
+// 路径解析口径与官方示例不同，是刻意的：SDK 传进来的永远是相对路径，官方示例
+// 按「当前工作目录」解析 —— 从快捷方式、计划任务或别的程序拉起来时工作目录
+// 未必是程序目录，那时就会全盘失效。这里按「程序目录 → 当前工作目录」顺序找，
+// 部署时把 FrameworkShaders/ 放在 exe 旁边即可，与启动方式无关。
+csmByte *loadCubismFileBytes(const std::string filePath, csmSizeInt *outSize)
+{
+    if (outSize) {
+        *outSize = 0;
+    }
+    const QString relative = QString::fromUtf8(filePath.c_str());
+    if (relative.isEmpty()) {
+        return nullptr;
+    }
+
+    QStringList candidates;
+    if (QFileInfo(relative).isAbsolute()) {
+        candidates << relative;
+    } else {
+        candidates << QDir(QCoreApplication::applicationDirPath()).filePath(relative)
+                   << QDir::current().filePath(relative);
+    }
+
+    for (const QString &path : candidates) {
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly)) {
+            continue;
+        }
+        const QByteArray data = file.readAll();
+        file.close();
+        if (data.isEmpty()) {
+            continue;
+        }
+        // 释放函数由我们自己给(releaseCubismFileBytes)，所以分配方式随意，
+        // 只要 new[]/delete[] 成对。框架会按 (指针, 长度) 构造 csmString，
+        // 不需要我们补字符串终止符。
+        const int size = data.size();
+        csmByte *bytes = new csmByte[size];
+        std::memcpy(bytes, data.constData(), static_cast<size_t>(size));
+        if (outSize) {
+            *outSize = static_cast<csmSizeInt>(size);
+        }
+        return bytes;
+    }
+
+    logWarn(QStringLiteral("读不到运行期资源：%1(程序目录 %2)")
+                .arg(relative, QCoreApplication::applicationDirPath()));
+    return nullptr;
+}
+
+void releaseCubismFileBytes(csmByte *byteData)
+{
+    delete[] byteData;
+}
+
 std::mt19937 &randomEngine()
 {
     static std::mt19937 engine{std::random_device{}()};
@@ -180,23 +254,38 @@ int randomBelow(int bound)
 //
 // paintGL 期间 Qt 已经把上下文当前化，此时既不必再 makeCurrent，
 // 更绝对不能 doneCurrent —— 那会把视图自己的绘制状态从脚下抽走。
+//
+// 顺带把 glewInit() 也收在这里，理由是踩过一次的坑：
+//   glew.h 把 glGenTextures / glBindTexture / glClear 这些名字统统重定向到
+//   GLEW 自己的函数指针表(GLEW_GET_FUN)，而那张表在 glewInit() 之前全是空指针。
+//   于是「第一次 GL 调用」如果发生在 glewInit() 之前，就是一次干净的
+//   call 0x0 —— 没有异常、没有 Qt 错误框，只有进程凭空消失。
+//   原先只在 render() 里初始化，而 loadModel() 里的纹理上传比它早，正好踩中。
+//   放进 GlScope 之后，「借到上下文」与「函数表可用」变成同一件事，漏不掉了。
 class GlScope
 {
 public:
-    explicit GlScope(KanbanGlHost *host)
+    GlScope(KanbanGlHost *host, bool *glewReady)
         : m_host(host)
     {
         if (!m_host || !m_host->glHostReady()) {
             return;
         }
-        if (m_host->glIsCurrent()) {
-            m_ok = true; // 上下文本来就是别人的，归还轮不到我们
-            return;
+        if (!m_host->glIsCurrent()) {
+            if (!m_host->glMakeCurrent()) {
+                return;
+            }
+            m_owned = true;
         }
-        if (!m_host->glMakeCurrent()) {
-            return;
+        // 走到这里上下文一定是当前化的。GLEW 的表是「上下文 + 线程」的产物，
+        // 上下文易主后必须重来，所以这里只看传入的标志位。
+        if (glewReady && !*glewReady) {
+            if (glewInit() != GLEW_OK) {
+                logWarn(QStringLiteral("glewInit 失败，GL 函数表不可用"));
+                return;
+            }
+            *glewReady = true;
         }
-        m_owned = true;
         m_ok = true;
     }
     GlScope(const GlScope &) = delete;
@@ -284,6 +373,10 @@ public:
     bool PlayNextMotion();
     bool StartIdleMotion();
     bool SetExpressionIndex(int index);
+    // 顺序切下一张表情(用户点菜单用)；PlayRandomExpression 随机挑一张且避开
+    // 当前这张(摸头反馈用)。两者都返回 false 表示「本模型没有表情」。
+    bool PlayNextExpression();
+    bool PlayRandomExpression();
 
     bool hasModel() const { return _model != nullptr; }
     void SetViewportSize(csmUint32 width, csmUint32 height) { SetRenderTargetSize(width, height); }
@@ -293,6 +386,13 @@ public:
     int textureCount() const { return _textureImages.size(); }
     int motionGroupCount() const { return _motionGroups.size(); }
     int expressionCount() const { return _expressionNames.size(); }
+    // 当前生效的表情名(还没切过则为空)，日志用。
+    QString currentExpressionName() const
+    {
+        return _lastExpression >= 0 && _lastExpression < _expressionNames.size()
+                   ? _expressionNames.at(_lastExpression)
+                   : QString();
+    }
 
     // 上下文已经没了(宿主正在析构)时的善后：纹理句柄随上下文一起作废，
     // 这时再发 glDeleteTextures 是未定义行为，所以只清账不发调用。
@@ -337,6 +437,8 @@ private:
     int _idleGroup = -1;      // 名为 idle 的组，没有则退化为第 0 组
     int _nextGroup = 0;       // PlayNextMotion 的游标
     int _nextIndex = 0;
+    int _nextExpression = 0;  // PlayNextExpression 的游标
+    int _lastExpression = -1; // 当前生效的表情下标，用于避免「切了跟没切一样」
     csmBool _motionUpdated = false;
 };
 
@@ -564,6 +666,17 @@ bool KanbanCubismModel::EnsureGl(const QSize &pixelSize, QString *outError)
     }
     ReleaseGl(); // 重建前先彻底清干净，纹理与 VBO 才不会有累积
 
+    // 上传完就把 CPU 侧那份丢掉(一张 2048² 是 16MB，留着不划算)，代价是
+    // 「上下文重建」或「宿主重交」之后必须重新解码才能再建 GL 资源。
+    // 少了这一步，第二次 EnsureGl 会上传 0 张纹理：_textures 全为 0，
+    // DrawMeshOpenGL 对每个绘制对象直接 return —— 模型整个消失，且
+    // 不报错、不崩溃，正是最难查的那种「桌面上什么都没有」。
+    if (!_setting || _textureImages.size() != int(_setting->GetTextureCount())) {
+        if (!DecodeTextures(outError)) {
+            return false;
+        }
+    }
+
     CreateRenderer(static_cast<csmUint32>(pixelSize.width()),
                    static_cast<csmUint32>(pixelSize.height()), 1);
     CubismRenderer_OpenGLES2 *renderer = GetRenderer<CubismRenderer_OpenGLES2>();
@@ -584,8 +697,16 @@ bool KanbanCubismModel::EnsureGl(const QSize &pixelSize, QString *outError)
         glBindTexture(GL_TEXTURE_2D, textureId);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, image.width(), image.height(), 0,
                      GL_RGBA, GL_UNSIGNED_BYTE, image.constBits());
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        // mipmap 不是可选项：Cubism 每次绘制前会把 GL_TEXTURE_MIN_FILTER 强制设成
+        // GL_LINEAR_MIPMAP_LINEAR(见 CubismShader_OpenGLES2::SetupTexture)，纹理
+        // 只要缺 mipmap 层，对采样器就是「不完整」，采样一律返回 (0,0,0,1)。
+        // 表现是模型变成一堆纯黑方块，而 glGetError 全程为 0 —— 官方示例与
+        // 参考实现都在 glTexImage2D 之后紧跟 glGenerateMipmap，正是这个原因。
+        glGenerateMipmap(GL_TEXTURE_2D);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        // 顶点着色器已把纹理坐标的 y 翻转过，边缘若按 REPEAT 会取到对侧像素，
+        // 于是模型四周出现一圈来自另一端的杂色，这里按 CLAMP 收边。
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glBindTexture(GL_TEXTURE_2D, 0);
@@ -700,6 +821,9 @@ void KanbanCubismModel::SetDragTarget(float x, float y)
 bool KanbanCubismModel::StartHitReaction(const QPointF &normalized)
 {
     if (!_model || !_setting || _setting->GetHitAreasCount() <= 0) {
+        // 没有命中区不是错误(不少模型根本没配 HitAreas)，但必须能查出来 ——
+        // 否则「点了没反应」只能靠猜。
+        logDebug(QStringLiteral("点击无反应：本模型没有配置 HitAreas"));
         return false;
     }
     // IsHit 收到的是「投影之后、modelMatrix 之前」的坐标，故要除掉投影修正量。
@@ -711,18 +835,48 @@ bool KanbanCubismModel::StartHitReaction(const QPointF &normalized)
         if (!IsHit(_setting->GetHitAreaId(i), x, y)) {
             continue;
         }
-        // 惯例：命中区名与运动组同名，或带 Tap 前缀，两种都认。
         const QString area = QString::fromUtf8(_setting->GetHitAreaName(i));
+
+        // 头部命中优先给「表情」，身体命中给「动作」—— 与参考实现
+        // (QtLive2dDesktop 的 LAppLive2DManager::OnTap)一致：摸头是表情回应，
+        // 戳身体是动作回应。命名约定各家不一，所以两种写法都认。
+        const bool headLike = area.contains(QLatin1String("Head"), Qt::CaseInsensitive)
+                              || area.contains(QStringLiteral("头"))
+                              || area.contains(QStringLiteral("臉"))
+                              || area.contains(QStringLiteral("脸"));
+        if (headLike && PlayRandomExpression()) {
+            logDebug(QStringLiteral("命中「%1」→ 表情反馈").arg(area));
+            return true;
+        }
+
+        // 动作惯例：命中区名与运动组同名，或带 Tap 前缀，两种都认。
         const QStringList candidates = {area, QStringLiteral("Tap%1").arg(area)};
         for (const QString &candidate : candidates) {
             for (int g = 0; g < _motionGroups.size(); ++g) {
                 if (_motionGroups.at(g).compare(candidate, Qt::CaseInsensitive) == 0 &&
                     motionCount(g) > 0) {
-                    return startGroupMotion(g, randomBelow(motionCount(g)), kPriorityForce);
+                    const bool played =
+                        startGroupMotion(g, randomBelow(motionCount(g)), kPriorityForce);
+                    logDebug(QStringLiteral("命中「%1」→ 动作组「%2」%3")
+                                 .arg(area, candidate,
+                                      played ? QStringLiteral("已播放")
+                                             : QStringLiteral("被更高优先级的动作挡住")));
+                    return played;
                 }
             }
         }
+
+        // 命中区既没配表情也没配动作(小模型很常见)：最后给个表情兜底，
+        // 否则用户点了角色却毫无反应，看起来像点击没生效。
+        if (!headLike && PlayRandomExpression()) {
+            logDebug(QStringLiteral("命中「%1」没有对应动作组 → 退化为表情反馈").arg(area));
+            return true;
+        }
+        logDebug(QStringLiteral("命中「%1」但既无同名/Tap 动作组，也没有可用表情").arg(area));
     }
+    logDebug(QStringLiteral("点击未落入任何命中区(归一化 %1, %2)")
+                 .arg(normalized.x(), 0, 'f', 3)
+                 .arg(normalized.y(), 0, 'f', 3));
     return false;
 }
 
@@ -803,8 +957,61 @@ bool KanbanCubismModel::SetExpressionIndex(int index)
     if (!_expressions.IsExist(name)) {
         return false;
     }
-    return _expressionManager->StartMotion(_expressions[name], false) !=
-           InvalidMotionQueueEntryHandleValue;
+    if (_expressionManager->StartMotion(_expressions[name], false) ==
+        InvalidMotionQueueEntryHandleValue) {
+        return false;
+    }
+    // 记账只在这一处：_lastExpression 是「当前生效的表情」的唯一真相，
+    // 两个调用方(顺序切/随机切)都靠它避免「切了跟没切一样」。
+    _lastExpression = index;
+    return true;
+}
+
+bool KanbanCubismModel::PlayNextExpression()
+{
+    if (!_expressionManager || _expressionNames.isEmpty()) {
+        return false;
+    }
+    const int total = _expressionNames.size();
+    // 顺序轮转而不是随机：用户点「切换表情」是想把几个表情看一遍，
+    // 随机抽样会连着撞同一个，看起来像没生效。
+    for (int attempt = 0; attempt < total; ++attempt) {
+        const int index = _nextExpression % total;
+        _nextExpression = (index + 1) % total;
+        // 只有一个表情的模型不跳过 —— 那一个就是它的全部，重播也算切了。
+        if (total > 1 && index == _lastExpression) {
+            continue;
+        }
+        if (SetExpressionIndex(index)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool KanbanCubismModel::PlayRandomExpression()
+{
+    if (!_expressionManager || _expressionNames.isEmpty()) {
+        return false;
+    }
+    const int total = _expressionNames.size();
+    if (total == 1) {
+        return SetExpressionIndex(0);
+    }
+    // 避开当前这张：摸头若有一半概率挑回同一张，用户会以为点击没生效。
+    int index = _lastExpression;
+    for (int attempt = 0; attempt < 8 && index == _lastExpression; ++attempt) {
+        index = randomBelow(total);
+    }
+    if (index == _lastExpression) {
+        index = (_lastExpression + 1) % total; // 连续撞车(概率极低)时的确定性兜底
+    }
+    if (!SetExpressionIndex(index)) {
+        return false;
+    }
+    // 同步游标，免得用户接着点「切换表情」时又绕回刚随机挑中的这张。
+    _nextExpression = (index + 1) % total;
+    return true;
 }
 
 // —— 装载辅助 ——
@@ -965,8 +1172,13 @@ Live2DRenderer::~Live2DRenderer()
 
 void Live2DRenderer::setGlHost(KanbanGlHost *host)
 {
-    // 不比较旧值：视图每次 contextReady 都会重新交一次宿主，
-    // 那意味着上下文刚刚重建，手里的旧句柄已经全部作废。
+    // 同一个宿主再交一次是常态：控制器在 GL 就绪后会把视图重新 attach 一遍。
+    // 那种情况下上下文没换，GL 对象与纹理都还有效 —— 一旦在这里无条件作废，
+    // 刚上传好的纹理就被判成过期，下一帧重建时又拿不到 CPU 侧数据，模型直接消失。
+    // 只有宿主真的换了(视图重建、后端切换、上下文销毁)才需要作废。
+    if (host == m_d->host) {
+        return;
+    }
     if (m_d->model) {
         m_d->model->InvalidateGl();
     }
@@ -986,6 +1198,10 @@ bool Live2DRenderer::initialize(QString *outError)
     // 那一行是「接的到底是哪个内核」最硬的证据，落到 videodiag 里才有得查。
     g_option.LogFunction = &cubismLogBridge;
     g_option.LoggingLevel = CubismFramework::Option::LogLevel_Warning;
+    // 读盘回调同样必须早于 StartUp：GenerateShaders() 在第一次 CreateRenderer
+    // 时就会调它，那时再补已经晚了(着色器是「生成一次、全局缓存」的)。
+    g_option.LoadFileFunction = &loadCubismFileBytes;
+    g_option.ReleaseBytesFunction = &releaseCubismFileBytes;
 
     if (!CubismFramework::IsStarted() && !CubismFramework::StartUp(&g_allocator, &g_option)) {
         const QString reason = QStringLiteral("CubismFramework::StartUp 失败");
@@ -1036,7 +1252,7 @@ bool Live2DRenderer::loadModel(const QString &modelJsonPath, QString *outError)
     // 控制器换模型时未必在 paintGL 里，此时没有上下文是常态；
     // 建不起来就交给第一次 render() 补，不把这一步当失败。
     if (m_d->host) {
-        const GlScope scope(m_d->host);
+        const GlScope scope(m_d->host, &m_d->glewReady);
         const QSize pixels = m_d->host->glPixelSize();
         if (scope.ok() && pixels.width() > 0 && pixels.height() > 0) {
             QString glError;
@@ -1046,6 +1262,8 @@ bool Live2DRenderer::loadModel(const QString &modelJsonPath, QString *outError)
             } else {
                 logWarn(QStringLiteral("纹理上传延后：%1").arg(glError));
             }
+        } else if (!scope.ok()) {
+            logWarn(QStringLiteral("装载时上下文不可用，纹理上传延后到首帧"));
         }
     }
     return true;
@@ -1064,7 +1282,7 @@ void Live2DRenderer::unloadModel()
 
     // 释放与创建必须成对，且都要在上下文里；上下文已经没了就只能作废句柄，
     // 对着死上下文发 GL 调用比漏一次释放严重得多。
-    const GlScope scope(m_d->host);
+    const GlScope scope(m_d->host, &m_d->glewReady);
     if (scope.ok()) {
         model->ReleaseGl();
     } else {
@@ -1101,19 +1319,10 @@ void Live2DRenderer::render()
     if (!model || !m_d->host) {
         return;
     }
-    const GlScope scope(m_d->host);
+    // GlScope 顺带保证 GLEW 函数表可用(见类注释)，不必在这里单独 glewInit。
+    const GlScope scope(m_d->host, &m_d->glewReady);
     if (!scope.ok()) {
         return;
-    }
-
-    // GLEW 的函数指针表是「上下文 + 线程」的产物，必须在这里、且只在这里初始化。
-    if (!m_d->glewReady) {
-        if (glewInit() != GLEW_OK) {
-            m_d->glewReady = false;
-            logWarn(QStringLiteral("glewInit 失败，无法取得 GL 入口点"));
-            return;
-        }
-        m_d->glewReady = true;
     }
 
     const QSize pixels = m_d->host->glPixelSize();
@@ -1166,6 +1375,21 @@ void Live2DRenderer::pointerClick(const QPointF &pos)
 bool Live2DRenderer::playNextMotion()
 {
     return m_d->model && m_d->model->PlayNextMotion();
+}
+
+int Live2DRenderer::expressionCount() const
+{
+    // 模型没装载时答 0：界面据此把入口置灰，而不是让用户点了没反应。
+    return m_d->model ? m_d->model->expressionCount() : 0;
+}
+
+bool Live2DRenderer::playNextExpression()
+{
+    if (!m_d->model || !m_d->model->PlayNextExpression()) {
+        return false;
+    }
+    logDebug(QStringLiteral("切换表情 → %1").arg(m_d->model->currentExpressionName()));
+    return true;
 }
 
 void Live2DRenderer::pause()
