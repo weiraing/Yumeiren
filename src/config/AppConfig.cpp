@@ -48,6 +48,16 @@ const NumericRule kNumericRules[] = {
     {ConfigKeys::Video::TargetFps, 24, 0, 240},
     {ConfigKeys::Video::ScreenMode, 0, 0, 2},
     {ConfigKeys::Video::PlayMode, 0, 0, 2},
+    // 看板娘：缩放/透明度/窗口尺寸/位置/目标帧率。位置 -1 表示「尚未放置」，
+    // 由看板娘窗口首次显示时按主屏右下角自动摆放；下界必须留 -1，
+    // 否则钳位会把「未放置」改写成 0，等于把窗口钉死在屏幕左上角。
+    {ConfigKeys::Kanban::Scale, 100, 20, 300},
+    {ConfigKeys::Kanban::Opacity, 100, 20, 100},
+    {ConfigKeys::Kanban::Width, 320, 160, 2560},
+    {ConfigKeys::Kanban::Height, 480, 160, 2560},
+    {ConfigKeys::Kanban::PosX, -1, -1, 8192},
+    {ConfigKeys::Kanban::PosY, -1, -1, 8192},
+    {ConfigKeys::Kanban::TargetFps, 30, 10, 60},
 };
 
 const char *kBoolRules[] = {
@@ -63,7 +73,45 @@ const char *kBoolRules[] = {
     ConfigKeys::Video::AffinityLimit,
     ConfigKeys::Video::Diag,
     ConfigKeys::Window::Maximized,
+    // 看板娘与系统托盘：缺省值查 kBoolDefaultTrue，未列出的按 false
+    ConfigKeys::Kanban::Enabled,
+    ConfigKeys::Kanban::AlwaysOnTop,
+    ConfigKeys::Kanban::MouseThrough,
+    ConfigKeys::Kanban::AutoStart,
+    ConfigKeys::Kanban::PauseWhenHidden,
+    ConfigKeys::Kanban::AllowInteraction,
+    ConfigKeys::Tray::Enabled,
+    ConfigKeys::Tray::ShowWhenBackgroundTaskRunning,
+    ConfigKeys::Tray::MinimizeToTrayOnClose,
 };
+
+// 布尔项缺省值表：列在这里的默认开，其余布尔项默认关。用表而不是继续叠
+// strcmp 条件链，是为了新增键时只看一处。
+const char *kBoolDefaultTrue[] = {
+    ConfigKeys::Effect::ClearAddress,
+    ConfigKeys::Effect::ClearBarBg,
+    ConfigKeys::Effect::ClearWinUIBg,
+    ConfigKeys::Video::PauseFullscreen,
+    ConfigKeys::Video::Reclaim,
+    ConfigKeys::Video::AffinityLimit,
+    ConfigKeys::Kanban::AlwaysOnTop,
+    ConfigKeys::Kanban::PauseWhenHidden,
+    ConfigKeys::Kanban::AllowInteraction,
+    ConfigKeys::Tray::Enabled,
+    ConfigKeys::Tray::ShowWhenBackgroundTaskRunning,
+    // 任务书 §7.6：有后台任务时点关闭应「隐藏而不是退出」，所以这项默认开，
+    // 用户想改回传统行为再取消勾选。读取端(closeEvent / 界面勾选框)默认值同为 true。
+    ConfigKeys::Tray::MinimizeToTrayOnClose,
+};
+
+bool boolDefaultFor(const char *key)
+{
+    for (const char *k : kBoolDefaultTrue) {
+        if (strcmp(k, key) == 0)
+            return true;
+    }
+    return false;
+}
 
 // INI 中一切值都是字符串: "true"/"1" 视为真, "false"/"0" 视为假
 bool normalizeBool(const QVariant &v)
@@ -224,13 +272,7 @@ void AppConfig::ensureDefaultsAndFix()
     // 布尔类
     for (const char *key : kBoolRules) {
         if (!m_settings->contains(key)) {
-            m_settings->setValue(key,
-                strcmp(key, ConfigKeys::Video::PauseFullscreen) == 0
-                    || strcmp(key, ConfigKeys::Video::Reclaim) == 0
-                    || strcmp(key, ConfigKeys::Video::AffinityLimit) == 0
-                    || strcmp(key, ConfigKeys::Effect::ClearAddress) == 0
-                    || strcmp(key, ConfigKeys::Effect::ClearBarBg) == 0
-                    || strcmp(key, ConfigKeys::Effect::ClearWinUIBg) == 0);
+            m_settings->setValue(key, boolDefaultFor(key));
             ++missing;
         } else {
             // 字符串形态的布尔规范化(保留用户原值而非盲目改 false)。
@@ -267,6 +309,7 @@ void AppConfig::ensureDefaultsAndFix()
     const struct { const char *key; const char *def; } strings[] = {
         {ConfigKeys::Image::CustomPath, ""},
         {ConfigKeys::Effect::ShowLine, "false"},
+        {ConfigKeys::Kanban::ModelPath, ""},
     };
     for (const auto &s : strings) {
         if (!m_settings->contains(s.key)) {

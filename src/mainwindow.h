@@ -9,8 +9,15 @@
 #include <QStringList>
 #include <QVector>
 
+#include <memory>
+
 #include "engine.h"
 #include "imageprocess.h"
+
+namespace kanban {
+class KanbanController;
+}
+class SystemTrayController;
 
 class QLineEdit;
 class QListWidget;
@@ -69,8 +76,12 @@ protected:
     void closeEvent(QCloseEvent *event) override; // 保存窗口几何到统一配置
     void resizeEvent(QResizeEvent *event) override;
     void showEvent(QShowEvent *event) override;
+    void hideEvent(QHideEvent *event) override;
 
 private:
+    // 把当前窗口尺寸/位置写进配置(不含保存后的 cfg.save())
+    void saveWindowGeometry();
+
     // UI builders
     QWidget *buildTitleBar();
     QWidget *buildSidebar();
@@ -116,6 +127,18 @@ private:
     // 「随机」模式：把图片浏览列表里的每张图按当前参数处理一遍，铺进图片池目录
     // (Engine::imagePoolDir())。成功返回 true，count 给出池内图片数。
     bool buildRandomImagePool(int *count, QString *error);
+
+    // —— 看板娘 + 系统托盘 ——
+    QWidget *buildKanbanPage();
+    QWidget *buildKanbanModelCard(QWidget *parent);
+    QWidget *buildKanbanParamCard(QWidget *parent);
+    // 控制器 + 托盘 + 退出步骤的装配(在 UI 建好之后调用，顺序有讲究)。
+    void setupKanbanAndTray();
+    void refreshKanbanModels();          // 重扫模型目录并回填下拉框
+    void updateKanbanControls();         // 按钮可用性/状态文本(单一出口，别处不直改)
+    void setKanbanLog(const QString &text, bool isError);
+    void showFromTray();                 // 托盘「显示窗口」/双击图标
+    void onTrayQuitRequested();
 
     // data
     struct PresetImage { QString name; QString res; bool isFigure; };
@@ -249,6 +272,33 @@ private:
     bool m_darkTheme = true;  // currently applied scheme
     QSize m_savedWindowSize;  // 启动时恢复的意图尺寸，关闭时保存它以防止布局漂移导致膨胀
     bool m_windowShown = false; // 首次 show 完成前不更新 m_savedWindowSize
+
+    // kanban page widgets
+    std::unique_ptr<kanban::KanbanController> m_kanban;
+    SystemTrayController *m_tray = nullptr;
+    QPushButton *m_kanbanStartBtn = nullptr;
+    QPushButton *m_kanbanPauseBtn = nullptr;
+    QPushButton *m_kanbanNextBtn = nullptr;
+    QPushButton *m_kanbanStopBtn = nullptr;
+    QLabel *m_kanbanStatus = nullptr;
+    QLabel *m_kanbanLog = nullptr;
+    QComboBox *m_kanbanModelCombo = nullptr;
+    QLabel *m_kanbanModelInfo = nullptr;
+    QSlider *m_kanbanScale = nullptr;
+    QSlider *m_kanbanOpacity = nullptr;
+    QSlider *m_kanbanFps = nullptr;
+    QLabel *m_kanbanScaleVal = nullptr;
+    QLabel *m_kanbanOpacityVal = nullptr;
+    QLabel *m_kanbanFpsVal = nullptr;
+    QCheckBox *m_kanbanTopBox = nullptr;
+    QCheckBox *m_kanbanThroughBox = nullptr;
+    QCheckBox *m_kanbanInteractBox = nullptr;
+    QCheckBox *m_kanbanAutoStartBox = nullptr;
+    QCheckBox *m_kanbanPauseHiddenBox = nullptr;
+    QCheckBox *m_trayAlwaysBox = nullptr;
+    QCheckBox *m_trayMinimizeBox = nullptr;
+    // 回填设置时挡住「控件变化 = 用户改动」，否则 loadSettings 会把刚读的值再写回去。
+    bool m_kanbanSyncing = false;
 };
 
 #endif // MAINWINDOW_H

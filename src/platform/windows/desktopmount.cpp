@@ -344,37 +344,53 @@ bool activateExistingInstanceWindow(const QString &mainWindowTitle, QString *rea
     if (!targetPid)
         return fail(QStringLiteral("未找到已运行的产品进程"));
 
-    // 2) 该实例的可见顶层主窗口：标题精确匹配(壁纸窗口无标题，不会误中)
+    // 2) 该实例的顶层主窗口：标题精确匹配(壁纸窗口无标题，不会误中)。
+    //    这里不能要求 IsWindowVisible —— 隐藏到托盘后窗口还在，只是不可见，
+    //    一旦把这种状态当成「没有实例」，用户二次启动就会看到
+    //    「虞美人已经在运行」弹窗而窗口永远叫不醒。
     const std::wstring wantTitle = mainWindowTitle.toStdWString();
-    HWND found = nullptr;
-    struct Ctx { DWORD pid; const std::wstring *title; HWND main; long area; } ctx{
-        targetPid, &wantTitle, nullptr, 0};
+    struct Ctx { DWORD pid; const std::wstring *title; HWND main; long area; bool visible; } ctx{
+        targetPid, &wantTitle, nullptr, 0, false};
     EnumWindows([](HWND hwnd, LPARAM lp) -> BOOL {
         auto *c = reinterpret_cast<Ctx *>(lp);
         DWORD pid = 0;
         GetWindowThreadProcessId(hwnd, &pid);
-        if (pid != c->pid || !IsWindowVisible(hwnd))
+        if (pid != c->pid)
             return TRUE;
         if (GetAncestor(hwnd, GA_ROOT) != hwnd)
             return TRUE;
         wchar_t title[128] = {};
         GetWindowTextW(hwnd, title, 128);
         if (*c->title == title) {
-            // 取面积最大的匹配窗口：兜底弹窗(MessageBox)标题与应用名相同，
+            // 可见窗口优先，其次取面积最大：兜底弹窗(MessageBox)标题与应用名相同，
             // 主窗口(990x780)远大于它，避免旧弹窗残留在场时误中
             RECT r;
             if (!GetWindowRect(hwnd, &r))
                 return TRUE;
             const long area = (r.right - r.left) * (r.bottom - r.top);
-            if (!c->main || area > c->area) {
+            const bool vis = IsWindowVisible(hwnd) != FALSE;
+            if (!c->main || (vis && !c->visible)
+                || (vis == c->visible && area > c->area)) {
                 c->main = hwnd;
                 c->area = area;
+                c->visible = vis;
             }
         }
         return TRUE;
     }, reinterpret_cast<LPARAM>(&ctx));
     if (!ctx.main)
         return fail(QStringLiteral("已运行实例(pid=%1)未找到标题匹配的主窗口").arg(targetPid));
+
+    if (!ctx.visible) {
+        // 隐藏到托盘：让已运行实例自己唤醒(见 showMainWindowMessage 注释)。
+        const unsigned int showMsg = showMainWindowMessage();
+        if (!showMsg || !PostMessageW(ctx.main, showMsg, 0, 0))
+            return fail(QStringLiteral("已运行实例(pid=%1)在托盘中，但唤醒消息发送失败")
+                            .arg(targetPid));
+        if (reason)
+            *reason = QStringLiteral("已请求从托盘恢复");
+        return true;
+    }
 
     // 3) 最小化则还原；置顶一拍再还原以绕过前台锁(本实例由用户点击启动，
     //    本身具备前台激活权限，双保险)
@@ -388,6 +404,14 @@ bool activateExistingInstanceWindow(const QString &mainWindowTitle, QString *rea
     if (reason)
         *reason = QStringLiteral("已激活");
     return true;
+}
+
+unsigned int showMainWindowMessage()
+{
+    // 注册名固定即可，跨进程拿到的是同一个消息号；注册失败返回 0，调用方兜底。
+    static const unsigned int msg = static_cast<unsigned int>(
+        RegisterWindowMessageW(L"Yumeiren.ShowMainWindow"));
+    return msg;
 }
 
 void trimProcessMemory()

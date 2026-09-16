@@ -63,6 +63,11 @@ bool applyProcessAffinityLimit(int maxCores);
 // 返回 true=获得运行权(句柄故意保持打开=锁)；false=已有实例在运行。
 bool acquireSingleInstanceLock();
 
+// 主窗口隐藏到托盘后，二次启动只能枚举到一个不可见窗口，此时不能直接
+// ShowWindow(Qt 不知道窗口又出现了，状态会失真)，改为给已运行实例发这条
+// 应用级消息，由它自己走「显示主窗口」的同一条路。返回值注册失败时为 0。
+unsigned int showMainWindowMessage();
+
 void trimProcessMemory();
 
 } // namespace fbswin

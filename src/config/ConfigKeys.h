@@ -72,6 +72,32 @@ inline constexpr auto Y = "window/y";
 inline constexpr auto Maximized = "window/maximized";
 }
 
+// 看板娘(Live2D 桌宠)。只持久化用户设置，运行态(当前状态机状态、当前动作)
+// 一律不落盘：进程重启后回到"未启动"，由 kanban/autoStart 决定是否自动拉起。
+namespace Kanban {
+inline constexpr auto Enabled = "kanban/enabled";         // 用户最后一次是否让它在跑
+inline constexpr auto ModelPath = "kanban/modelPath";     // 当前模型 model3.json 绝对路径
+inline constexpr auto Scale = "kanban/scale";             // 显示缩放(%)，相对模型基准高度
+inline constexpr auto Opacity = "kanban/opacity";         // 窗口不透明度(%)
+inline constexpr auto Width = "kanban/width";             // 窗口宽(逻辑像素)
+inline constexpr auto Height = "kanban/height";           // 窗口高(逻辑像素)
+inline constexpr auto PosX = "kanban/x";                  // 窗口左上角(逻辑像素)
+inline constexpr auto PosY = "kanban/y";
+inline constexpr auto AlwaysOnTop = "kanban/alwaysOnTop"; // 置顶(关=贴在桌面之上的一般层)
+inline constexpr auto MouseThrough = "kanban/mouseThrough"; // 鼠标穿透
+inline constexpr auto TargetFps = "kanban/targetFps";     // 动画目标帧率
+inline constexpr auto AutoStart = "kanban/autoStart";     // 程序启动时自动运行
+inline constexpr auto PauseWhenHidden = "kanban/pauseWhenHidden"; // 主窗口隐藏后仍动画
+inline constexpr auto AllowInteraction = "kanban/allowInteraction"; // 允许点击/悬停互动
+}
+
+// 系统托盘与"关窗不等于退出"策略。
+namespace Tray {
+inline constexpr auto Enabled = "tray/enabled";                       // 允许使用托盘
+inline constexpr auto ShowWhenBackgroundTaskRunning = "tray/showWhenBackgroundTaskRunning";
+inline constexpr auto MinimizeToTrayOnClose = "tray/minimizeToTrayOnClose";
+}
+
 } // namespace ConfigKeys
 
 #endif // CONFIGKEYS_H
