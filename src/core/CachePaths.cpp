@@ -15,12 +15,11 @@ constexpr char kCacheDirName[] = ".cache";
 const QStringList &subDirNames()
 {
     static const QStringList dirs = {
-        QStringLiteral("thumbnails"),
+        QStringLiteral("gallery-thumbs"),
         QStringLiteral("model-thumbs"),
-        QStringLiteral("media"),
-        QStringLiteral("bg_random"),
+        QStringLiteral("rendered-bg"),
+        QStringLiteral("image-pool"),
         QStringLiteral("logs"),
-        QStringLiteral("temp"),
     };
     return dirs;
 }
@@ -74,9 +73,9 @@ QString CachePaths::root()
     return QDir(QCoreApplication::applicationDirPath()).filePath(QLatin1String(kCacheDirName));
 }
 
-QString CachePaths::thumbnails()
+QString CachePaths::galleryThumbs()
 {
-    return QDir(root()).filePath(QStringLiteral("thumbnails"));
+    return QDir(root()).filePath(QStringLiteral("gallery-thumbs"));
 }
 
 QString CachePaths::modelThumbs()
@@ -84,24 +83,19 @@ QString CachePaths::modelThumbs()
     return QDir(root()).filePath(QStringLiteral("model-thumbs"));
 }
 
-QString CachePaths::media()
+QString CachePaths::renderedBg()
 {
-    return QDir(root()).filePath(QStringLiteral("media"));
+    return QDir(root()).filePath(QStringLiteral("rendered-bg"));
 }
 
 QString CachePaths::imagePool()
 {
-    return QDir(root()).filePath(QStringLiteral("bg_random"));
+    return QDir(root()).filePath(QStringLiteral("image-pool"));
 }
 
 QString CachePaths::logs()
 {
     return QDir(root()).filePath(QStringLiteral("logs"));
-}
-
-QString CachePaths::temp()
-{
-    return QDir(root()).filePath(QStringLiteral("temp"));
 }
 
 bool CachePaths::contains(const QString &path)
@@ -152,7 +146,8 @@ bool CachePaths::isWritable(QString *errorMessage)
     if (!ensureDirectories(errorMessage))
         return false;
 
-    const QString probe = QDir(temp()).filePath(probeFileName());
+    // 直接在根目录写探针，不再依赖 temp 子目录
+    const QString probe = QDir(root()).filePath(probeFileName());
     QFile file(probe);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         if (errorMessage)

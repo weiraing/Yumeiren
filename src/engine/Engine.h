@@ -40,7 +40,7 @@ public:
     static QString effectDllPath();
     static QString imageIniPath();
     static QString effectIniPath();
-    static QString bgDir();               // 处理后背景图缓存 = CachePaths::media()
+    static QString bgDir();               // 处理后背景图缓存 = CachePaths::renderedBg()
     static QString processedImagePath();
     static QString wallpaperPath();
     // 「随机」模式的图片池目录 = CachePaths::imagePool()。

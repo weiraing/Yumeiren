@@ -130,10 +130,10 @@ QStringList migrateLegacy()
 
     // 2) cached backgrounds. The hook DLLs are re-extracted on the next apply,
     //    only the rendered images are worth carrying over. 背景图是可重新生成的
-    //    缓存，落点随缓存迁移到 <程序目录>/.cache/media，不再写 %LOCALAPPDATA%。
+    //    缓存，落点随缓存迁移到 <程序目录>/.cache/rendered-bg，不再写 %LOCALAPPDATA%。
     QDir from(legacyDataRoot() + QStringLiteral("/bg"));
     if (from.exists()) {
-        QDir to(CachePaths::media());
+        QDir to(CachePaths::renderedBg());
         to.mkpath(QStringLiteral("."));
         int copied = 0;
         const QList<QFileInfo> files = from.entryInfoList(QDir::Files);

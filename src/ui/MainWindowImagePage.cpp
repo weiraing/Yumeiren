@@ -334,9 +334,9 @@ QString MainWindow::galleryThumbPath(const QString &image) const
     const QString hash = QString::fromLatin1(
         QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Md5).toHex());
     // v2: PNG 保留透明通道(旧 JPEG 缩略图作废)
-    // 图库缩略图缓存统一落在 <程序目录>/.cache/thumbnails(见 CachePaths)。
+    // 图库缩略图缓存统一落在 <程序目录>/.cache/gallery-thumbs(见 CachePaths)。
     CachePaths::ensureDirectories();
-    return QDir(CachePaths::thumbnails())
+    return QDir(CachePaths::galleryThumbs())
         .filePath(hash + QStringLiteral("_v2.png"));
 }
 

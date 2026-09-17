@@ -50,14 +50,14 @@ QString Engine::imageDllPath()  { return imageDllDir() + QStringLiteral("/Explor
 QString Engine::effectDllPath() { return effectDllDir() + QStringLiteral("/ExplorerBlurMica.dll"); }
 QString Engine::imageIniPath()  { return imageDllDir() + QStringLiteral("/config.ini"); }
 QString Engine::effectIniPath() { return effectDllDir() + QStringLiteral("/config.ini"); }
-QString Engine::bgDir()   { return CachePaths::media(); }
+QString Engine::bgDir()   { return CachePaths::renderedBg(); }
 QString Engine::processedImagePath() { return bgDir() + QStringLiteral("/bg_custom.png"); }
 QString Engine::wallpaperPath() { return bgDir() + QStringLiteral("/current_wallpaper.jpg"); }
 QString Engine::imagePoolDir() { return CachePaths::imagePool(); }
 
 void Engine::ensureDataDirs()
 {
-    // 渲染出的背景图是可重新生成的缓存，落在 <程序目录>/.cache/media。
+    // 渲染出的背景图是可重新生成的缓存，落在 <程序目录>/.cache/rendered-bg。
     QString cacheError;
     if (!CachePaths::ensureDirectories(&cacheError))
         videodiag::log(videodiag::Level::Error, cacheError, QStringLiteral("Cache"));
