@@ -38,6 +38,10 @@ public:
     void pointerMove(const QPointF &pos) override;
     void pointerClick(const QPointF &pos) override;
     bool playNextMotion() override;
+    // 占位后端有 3 个写死的动作(见 .cpp 的 kMotions)：降级路径下「播放下一个动作」
+    // 不该变成死按钮，界面行为不因后端而不同。它没有 idle 组的概念，
+    // 所以 3 个全是「可播动作」。
+    int playableMotionCount() const override;
 
     // 占位后端也有表情(见 .cpp 的 kExpressions)：降级路径下右键菜单的
     // 「切换表情」不该变成死按钮，界面行为不因后端而不同。
@@ -71,6 +75,7 @@ private:
     QPointF m_gazeTarget;
     TimedMotion m_motion;
     bool m_motionActive = false;
+    int m_motionIndex = 0;     // 见 kMotions，索引即「下一个动作」的游标
     int m_expressionIndex = 0; // 见 kExpressions，索引即「当前表情」
 };
 

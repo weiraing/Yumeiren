@@ -1,7 +1,6 @@
 #include "ui/TooltipStyle.h"
 
 #include <QApplication>
-#include <QFont>
 #include <QFontMetrics>
 #include <QString>
 #include <QVector>

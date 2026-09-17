@@ -59,8 +59,12 @@ public:
     bool retry();       // Error 态下重试
     void pauseResume(); // 暂停/恢复(不销毁窗口)
     void stop();        // 取消看板娘：停帧、释放模型、关窗、复位
-    void playNext();    // 下一个动作；没有动作则换下一个可用模型(§7.4)
+    void playNext();    // 下一个动作；没有可播动作就到此为止(不换模型)
     void playNextExpression(); // 下一个表情；没有表情就静默返回(不换模型)
+    // 可播动作数(不含 idle)与「这个入口该不该可点」。界面拿它置灰，
+    // 判据收在渲染器基类里一处，三条入口(菜单/设置页/托盘)共用。
+    int playableMotionCount() const;
+    bool canPlayNextMotion() const;
     void showWindow();  // 暂时隐藏后重新显示(不重启)
     void hideWindow();  // 隐藏但保持已装载状态与运行语义
 

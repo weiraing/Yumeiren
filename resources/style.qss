@@ -359,6 +359,74 @@ QAbstractItemView#ComboPopup::item:selected {
     font-weight: 600;
 }
 
+/* ---------- popup menus (看板娘右键菜单 / 托盘菜单) ----------
+   与 #ComboContainer、QToolTip 同属一族「浮层表面」：细描边 + 扁平底色，
+   只是内容换成了动作列表。
+
+   尺度整体收小一档(2026-09-17)：字 13→12px(与正文 12px 对齐)、外内边距 4→3px、
+   行内边距 5→4px、行外边距 2→1px、分隔线 3/8→2/6px。
+
+   **外框刻意不留圆角**(2026-09-17 二次调整，实测结论)：
+   QMenu 是顶层弹窗，QSS 的 border-radius 只改「画出来的那块矩形」，窗口本身仍是
+   方的，圆角外侧会露出窗口底色。以前靠给窗口设 region 遮罩收口
+   (menustyle::applyRoundedCorners)，但 region 是 **1 位 alpha**，圆角边缘必然是
+   硬台阶；在 150% 缩放(DPI 144)下逻辑坐标转设备坐标还会把台阶放大，肉眼就是
+   「圆角有粗糙像素点」。改走逐像素透明(WA_TranslucentBackground)实测更糟 ——
+   圆角外侧直接渲染成黑块。所以外框改成直角：不留半径就不需要遮罩，也就没有
+   台阶可看。菜单项的高亮块画在窗口**内部**、带抗锯齿，保留小圆角不受影响。 */
+QMenu {
+    background: #212228;
+    border: 1px solid #33343c;
+    padding: 3px;
+    color: #e9eaee;
+    font-size: 12px;
+}
+
+/* 行高：12px 字的一行约 24px(上下内边距 4px + 外边距 1px)，比上一版矮一档。
+   历史：最早是 8px/2px，出来 37px 一行，十项的菜单拉到 360px 高，鼠标要跑很远
+   才够得着下一项，所以一路压到现在的 4px/1px。 */
+QMenu::item {
+    background: transparent;
+    color: #e9eaee;
+    padding: 4px 13px 4px 8px;
+    margin: 1px 1px;
+    border-radius: 5px;
+    /* 只是「不许窄成一条」，不是目标宽度：真正的宽度由最长的那行文字定
+       (「打开主界面设置」)。写大了会平白把菜单撑宽 —— 原来 124px 就是
+       菜单宽度 176px 的主要来源。 */
+    min-width: 76px;
+}
+
+/* 菜单没有 hover 态，高亮就是 :selected */
+QMenu::item:selected { background: rgba(255, 255, 255, 0.08); color: #ffffff; }
+
+/* 不可点的项灰得更明确，一眼能看出是「不可用」而不是「没画出来」 */
+QMenu::item:disabled { color: #6b6e78; }
+
+QMenu::separator {
+    height: 1px;
+    background: #33343c;
+    margin: 2px 6px;
+}
+
+/* 勾选项用填色圆角块表示选中，与 QCheckBox::indicator 同一套语言。
+   尺寸随字号一起收小：13→12px，圆角 4→3px。 */
+QMenu::indicator {
+    width: 12px;
+    height: 12px;
+    margin-left: 7px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.10);
+}
+
+QMenu::indicator:checked { background: #4f8cff; }
+
+QMenu::indicator:disabled { background: rgba(255, 255, 255, 0.05); }
+
+/* 二级菜单箭头：**刻意不覆盖**，交给 Fusion 画。理由见 light.qss 里同一处的长注释
+   (简言之：border 拼三角在 QMenu::right-arrow 上出不来三角，贴图又要多两个资源
+   文件；不覆盖时箭头颜色会跟着 `color` 走，明暗主题都对)。 */
+
 QCheckBox {
     color: #9a9daa;
     font-size: 12px;

@@ -80,6 +80,13 @@ bool Live2DRenderer::playNextMotion()
     return false;
 }
 
+int Live2DRenderer::playableMotionCount() const
+{
+    // 0 = 本构建没有 SDK，一段动作都播不了。入口据此置灰，
+    // 而不是让用户点了才发现没反应。
+    return 0;
+}
+
 int Live2DRenderer::expressionCount() const
 {
     // 0 = 本后端没有表情。控制器据此切到占位渲染器(它有写死的几个表情)，

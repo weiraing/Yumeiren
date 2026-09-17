@@ -22,12 +22,9 @@ new-build/
 live2d-build/
 data/
 third_party/
+.workbuddy-ai/
 scripts
 tests
-# docs 整体不入库，但看板娘/托盘的开发与测试文档要跟着代码走(任务书 §15)。
-docs/*
-!docs/dev/
-!docs/test/
 
 # 软件自身缓存(<程序目录>\.cache)
 .cache/

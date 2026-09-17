@@ -13,7 +13,6 @@
 #ifndef SYSTEMTRAYCONTROLLER_H
 #define SYSTEMTRAYCONTROLLER_H
 
-#include <QObject>
 #include <QSystemTrayIcon>
 
 class QMenu;

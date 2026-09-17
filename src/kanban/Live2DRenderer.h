@@ -74,6 +74,9 @@ public:
     void pointerMove(const QPointF &pos) override;
     void pointerClick(const QPointF &pos) override;
     bool playNextMotion() override;
+    // 可播动作数(不含 idle)。两份实现都要给定义：接入 SDK 的那份按模型文件算，
+    // 未接入的那份恒为 0 —— 界面据此把「播放下一个动作」置灰。
+    int playableMotionCount() const override;
     // 表情走 ExpressionMotionManager，与动作的 MotionManager 互不抢占优先级，
     // 所以「切表情」不会打断正在播的动作(见 KanbanRenderer 的说明)。
     int expressionCount() const override;

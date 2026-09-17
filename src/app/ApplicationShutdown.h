@@ -11,9 +11,6 @@
 #ifndef APPLICATIONSHUTDOWN_H
 #define APPLICATIONSHUTDOWN_H
 
-#include <QObject>
-#include <QString>
-
 #include <functional>
 #include <utility>
 #include <vector>

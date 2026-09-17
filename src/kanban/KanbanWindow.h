@@ -15,7 +15,6 @@
 #ifndef KANBANWINDOW_H
 #define KANBANWINDOW_H
 
-#include <QPoint>
 #include <QWidget>
 
 namespace kanban {
