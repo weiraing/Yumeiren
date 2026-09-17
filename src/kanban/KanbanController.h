@@ -85,6 +85,10 @@ public:
     bool autoStart() const;
     void setPauseWhenMainHidden(bool on);
     bool pauseWhenMainHidden() const;
+    // 视线追踪：头/眼/身体跟着鼠标转。开启时控制器在每帧末尾读一次全局光标，
+    // 换算成窗口坐标喂给渲染器(见 onFrameTick 里的说明)。
+    void setGazeTracking(bool on);
+    bool gazeTracking() const { return m_gazeTracking; }
     bool setModelPath(const QString &modelJsonPath);
     QString modelPath() const { return m_modelPath; }
     int refreshModels(); // 重新扫描模型目录，返回可用模型数
@@ -124,6 +128,8 @@ private:
     void saveGeometry();
     void placeWindowFromConfig(); // 建窗后、挂视图前：给窗口一个非零尺寸与落点
     void applyScaleToWindow();
+    // 视线追踪：把全局光标换算成窗口坐标交给渲染器。每帧调一次。
+    void feedGazeTarget();
 
     KanbanStateMachine m_machine;
     KanbanModelManager m_models;
@@ -146,6 +152,7 @@ private:
     bool m_alwaysOnTop = true;
     bool m_mouseThrough = false;
     bool m_interactionEnabled = true;
+    bool m_gazeTracking = true;
 };
 
 } // namespace kanban

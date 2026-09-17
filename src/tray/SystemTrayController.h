@@ -74,6 +74,7 @@ private:
     QAction *m_actKanbanPause = nullptr;
     QAction *m_actKanbanNext = nullptr;
     QAction *m_actKanbanStop = nullptr;
+    QAction *m_actKanbanGaze = nullptr;
     QAction *m_actQuit = nullptr;
 
     bool m_available = false;

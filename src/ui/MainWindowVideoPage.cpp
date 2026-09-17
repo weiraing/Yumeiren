@@ -104,25 +104,26 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     hint->setWordWrap(true);
     leftLay->addWidget(hint);
 
-    m_playBtn = new QPushButton(QStringLiteral("启动"), leftCard);
+    m_playBtn = new QPushButton(QStringLiteral("▶ 启动"), leftCard);
     m_playBtn->setObjectName(QStringLiteral("PrimaryButton"));
     m_playBtn->setMinimumHeight(40);
-    connect(m_playBtn, &QPushButton::clicked, this, &MainWindow::startVideo);
-    m_pauseBtn = new QPushButton(QStringLiteral("暂停"), leftCard);
+    m_playBtn->setProperty("data-active", 0);
+    connect(m_playBtn, &QPushButton::clicked, this, [this] {
+        if (VideoWallpaper::instance().isStarted())
+            stopVideo();
+        else
+            startVideo();
+    });
+    m_pauseBtn = new QPushButton(QStringLiteral("⏸ 暂停"), leftCard);
     m_pauseBtn->setMinimumHeight(40);
     m_pauseBtn->setEnabled(false);
     connect(m_pauseBtn, &QPushButton::clicked, this, [] {
         VideoWallpaper::instance().pauseResume();
     });
-    m_stopBtn = new QPushButton(QStringLiteral("取消"), leftCard);
-    m_stopBtn->setMinimumHeight(40);
-    m_stopBtn->setEnabled(false);
-    connect(m_stopBtn, &QPushButton::clicked, this, &MainWindow::stopVideo);
     auto *playRow = new QHBoxLayout();
     playRow->setSpacing(10);
     playRow->addWidget(m_playBtn, 1);
     playRow->addWidget(m_pauseBtn, 1);
-    playRow->addWidget(m_stopBtn, 1);
     leftLay->addLayout(playRow);
 
     // 播放模式：单循环(默认) / 列表循环 / 随机，三选一互斥
@@ -284,11 +285,11 @@ QWidget *MainWindow::buildVideoWallpaperPage()
         strip->addWidget(b);
         return b;
     };
-    addStripBtn(QStringLiteral("扫描"), "VideoScanButton", [this] { scanVideoDir(); });
+    addStripBtn(QStringLiteral("↻ 扫描"), "VideoScanButton", [this] { scanVideoDir(); });
     strip->addSpacing(46); // 扫描(发现类)与列表管理三键之间空一个按键距离
-    addStripBtn(QStringLiteral("添加"), "VideoAddButton", [this] { addVideos(); });
-    addStripBtn(QStringLiteral("删除"), "VideoDeleteButton", [this] { removeSelectedVideos(); });
-    addStripBtn(QStringLiteral("清空"), "VideoClearButton", [this] { clearVideos(); });
+    addStripBtn(QStringLiteral("＋ 添加"), "VideoAddButton", [this] { addVideos(); });
+    addStripBtn(QStringLiteral("✕ 删除"), "VideoDeleteButton", [this] { removeSelectedVideos(); });
+    addStripBtn(QStringLiteral("⌫ 清空"), "VideoClearButton", [this] { clearVideos(); });
     strip->addStretch(1);
     listRow->addLayout(strip);
     rightLay->addLayout(listRow, 1);
@@ -468,7 +469,7 @@ QWidget *MainWindow::buildTranscodeCard(QWidget *parent)
     audioRow->addStretch(1);
     lay->addLayout(audioRow);
 
-    m_transcodeBtn = new QPushButton(QStringLiteral("立即转码"), card);
+    m_transcodeBtn = new QPushButton(QStringLiteral("⚡ 立即转码"), card);
     m_transcodeBtn->setObjectName(QStringLiteral("PrimaryButton"));
     m_transcodeBtn->setMinimumHeight(36);
     m_transcodeBtn->setEnabled(false); // 恰好选中一个视频才可点
@@ -490,7 +491,7 @@ void MainWindow::updateTranscodeButton()
         m_transcodeBtn->setEnabled(false);
         return;
     }
-    m_transcodeBtn->setText(QStringLiteral("立即转码"));
+    m_transcodeBtn->setText(QStringLiteral("⚡ 立即转码"));
     m_transcodeBtn->setEnabled(m_videoList && m_videoList->selectedItems().size() == 1);
 }
 
@@ -905,6 +906,7 @@ void MainWindow::startVideo()
     AppConfig &st = AppConfig::instance();
     st.setValue(ConfigKeys::Video::WasPlaying, true);
     setLog(QStringLiteral("视频壁纸运行中：画面在桌面图标之后，保持程序运行即可。"), false);
+    updateVideoButtons();
 }
 
 void MainWindow::stopVideo()
@@ -914,6 +916,7 @@ void MainWindow::stopVideo()
     st.setValue(ConfigKeys::Video::WasPlaying, false);
     refreshVideoList();
     setLog(QStringLiteral("视频壁纸已取消。"), false);
+    updateVideoButtons();
 }
 
 void MainWindow::refreshVideoList()
@@ -1001,17 +1004,20 @@ void MainWindow::onVideoStateChanged(const QString &text)
 
 void MainWindow::updateVideoButtons()
 {
-    if (!m_playBtn || !m_stopBtn)
+    if (!m_playBtn)
         return;
     const bool empty = VideoWallpaper::instance().playlist().isEmpty();
     const bool started = VideoWallpaper::instance().isStarted();
 
-    m_playBtn->setEnabled(!empty && !started); // 运行中由“暂停/继续”与“取消”接管
-    m_stopBtn->setEnabled(started);
+    m_playBtn->setEnabled(!empty || started);
+    m_playBtn->setText(started ? QStringLiteral("■ 取消") : QStringLiteral("▶ 启动"));
+    m_playBtn->setProperty("data-active", started ? 1 : 0);
+    m_playBtn->style()->unpolish(m_playBtn);
+    m_playBtn->style()->polish(m_playBtn);
     if (m_pauseBtn) {
         m_pauseBtn->setEnabled(started);
         m_pauseBtn->setText(VideoWallpaper::instance().isManualPaused()
-                                ? QStringLiteral("继续") : QStringLiteral("暂停"));
+                                ? QStringLiteral("⏸ 继续") : QStringLiteral("⏸ 暂停"));
     }
 }
 void MainWindow::saveWindowGeometry()

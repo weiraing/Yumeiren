@@ -18,6 +18,13 @@ constexpr float kBreathOmega = 1.15f;
 constexpr float kSwayOmega = 0.55f;
 constexpr float kBlinkDuration = 0.13f;
 
+// 视线追踪调参：必须与 Live2DRendererCubism.cpp 里那几个同名常量保持一致。
+// 两份实现在不同 translation unit，没法共享 constexpr，所以这里刻意重复定义
+// 并注明 —— 改动其中一个必须同步另一个，否则两种后端的手感会分叉。
+constexpr float kGazeRadiusFactor = 2.2f;
+constexpr float kGazeMinRadiusPx = 160.0f;
+constexpr float kGazeVerticalScale = 0.7f;
+
 // 一次性动作表：占位渲染器没有 motion3.json，动作是写死的三形变。
 // 名称与 Live2D 侧的 motion 语义对齐，方便接入后逐项替换。
 struct MotionDef {
@@ -158,11 +165,36 @@ void PlaceholderRenderer::update(float deltaSeconds)
 
 void PlaceholderRenderer::pointerMove(const QPointF &pos)
 {
-    // 窗口坐标 -> 归一化视线偏移：左上 (-1,-1)，右下 (1,1)。
-    const float halfW = qMax(1.0f, m_width * 0.5f);
-    const float halfH = qMax(1.0f, m_height * 0.5f);
-    m_gazeTarget.setX(qBound(-1.0f, float(pos.x() - halfW) / halfW, 1.0f));
-    m_gazeTarget.setY(qBound(-1.0f, float(pos.y() - halfH) / halfH, 1.0f));
+    if (!m_gazeEnabled) {
+        return;
+    }
+    // 与 Live2D 后端用同一套映射口径：以窗口中心为原点、按作用半径归一化、
+    // 纵向再收一点。两份实现必须一致 —— 否则用户在降级路径下看到的手感
+    // 跟 Live2D 路径不一样，会以为「升级后变迟钝了」。
+    //
+    // 这里同样**不按半窗宽归一化**：看板娘窗口很小，鼠标几乎总在窗外，
+    // 除以半窗宽会让光标一离开窗口就瞬间饱和到 ±1，眼睛直接翻到底。
+    const float radiusX = qMax(m_width * kGazeRadiusFactor, kGazeMinRadiusPx);
+    const float radiusY = qMax(m_height * kGazeRadiusFactor, kGazeMinRadiusPx);
+    const float dx = static_cast<float>(pos.x()) - m_width * 0.5f;
+    const float dy = static_cast<float>(pos.y()) - m_height * 0.5f;
+    m_gazeTarget.setX(qBound(-1.0f, dx / radiusX, 1.0f));
+    // 符号约定与 Live2D 后端统一：+1 表示「光标在上方」。而这里的绘制坐标是
+    // 屏幕系(y 向下)，所以取负号 —— 否则鼠标往上移、眼睛反而往下看。
+    m_gazeTarget.setY(qBound(-1.0f, -dy / radiusY * kGazeVerticalScale, 1.0f));
+}
+
+void PlaceholderRenderer::setGazeEnabled(bool enabled)
+{
+    if (m_gazeEnabled == enabled) {
+        return;
+    }
+    m_gazeEnabled = enabled;
+    if (!enabled) {
+        // 只清目标值，让 update() 里的低通缓动把 m_gaze 平滑地带回中心 ——
+        // 直接把 m_gaze 抹零是瞬移，看着像抽了一下。
+        m_gazeTarget = QPointF(0.0, 0.0);
+    }
 }
 
 void PlaceholderRenderer::pointerClick(const QPointF &pos)
@@ -341,7 +373,7 @@ void PlaceholderRenderer::paint(QPainter *painter, const QSize &logicalSize)
             painter->save();
             const qreal a = angles[i] + sway * 2.0 + breath * 1.2;
             painter->translate(cx + m_gaze.x() * headR * 0.10,
-                               headCy + m_gaze.y() * headR * 0.08);
+                               headCy - m_gaze.y() * headR * 0.08);
             painter->rotate(a);
             QPainterPath petal;
             const qreal pr = headR * (1.28 + 0.04 * breath);
@@ -391,7 +423,7 @@ void PlaceholderRenderer::paint(QPainter *painter, const QSize &logicalSize)
         painter->setPen(Qt::NoPen);
         for (int side = -1; side <= 1; side += 2) {
             const QPointF c(cx + side * eyeDx + m_gaze.x() * headR * 0.05,
-                            eyeY + m_gaze.y() * headR * 0.04);
+                            eyeY - m_gaze.y() * headR * 0.04);
             if (asArc) {
                 QPainterPath arc;
                 arc.moveTo(c.x() - eyeW * 1.35, c.y() + eyeH * 0.9);

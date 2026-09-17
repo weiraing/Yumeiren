@@ -222,6 +222,16 @@ QPushButton#PrimaryButton[data-active="0"]:focus {
 
 QPushButton#PrimaryButton[data-active="0"]:disabled { border: 1px solid #26272d; }
 
+QPushButton#PrimaryButton[data-active="1"] {
+    background: #c0392b;
+    border: none;
+    color: #ffffff;
+    font-weight: 600;
+}
+QPushButton#PrimaryButton[data-active="1"]:hover { background: #d44637; }
+QPushButton#PrimaryButton[data-active="1"]:pressed { background: #a93226; }
+QPushButton#PrimaryButton[data-active="1"]:disabled { background: #5c2228; color: #8a5a5e; border: 1px solid #5c2228; }
+
 QListWidget#NavList:focus { border: none; }
 QSlider:focus { background: transparent; }
 QCheckBox { border: none; }

@@ -36,6 +36,8 @@ public:
     void paint(QPainter *painter, const QSize &logicalSize) override;
 
     void pointerMove(const QPointF &pos) override;
+    // 视线追踪开关。关掉时把视线平滑带回中心(见实现处的说明)。
+    void setGazeEnabled(bool enabled) override;
     void pointerClick(const QPointF &pos) override;
     bool playNextMotion() override;
     // 占位后端有 3 个写死的动作(见 .cpp 的 kMotions)：降级路径下「播放下一个动作」

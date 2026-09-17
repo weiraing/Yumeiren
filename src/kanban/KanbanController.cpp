@@ -11,6 +11,7 @@
 #include "kanban/Live2DRenderer.h"
 #include "kanban/PlaceholderRenderer.h"
 
+#include <QCursor>
 #include <QFileInfo>
 #include <QScreen>
 #include <QTimer>
@@ -94,6 +95,7 @@ void KanbanController::loadSettings()
     m_alwaysOnTop = cfg.value(QString::fromLatin1(ConfigKeys::Kanban::AlwaysOnTop), true).toBool();
     m_mouseThrough = cfg.value(QString::fromLatin1(ConfigKeys::Kanban::MouseThrough), false).toBool();
     m_interactionEnabled = cfg.value(QString::fromLatin1(ConfigKeys::Kanban::AllowInteraction), true).toBool();
+    m_gazeTracking = cfg.value(QString::fromLatin1(ConfigKeys::Kanban::GazeTracking), true).toBool();
     m_modelPath = cfg.value(QString::fromLatin1(ConfigKeys::Kanban::ModelPath)).toString();
 
     m_clock->setTargetFps(m_targetFps);
@@ -181,7 +183,13 @@ bool KanbanController::ensureWindow()
         }
     });
     connect(m_window, &KanbanWindow::hoveredAt, this, [this](const QPointF &pos) {
-        if (m_renderer && !m_machine.isPaused()) {
+        // 只在没开视线追踪时用窗口自己的 hover 坐标兜底。
+        //
+        // 开着的时候以「每帧读全局光标」(onFrameTick → feedGazeTarget) 为准：
+        // 两条路同时喂会互相覆盖，而 hover 只在鼠标位于窗口内时才有事件 ——
+        // 它会把刚由全局光标算好的「在左边」一把拽回窗口内的小范围，表现为
+        // 「鼠标一离开窗口，视线就自己收回中间」。
+        if (m_renderer && !m_machine.isPaused() && !m_gazeTracking) {
             m_renderer->pointerMove(pos);
         }
     });
@@ -372,6 +380,12 @@ bool KanbanController::activateKanban()
     }
     applyScaleToWindow();
 
+    // 视线追踪的启用状态在这里落到渲染器上。选这里是因为它是三条路径
+    // (Live2D 成功 / 降级到占位 / 重试) 的唯一汇合点：写在 pickRenderer 里
+    // 会漏掉降级后新建的那个 PlaceholderRenderer，写在 ensureWindow 里又太早
+    // —— 那时渲染器还没 initialize()。
+    m_renderer->setGazeEnabled(m_gazeTracking);
+
     if (!m_machine.transition(State::Idle, "activateKanban")) {
         return false;
     }
@@ -462,8 +476,16 @@ void KanbanController::stop()
         publishState();
         return;
     }
+    // 收口是幂等的：Stopping 只存活一瞬，但这期间按钮 / 托盘菜单 / 窗口事件
+    // 都可能再进来一次。第二次进来时 renderer 已经在 reset 的路上，再拆一遍
+    // 就是对着半销毁的对象动手 —— 直接返回，让第一次收口跑完。
+    if (m_machine.is(State::Stopping)) {
+        return;
+    }
     m_waitingGl = false;
-    m_machine.transition(State::Stopping, "stop");
+    if (!m_machine.transition(State::Stopping, "stop")) {
+        return;
+    }
     m_clock->stop();
 
     if (m_renderer) {
@@ -658,9 +680,39 @@ void KanbanController::onFrameTick(float deltaSeconds)
         return;
     }
     m_renderer->update(deltaSeconds);
+    // 视线目标在 update() 之后、requestFrame() 之前喂。
+    //
+    // 顺序有讲究：update() 里 CubismTargetPoint 会把上一帧的目标推进一格，
+    // 这一格用的是「上一次喂进来的方向」；而本帧的画面(紧跟其后的 requestFrame)
+    // 应当反映「此刻光标在哪」。所以先让 TargetPoint 嚼完上一帧的值，再把新值
+    // 放进去，画出来的就是最新方向。反过来写也没大错，只是永远慢一帧 ——
+    // 鼠标快速划过时能看出来「眼珠追着背影跑」。
+    if (m_gazeTracking) {
+        feedGazeTarget();
+    }
     if (m_window) {
         m_window->requestFrame();
     }
+}
+
+// 把全局光标换算成「相对看板娘窗口」的坐标交给渲染器。
+//
+// 为什么必须用全局光标而不是窗口的 hover 事件：看板娘窗口只有两三百像素，
+// 用户看它的时候鼠标绝大多数时间在窗口外 —— 只靠 hover，模型就只在鼠标划过
+// 窗口内部的那零点几秒转一下头，正是「视线追踪」最没意义的一种实现。
+//
+// QCursor::pos() 每帧一次(默认 30fps)比装钩子/开定时器便宜得多，也不会漏事件；
+// 它读的是光标位置的缓存值，不产生消息、不打扰别的进程。
+void KanbanController::feedGazeTarget()
+{
+    if (!m_renderer || !m_window || !m_window->isVisible()) {
+        return;
+    }
+
+    // 用 mapFromGlobal 而不是减窗口左上角：DPI 缩放、多屏不同 DPR 时
+    // geometry() 与全局坐标不在同一个坐标系里，直接相减会在副屏上整体偏掉。
+    const QPoint local = m_window->mapFromGlobal(QCursor::pos());
+    m_renderer->pointerMove(QPointF(local));
 }
 
 // —— 设置落地 ——
@@ -779,6 +831,26 @@ void KanbanController::setInteractionEnabled(bool enabled)
     if (m_window) {
         m_window->setInteractionEnabled(enabled);
     }
+}
+
+void KanbanController::setGazeTracking(bool on)
+{
+    m_gazeTracking = on;
+    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::GazeTracking), on);
+
+    // 立刻作用到当前渲染器，而不是等下一帧的 feedGazeTarget：
+    // 关掉时渲染器要把角度平滑复位(否则模型僵在歪头姿势)，重新打开时要马上
+    // 看向当前光标。两条都需要「现在就告诉渲染器」。
+    if (m_renderer) {
+        m_renderer->setGazeEnabled(on);
+        if (on) {
+            feedGazeTarget();
+        }
+    }
+    videodiag::log(videodiag::Level::Info,
+                   QStringLiteral("[Kanban] 视线追踪=%1").arg(on ? QStringLiteral("开")
+                                                                  : QStringLiteral("关")),
+                   QLatin1String("Kanban"));
 }
 
 bool KanbanController::setModelPath(const QString &modelJsonPath)

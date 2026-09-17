@@ -57,52 +57,49 @@ QWidget *MainWindow::buildKanbanPage()
     hint->setWordWrap(true);
     leftLay->addWidget(hint);
 
-    m_kanbanStartBtn = new QPushButton(QStringLiteral("启动"), leftCard);
+    m_kanbanStartBtn = new QPushButton(QStringLiteral("▶ 启动"), leftCard);
     m_kanbanStartBtn->setObjectName(QStringLiteral("PrimaryButton"));
     m_kanbanStartBtn->setMinimumHeight(40);
+    m_kanbanStartBtn->setProperty("data-active", 0);
     connect(m_kanbanStartBtn, &QPushButton::clicked, this, [this] {
-        if (!m_kanban->start())
-            setKanbanLog(m_kanban->lastError().isEmpty() ? QStringLiteral("看板娘启动失败")
-                                                          : m_kanban->lastError(),
-                         true);
-        refreshKanbanModels();
+        if (m_kanban->isRunning() || m_kanban->state() == kanban::State::Error) {
+            m_kanban->stop();
+        } else {
+            if (!m_kanban->start())
+                setKanbanLog(m_kanban->lastError().isEmpty() ? QStringLiteral("看板娘启动失败")
+                                                              : m_kanban->lastError(),
+                             true);
+            refreshKanbanModels();
+        }
         updateKanbanControls();
     });
-    m_kanbanPauseBtn = new QPushButton(QStringLiteral("暂停"), leftCard);
+    m_kanbanPauseBtn = new QPushButton(QStringLiteral("⏸ 暂停"), leftCard);
     m_kanbanPauseBtn->setMinimumHeight(40);
     m_kanbanPauseBtn->setEnabled(false);
     connect(m_kanbanPauseBtn, &QPushButton::clicked, this, [this] {
         m_kanban->pauseResume();
         updateKanbanControls();
     });
-    m_kanbanNextBtn = new QPushButton(QStringLiteral("播放下一个动作"), leftCard);
+    m_kanbanNextBtn = new QPushButton(QStringLiteral("⏭ 播放下一个动作"), leftCard);
     m_kanbanNextBtn->setMinimumHeight(40);
     m_kanbanNextBtn->setEnabled(false);
     connect(m_kanbanNextBtn, &QPushButton::clicked, this, [this] {
         m_kanban->playNext();
         updateKanbanControls();
     });
-    m_kanbanExprBtn = new QPushButton(QStringLiteral("切换表情"), leftCard);
+    m_kanbanExprBtn = new QPushButton(QStringLiteral("☺ 切换表情"), leftCard);
     m_kanbanExprBtn->setMinimumHeight(40);
     m_kanbanExprBtn->setEnabled(false);
     connect(m_kanbanExprBtn, &QPushButton::clicked, this, [this] {
         m_kanban->playNextExpression();
         updateKanbanControls();
     });
-    m_kanbanStopBtn = new QPushButton(QStringLiteral("取消"), leftCard);
-    m_kanbanStopBtn->setObjectName(QStringLiteral("DangerButton"));
-    m_kanbanStopBtn->setMinimumHeight(40);
-    m_kanbanStopBtn->setEnabled(false);
-    connect(m_kanbanStopBtn, &QPushButton::clicked, this, [this] {
-        m_kanban->stop();
-        updateKanbanControls();
-    });
-    leftLay->addWidget(m_kanbanStartBtn);
-    leftLay->addWidget(m_kanbanPauseBtn);
+    auto *btnRow = new QHBoxLayout;
+    btnRow->addWidget(m_kanbanStartBtn);
+    btnRow->addWidget(m_kanbanPauseBtn);
+    leftLay->addLayout(btnRow);
     leftLay->addWidget(m_kanbanNextBtn);
     leftLay->addWidget(m_kanbanExprBtn);
-    leftLay->addWidget(m_kanbanStopBtn);
-
     m_kanbanStatus = new QLabel(QStringLiteral("未启动"), leftCard);
     m_kanbanStatus->setObjectName(QStringLiteral("HintLabel"));
     m_kanbanStatus->setWordWrap(true);
@@ -159,7 +156,7 @@ QWidget *MainWindow::buildKanbanModelCard(QWidget *parent)
     });
     row->addWidget(m_kanbanModelCombo, 1);
 
-    auto *refreshBtn = new QPushButton(QStringLiteral("刷新"), card);
+    auto *refreshBtn = new QPushButton(QStringLiteral("↻ 刷新"), card);
     refreshBtn->setMinimumHeight(32);
     refreshBtn->setToolTip(tooltipstyle::format(
         QStringLiteral("重新扫描模型目录(新增/删除模型后点一下)")));
@@ -169,7 +166,7 @@ QWidget *MainWindow::buildKanbanModelCard(QWidget *parent)
     });
     row->addWidget(refreshBtn);
 
-    auto *openBtn = new QPushButton(QStringLiteral("打开模型目录"), card);
+    auto *openBtn = new QPushButton(QStringLiteral("📂 打开模型目录"), card);
     openBtn->setMinimumHeight(32);
     connect(openBtn, &QPushButton::clicked, this, [] {
         const QString dir = kanban::KanbanModelManager::defaultModelsRoot();
@@ -270,9 +267,17 @@ QWidget *MainWindow::buildKanbanParamCard(QWidget *parent)
         if (!m_kanbanSyncing)
             m_kanban->setInteractionEnabled(on);
     });
+    m_kanbanGazeBox = new QCheckBox(QStringLiteral("视线追踪"), card);
+    m_kanbanGazeBox->setToolTip(tooltipstyle::format(
+        QStringLiteral("头、眼与身体跟随鼠标方向转动；关闭后模型保持正面")));
+    connect(m_kanbanGazeBox, &QCheckBox::toggled, this, [this](bool on) {
+        if (!m_kanbanSyncing)
+            m_kanban->setGazeTracking(on);
+    });
     checkRow->addWidget(m_kanbanTopBox);
     checkRow->addWidget(m_kanbanThroughBox);
     checkRow->addWidget(m_kanbanInteractBox);
+    checkRow->addWidget(m_kanbanGazeBox);
     checkRow->addStretch(1);
     lay->addLayout(checkRow);
 
@@ -458,11 +463,27 @@ void MainWindow::updateKanbanControls()
     const bool running = m_kanban->isRunning();
     const bool paused = m_kanban->isPaused();
     const bool failed = m_kanban->state() == kanban::State::Error;
+    // Stopping 是「正在收口」的中间态：窗口与渲染器正在拆，此时再点一次既没有
+    // 可撤销的对象，也会在 stop() 里撞上 Starting->Stopping 之外的非法转移。
+    // 所以它是唯一该置灰的「在跑」状态 —— 它只存活一瞬，用户几乎撞不上。
+    const bool stopping = m_kanban->state() == kanban::State::Stopping;
 
-    m_kanbanStartBtn->setEnabled(!running);
-    m_kanbanStartBtn->setText(failed ? QStringLiteral("重试启动") : QStringLiteral("启动"));
+    // 这个按钮是**双态开关**：未启动时是「启动」，运行中(或失败待重试)时是
+    // 「取消」。两种状态都必须可点，禁用条件只能是「正在收口」这一瞬。
+    //
+    // 曾经写成 setEnabled(!running || failed)，于是 Running 时 !running=false、
+    // failed=false，按钮在变成「■ 取消」的同时被一起禁用 —— 用户看到的就是
+    // 「文字变了、颜色变灰、点不动」。enabled 与 text 必须由同一个判据驱动，
+    // 不要再各写一套。
+    const bool canToggle = !stopping;
+    m_kanbanStartBtn->setEnabled(canToggle);
+    m_kanbanStartBtn->setText((running || failed) ? QStringLiteral("■ 取消")
+                                                   : QStringLiteral("▶ 启动"));
+    m_kanbanStartBtn->setProperty("data-active", (running || failed) ? 1 : 0);
+    m_kanbanStartBtn->style()->unpolish(m_kanbanStartBtn);
+    m_kanbanStartBtn->style()->polish(m_kanbanStartBtn);
     m_kanbanPauseBtn->setEnabled(running);
-    m_kanbanPauseBtn->setText(paused ? QStringLiteral("继续") : QStringLiteral("暂停"));
+    m_kanbanPauseBtn->setText(paused ? QStringLiteral("⏸ 继续") : QStringLiteral("⏸ 暂停"));
     // 动作入口：可播动作不足两个就置灰，并把原因写进提示 —— 一个不解释原因的
     // 灰按钮，用户只会当成 bug。实测 13 个模型里有 8 个可播动作不足 2 个，
     // 所以这里灰掉是常态而不是异常，更要把原因说清楚。
@@ -484,7 +505,6 @@ void MainWindow::updateKanbanControls()
                                     ? QStringLiteral("当前模型有 %1 个表情，点击逐个切换")
                                           .arg(exprCount)
                                     : QStringLiteral("当前模型没有表情文件"));
-    m_kanbanStopBtn->setEnabled(running || failed);
 
     QString status = QStringLiteral("状态：%1").arg(m_kanban->stateText());
     if (running)
@@ -527,6 +547,7 @@ void MainWindow::updateKanbanControls()
     m_kanbanTopBox->setChecked(m_kanban->alwaysOnTop());
     m_kanbanThroughBox->setChecked(m_kanban->mouseThrough());
     m_kanbanInteractBox->setChecked(m_kanban->interactionEnabled());
+    m_kanbanGazeBox->setChecked(m_kanban->gazeTracking());
     m_kanbanAutoStartBox->setChecked(m_kanban->autoStart());
     m_kanbanPauseHiddenBox->setChecked(m_kanban->pauseWhenMainHidden());
     // 托盘两项直接读配置：它们不归 KanbanController 管，不回填的话
@@ -540,6 +561,34 @@ void MainWindow::updateKanbanControls()
 
     if (m_tray)
         m_tray->updateRuntimeState();
+
+    // 诊断探针：把「启动/取消」按钮的可用性与位置写进日志。
+    //
+    // 起因是一个只靠读代码很难自证的问题：按钮的文字与 enabled 曾经由两套判据
+    // 驱动，点击启动后文字变成「■ 取消」却被同时禁用。自动化验证需要能**不问像素**
+    // 地拿到「这个按钮此刻可不可点、在哪」，所以在这里如实打印。
+    // 只在 YUMEIREN_DIAG=1 时落盘(Debug 级)，正常运行不多写一行。
+    if (videodiag::diagEnabled()) {
+        const QSize sz = m_kanbanStartBtn->size();
+        // 相对整窗的坐标才是可点的：按钮嵌在「卡片 → 滚动区 → 页 → 堆栈」里，
+        // geometry() 给的是它在**直接父容器**里的位置(实测恒为 0,0)，
+        // mapToGlobal 那时算出来的也是错的。mapTo(this) 逐级换算到主窗口客户区。
+        const QPoint inWin = m_kanbanStartBtn->mapTo(this, QPoint(0, 0));
+        const QPoint inWinCenter = m_kanbanStartBtn->mapTo(
+            this, QPoint(sz.width() / 2, sz.height() / 2));
+        videodiag::log(videodiag::Level::Debug,
+                       QStringLiteral("[KanbanPage] 启动按钮 enabled=%1 text=%2 "
+                                      "尺寸=%3x%4 窗内=%5,%6 窗内中心=%7,%8 "
+                                      "可见=%9 状态=%10")
+                           .arg(m_kanbanStartBtn->isEnabled() ? 1 : 0)
+                           .arg(m_kanbanStartBtn->text())
+                           .arg(sz.width()).arg(sz.height())
+                           .arg(inWin.x()).arg(inWin.y())
+                           .arg(inWinCenter.x()).arg(inWinCenter.y())
+                           .arg(m_kanbanStartBtn->isVisible() ? 1 : 0)
+                           .arg(m_kanban->stateText()),
+                       QStringLiteral("Kanban"));
+    }
 }
 
 // 看板娘页自己的日志行：主界面日志条只属于文件夹美化页，这里不借用它。

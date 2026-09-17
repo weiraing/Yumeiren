@@ -72,6 +72,13 @@ public:
     void setGlHost(KanbanGlHost *host) override;
 
     void pointerMove(const QPointF &pos) override;
+    // 视线追踪开关。关掉时把模型平滑地放回正面(见实现处的说明)。
+    void setGazeEnabled(bool enabled) override;
+
+    // 视线相关参数的实时快照(值 + 取值范围)，诊断探针用。
+    // 「鼠标动但模型不转头」有三种成因：参数名对不上、被运动每帧压回、
+    // 模型参数范围本来就窄 —— 只有把值打出来才分得清是哪种。
+    QString gazeDebugText() const;
     void pointerClick(const QPointF &pos) override;
     bool playNextMotion() override;
     // 可播动作数(不含 idle)。两份实现都要给定义：接入 SDK 的那份按模型文件算，

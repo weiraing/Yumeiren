@@ -95,12 +95,36 @@ public:
     virtual void setGlHost(KanbanGlHost *host) { Q_UNUSED(host) }
 
     // —— 交互 ——
-    // 鼠标移动(逻辑像素，窗口坐标)：Live2D 后端据此做视线/头部跟随。
+    // pointerMove(逻辑像素，窗口坐标)：Live2D 后端据此做视线/头部跟随。
+    //
+    // 传进来的应当是**光标相对窗口的坐标**，而不是「鼠标是否压在窗口上」。看板娘
+    // 是个小窗，用户大多数时候光标都在窗外 —— 若只喂窗口内坐标，「视线追踪」就
+    // 退化成「鼠标划过的一瞬间转一下眼」。所以由控制器把全局光标换算成本窗口
+    // 坐标（范围允许超出 [0,size)，这正是能把「在左边 / 在上方」表达清楚的原因），
+    // 窗口不做任何判断。映射细节见 Live2DRenderer::pointerMove。
     virtual void pointerMove(const QPointF &pos) = 0;
     // 点击(逻辑像素)：触发一次性动作。
     virtual void pointerClick(const QPointF &pos) = 0;
     // 播放下一个动作；返回 true 表示确实播了，返回 false 表示没有可播动作。
     virtual bool playNextMotion() = 0;
+
+    // —— 视线追踪开关 ——
+    // 关掉后指针移动不再改变头/眼角度，模型回到正面。
+    //
+    // 为什么放在渲染器而不是窗口：能不能「看向某处」是后端能力(Live2D 靠
+    // CubismLook 把归一化坐标映射到 ParamAngleX/EyeBallX 等参数，占位后端靠自己
+    // 那几个字段)，而「什么时候该看哪里」才是交互策略。能力留在渲染器、策略留在
+    // 控制器，两边不混。
+    // 关掉时必须把角度**复位**而不是保留最后那个值，否则用户一关开关，模型就
+    // 僵在一个歪头的姿势上。
+    virtual void setGazeEnabled(bool enabled) { m_gazeEnabled = enabled; }
+    bool gazeEnabled() const { return m_gazeEnabled; }
+
+protected:
+    // 默认实现只写这个字段，派生类在 pointerMove / update 里自行判断。
+    bool m_gazeEnabled = true;
+
+public:
 
     // playableMotionCount() 返回「可播动作」数 —— **不含 idle 组**。
     //

@@ -90,6 +90,20 @@ constexpr int kPriorityIdle = 1;
 constexpr int kPriorityNormal = 2;
 constexpr int kPriorityForce = 3;
 
+// —— 视线追踪调参 ——
+//
+// 作用半径 = 窗口尺寸 × kGazeRadiusFactor。乘以窗口尺寸是为了**跟着缩放走**：
+// 用户把看板娘放大到 300%，视线覆盖的桌面范围也应该同比放大，否则大模型会显得
+// 「只盯着脚尖前面那一小块」。2.2 是实测手感的值 —— 再小会让窗口边缘就饱和，
+// 再大则屏幕另一端和窗口旁边的差别被压平，看着像没在追。
+constexpr float kGazeRadiusFactor = 2.2f;
+// 作用半径下限(逻辑像素)。缩放调到 20% 时窗口只有几十像素，纯按倍数算出的
+// 半径太小，光标轻微抖动就会让模型疯狂偏头 —— 用一个地板值兜住。
+constexpr float kGazeMinRadiusPx = 160.0f;
+// 纵向收敛系数。人体头部上仰幅度小于左右摆，眼睛上看的范围也小于左右看，
+// 所以 y 方向收一点(0.7)，观感比 1:1 自然。
+constexpr float kGazeVerticalScale = 0.7f;
+
 QString logLine(const QString &text)
 {
     return QStringLiteral("[Live2D] %1").arg(text);
@@ -449,6 +463,59 @@ public:
     int expressionCount() const { return _expressionNames.size(); }
     // 可播动作数(不含 idle 组)：就是预载成功、可以真的播出来的那些。
     int PlayableMotionCount() const { return _playableMotions.size(); }
+
+    // 视线相关参数的「当前值 / 取值范围」，诊断与探针用。
+    //
+    // 为什么需要它：「鼠标动但模型不转头」这件事有三种完全不同的成因 ——
+    // 参数名对不上模型、参数被运动轨迹每帧压回原位、模型的参数范围本来就极窄。
+    // 光看画面分不出是哪种。把值打出来，一眼就能定位：
+    //   · 值恒等于默认值        → 参数没被写进去(名不对 / Look 没挂上)
+    //   · 值在默认值附近抖动    → 被运动覆盖
+    //   · 值确实在变但幅度很小  → 模型的 Min/Max 本身就窄，是素材特性
+    QString gazeDebugText()
+    {
+        if (!_model) {
+            return QStringLiteral("无模型");
+        }
+        struct Item { const csmChar *id; const char *label; };
+        static const Item items[] = {
+            {ParamAngleX, "ParamAngleX"},
+            {ParamAngleY, "ParamAngleY"},
+            {ParamBodyAngleX, "ParamBodyAngleX"},
+            {ParamEyeBallX, "ParamEyeBallX"},
+            {ParamEyeBallY, "ParamEyeBallY"},
+        };
+        QStringList parts;
+        // 不存在的参数不会返回负数：GetParameterIndex 会把它登记进
+        // 「非存在参数表」并返回一个 >= GetParameterCount() 的虚拟索引。
+        // 所以判据必须是「索引 < 参数总数」，不能判负。
+        const csmInt32 total = _model->GetParameterCount();
+        for (const Item &it : items) {
+            const CubismIdHandle id = CubismFramework::GetIdManager()->GetId(it.id);
+            const csmInt32 idx = _model->GetParameterIndex(id);
+            if (idx >= total) {
+                parts << QStringLiteral("%1=缺失").arg(QLatin1String(it.label));
+                continue;
+            }
+            parts << QStringLiteral("%1=%2[%3~%4]")
+                         .arg(QLatin1String(it.label))
+                         .arg(_model->GetParameterValue(idx), 0, 'f', 2)
+                         .arg(_model->GetParameterMinimumValue(idx), 0, 'f', 0)
+                         .arg(_model->GetParameterMaximumValue(idx), 0, 'f', 0);
+        }
+        return parts.join(QStringLiteral(" "));
+    }
+
+    // 当前 drag 目标值(渲染器写进来的、以及平滑后的实际值)，同上。
+    QString dragDebugText() const
+    {
+        if (!_dragManager) {
+            return QStringLiteral("无 dragManager");
+        }
+        return QStringLiteral("drag 平滑后=(%1,%2)")
+            .arg(_dragManager->GetX(), 0, 'f', 3)
+            .arg(_dragManager->GetY(), 0, 'f', 3);
+    }
     // 当前生效的表情名(还没切过则为空)，日志用。
     QString currentExpressionName() const
     {
@@ -1263,7 +1330,23 @@ struct Live2DRenderer::Private
     bool glBuilt = false;   // 渲染器与纹理是否已在当前上下文里建好
     bool glewReady = false; // glewInit() 只需成功一次，上下文易主则重来
     QSize pixelSize;        // glBuilt 为真时对应的绘制面尺寸
+
+    // —— 视线追踪 ——
+    // 目标值(-1..1，x 右为正、y 上为正)。这是「鼠标此刻在哪个方向」，由
+    // pointerMove 写；真正的跟随值由 CubismTargetPoint 在每帧里自己追过来。
+    //
+    // 为什么要额外存一份而不是直接调 SetDragTarget：控制器会以 60Hz 左右
+    // 的频率喂光标位置，而动画时钟是 30fps。把它们直接写进 CubismTargetPoint
+    // 没问题，但**关掉视线追踪时要能立刻回到正面** —— 那需要知道「复位成什么」。
+    // 复位成 (0,0) 是错的：用户会看到头先弹回正面再自己转开。所以这里存的是
+    // 最后那个目标方向，供 setGazeEnabled(false) 时判断是否需要归零。
+    float gazeX = 0.0f;
+    float gazeY = 0.0f;
+    // 是否已经喂过至少一个坐标。没喂过时不应把模型按到 (0,0) ——
+    // 启动瞬间光标坐标还没来，先归零会让模型先正一下再转向，一帧的抽动。
+    bool gazeSeen = false;
 };
+
 
 bool Live2DRenderer::sdkCompiledIn()
 {
@@ -1470,13 +1553,82 @@ void Live2DRenderer::render()
 
 void Live2DRenderer::pointerMove(const QPointF &pos)
 {
+    if (!m_d->model || !m_gazeEnabled) {
+        return;
+    }
+
+    // 光标(窗口坐标) → 归一化方向 (-1..1, x 右为正、y 上为正)。
+    //
+    // 两个关键决定：
+    //
+    // 1) 不是拿窗口宽高直接除。看板娘是个 230x345 的小窗，用户看它的时候光标
+    //    通常离得很远 —— 若按窗口宽高归一化，只要光标离开窗口十几像素就会撞到
+    //    ±1 饱和，表现为「眼珠直接翻到底、之后不管在屏幕哪儿都不再变化」，看着
+    //    像坏了。所以用一个远大于窗口的**作用半径**：以窗口中心为原点、按
+    //    kGazeRadiusFactor 倍窗口尺寸取半径，再夹到 ±1。这样窗口附近的分辨率高
+    //    (轻微移动就有反应)，屏幕另一端也只是缓慢逼近极限，像真的在看你。
+    //
+    // 2) y 要取反：Qt 的 y 向下为正，Cubism 的 dragY 向上为正。
+    const float w = m_width > 0 ? static_cast<float>(m_width) : 1.0f;
+    const float h = m_height > 0 ? static_cast<float>(m_height) : 1.0f;
+
+    // 作用半径：取窗口可见范围的 kGazeRadiusFactor 倍，但不小于一个下限，
+    // 免得把缩放调到 20% 时（窗口只有几十像素）模型疯狂抽搐。
+    const float radiusX = std::max(w * kGazeRadiusFactor, kGazeMinRadiusPx);
+    const float radiusY = std::max(h * kGazeRadiusFactor, kGazeMinRadiusPx);
+
+    // 相对窗口中心的偏移。pos 允许落在窗口外（控制器喂的是全局光标换算值），
+    // 所以这里的值可以超过 ±w/2。
+    const float dx = static_cast<float>(pos.x()) - w * 0.5f;
+    const float dy = static_cast<float>(pos.y()) - h * 0.5f;
+
+    const float nx = qBound(-1.0f, dx / radiusX, 1.0f);
+    // 生理上头部「上仰」比「低头」幅度小，给 y 单独收一点，观感更自然；
+    // dy 仍是窗口坐标(向下为正)，故这里先取反再乘系数。
+    const float ny = qBound(-1.0f, -dy / radiusY * kGazeVerticalScale, 1.0f);
+
+    m_d->gazeX = nx;
+    m_d->gazeY = ny;
+    m_d->gazeSeen = true;
+    // 这里只写「目标方向」。真正的过渡由 CubismTargetPoint 在每帧的
+    // CubismLookUpdater 里按加速度/减速度算出来，所以即使光标跳变，
+    // 头也不会瞬移 —— 那正是「像在看你」而不是「被鼠标拴住」的关键。
+    m_d->model->SetDragTarget(nx, ny);
+}
+
+QString Live2DRenderer::gazeDebugText() const
+{
+    if (!m_d->model) {
+        return QStringLiteral("无模型");
+    }
+    return QStringLiteral("%1 | %2 | 目标=(%3,%4)")
+        .arg(m_d->model->gazeDebugText())
+        .arg(m_d->model->dragDebugText())
+        .arg(m_d->gazeX, 0, 'f', 3)
+        .arg(m_d->gazeY, 0, 'f', 3);
+}
+
+void Live2DRenderer::setGazeEnabled(bool enabled)
+{
+    // 基类只负责存标志。这里补上「关掉时让模型回正」——
+    // 不归零的话，用户一关开关模型就僵在歪头姿势上，看着像卡住了。
+    if (m_gazeEnabled == enabled) {
+        return;
+    }
+    m_gazeEnabled = enabled;
     if (!m_d->model) {
         return;
     }
-    // 逻辑像素 → NDC：x 右为正、y 上为正，和 Qt 的 y 向下相反。
-    const float w = m_width > 0 ? static_cast<float>(m_width) : 1.0f;
-    const float h = m_height > 0 ? static_cast<float>(m_height) : 1.0f;
-    m_d->model->SetDragTarget(pos.x() / w * 2.0f - 1.0f, 1.0f - pos.y() / h * 2.0f);
+    if (!enabled && m_d->gazeSeen) {
+        // 归零走同一条平滑通道，模型是「慢慢转回正面」而不是瞬移。
+        m_d->gazeX = 0.0f;
+        m_d->gazeY = 0.0f;
+        m_d->model->SetDragTarget(0.0f, 0.0f);
+    } else if (enabled && m_d->gazeSeen) {
+        // 重新开启时立刻回到「看当前方向」—— 否则要等下一次鼠标移动才有反应，
+        // 表现为「开了也没用」。
+        m_d->model->SetDragTarget(m_d->gazeX, m_d->gazeY);
+    }
 }
 
 void Live2DRenderer::pointerClick(const QPointF &pos)

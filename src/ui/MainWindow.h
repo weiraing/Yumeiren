@@ -241,7 +241,6 @@ private:
     QComboBox *m_screenModeCombo = nullptr;
     QPushButton *m_playBtn = nullptr;
     QPushButton *m_pauseBtn = nullptr;
-    QPushButton *m_stopBtn = nullptr;
     QComboBox *m_fpsBox = nullptr;
     QLabel *m_videoStatus = nullptr;
 
@@ -295,7 +294,6 @@ private:
     QPushButton *m_kanbanPauseBtn = nullptr;
     QPushButton *m_kanbanNextBtn = nullptr;
     QPushButton *m_kanbanExprBtn = nullptr;
-    QPushButton *m_kanbanStopBtn = nullptr;
     QLabel *m_kanbanStatus = nullptr;
     QLabel *m_kanbanLog = nullptr;
     QComboBox *m_kanbanModelCombo = nullptr;
@@ -309,6 +307,7 @@ private:
     QCheckBox *m_kanbanTopBox = nullptr;
     QCheckBox *m_kanbanThroughBox = nullptr;
     QCheckBox *m_kanbanInteractBox = nullptr;
+    QCheckBox *m_kanbanGazeBox = nullptr;
     QCheckBox *m_kanbanAutoStartBox = nullptr;
     QCheckBox *m_kanbanPauseHiddenBox = nullptr;
     QCheckBox *m_trayAlwaysBox = nullptr;

@@ -158,6 +158,16 @@ void SystemTrayController::buildContextMenu()
         if (m_kanban)
             m_kanban->stop();
     });
+    // 视线追踪开关：与设置页「视线追踪」复选框是同一个配置键(kanban/gazeTracking)，
+    // 这里用 checkable 项只是为了不在托盘里塞一个「设置」入口。
+    // 注意勾选态用 triggered(bool) 而不是「触发后翻转自己」—— 权威状态在控制器那边，
+    // 菜单显示的是它的回读值，两边打架时以控制器为准。
+    m_actKanbanGaze = kanbanMenu->addAction(QStringLiteral("视线追踪"));
+    m_actKanbanGaze->setCheckable(true);
+    connect(m_actKanbanGaze, &QAction::triggered, this, [this](bool checked) {
+        if (m_kanban)
+            m_kanban->setGazeTracking(checked);
+    });
 
     m_contextMenu->addSeparator();
     m_actQuit = addEntry(m_contextMenu, QStringLiteral("关闭软件"), [this] {
@@ -194,6 +204,17 @@ void SystemTrayController::updateMenuState()
     // 和灰掉一样让人怀疑程序坏了，但灰掉至少不骗人。
     m_actKanbanNext->setEnabled(kanbanRunning && m_kanban->canPlayNextMotion());
     m_actKanbanStop->setEnabled(kanbanRunning);
+    // 开关项本身不禁用：看板娘没跑时也可以先把偏好定下来，下次启动生效。
+    // 但没注入控制器时无从读回状态，此时灰掉更诚实。
+    m_actKanbanGaze->setEnabled(m_kanban != nullptr);
+    if (m_kanban) {
+        m_actKanbanGaze->setChecked(m_kanban->gazeTracking());
+        // 「点下一个会换模型」是多数模型的常态，这里用 tooltip 说清「看不到效果」的两种可能。
+        m_actKanbanGaze->setToolTip(
+            m_kanban->gazeTracking()
+                ? QStringLiteral("模型朝鼠标方向转头/转眼。关掉后模型缓慢回到正面。")
+                : QStringLiteral("已关闭：模型不再跟随鼠标。"));
+    }
     if (m_kanban)
         m_actKanbanPause->setText(m_kanban->isPaused() ? QStringLiteral("继续")
                                                        : QStringLiteral("暂停"));

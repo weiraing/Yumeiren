@@ -123,11 +123,11 @@ QWidget *MainWindow::buildImagePage()
 
     // custom image buttons
     auto *folderRow = new QHBoxLayout();
-    auto *folderBtn = new QPushButton(QStringLiteral("选择文件夹"), leftCard);
+    auto *folderBtn = new QPushButton(QStringLiteral("📁 选择文件夹"), leftCard);
     folderBtn->setObjectName(QStringLiteral("PrimaryButton"));
     folderBtn->setToolTip(tooltipstyle::format(QStringLiteral("读取文件夹内所有符合格式的图片并展示到图库")));
     connect(folderBtn, &QPushButton::clicked, this, &MainWindow::pickPresetFolder);
-    auto *refreshBtn = new QPushButton(QStringLiteral("刷新"), leftCard);
+    auto *refreshBtn = new QPushButton(QStringLiteral("↻ 刷新"), leftCard);
     refreshBtn->setObjectName(QStringLiteral("VideoScanButton"));
     refreshBtn->setToolTip(tooltipstyle::format(QStringLiteral("重新加载当前文件夹的图片")));
     connect(refreshBtn, &QPushButton::clicked, this, [this] {
@@ -137,7 +137,7 @@ QWidget *MainWindow::buildImagePage()
     folderRow->addWidget(folderBtn, 2);
     folderRow->addWidget(refreshBtn, 1);
     leftLay->addLayout(folderRow);
-    auto *wallBtn = new QPushButton(QStringLiteral("用桌面壁纸"), leftCard);
+    auto *wallBtn = new QPushButton(QStringLiteral("🖼 用桌面壁纸"), leftCard);
     wallBtn->setToolTip(tooltipstyle::format(QStringLiteral("截取当前桌面壁纸作为背景")));
     connect(wallBtn, &QPushButton::clicked, this, &MainWindow::pickWallpaper);
     leftLay->addWidget(wallBtn);
@@ -306,9 +306,9 @@ QWidget *MainWindow::buildImagePage()
 
     auto *btnRow = new QHBoxLayout();
     btnRow->setSpacing(10);
-    m_applyImageBtn = new QPushButton(QStringLiteral("应用图片背景"), rightCard);
+    m_applyImageBtn = new QPushButton(QStringLiteral("✓ 应用图片背景"), rightCard);
     m_applyImageBtn->setObjectName(QStringLiteral("PrimaryButton"));
-    auto *resetBtn = new QPushButton(QStringLiteral("恢复"), rightCard);
+    auto *resetBtn = new QPushButton(QStringLiteral("↩ 恢复"), rightCard);
     resetBtn->setObjectName(QStringLiteral("DangerButton"));
     connect(m_applyImageBtn, &QPushButton::clicked, this, &MainWindow::applyImage);
     connect(resetBtn, &QPushButton::clicked, this, &MainWindow::uninstallImage);

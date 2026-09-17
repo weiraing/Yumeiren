@@ -89,6 +89,9 @@ inline constexpr auto TargetFps = "kanban/targetFps";     // 动画目标帧率
 inline constexpr auto AutoStart = "kanban/autoStart";     // 程序启动时自动运行
 inline constexpr auto PauseWhenHidden = "kanban/pauseWhenHidden"; // 主窗口隐藏后仍动画
 inline constexpr auto AllowInteraction = "kanban/allowInteraction"; // 允许点击/悬停互动
+// 视线追踪：头/眼/身体跟着鼠标转。默认 true —— 这是「看起来像活物」的核心，
+// 关掉之后模型只会呆立着，所以默认开。
+inline constexpr auto GazeTracking = "kanban/gazeTracking";
 }
 
 // 系统托盘与"关窗不等于退出"策略。

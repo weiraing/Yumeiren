@@ -171,9 +171,9 @@ QWidget *MainWindow::buildEffectPage()
     auto *btnLay = new QHBoxLayout(btnCard);
     btnLay->setContentsMargins(14, 12, 14, 12);
     btnLay->setSpacing(10);
-    m_applyEffectBtn = new QPushButton(QStringLiteral("应用效果样式"), btnCard);
+    m_applyEffectBtn = new QPushButton(QStringLiteral("✓ 应用效果样式"), btnCard);
     m_applyEffectBtn->setObjectName(QStringLiteral("PrimaryButton"));
-    auto *resetBtn = new QPushButton(QStringLiteral("恢复"), btnCard);
+    auto *resetBtn = new QPushButton(QStringLiteral("↩ 恢复"), btnCard);
     resetBtn->setObjectName(QStringLiteral("DangerButton"));
     connect(m_applyEffectBtn, &QPushButton::clicked, this, &MainWindow::applyEffect);
     connect(resetBtn, &QPushButton::clicked, this, &MainWindow::uninstallEffect);

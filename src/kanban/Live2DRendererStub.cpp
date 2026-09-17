@@ -72,6 +72,10 @@ void Live2DRenderer::setGlHost(KanbanGlHost *)
 {
     // 本构建连 GL 宿主视图都不存在，收到宿主指针也无事可做。
 }
+QString Live2DRenderer::gazeDebugText() const
+{
+    return QStringLiteral("未接入 SDK");
+}
 void Live2DRenderer::pointerMove(const QPointF &) {}
 void Live2DRenderer::pointerClick(const QPointF &) {}
 
