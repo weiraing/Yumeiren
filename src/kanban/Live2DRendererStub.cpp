@@ -77,6 +77,9 @@ QString Live2DRenderer::gazeDebugText() const
     return QStringLiteral("未接入 SDK");
 }
 void Live2DRenderer::pointerMove(const QPointF &) {}
+// 未接入 SDK 时没有任何可跟视线转的东西。基类的 setGazeStrength 已经把值
+// 记进 m_gazeStrength(界面据此回填档位)，这里不需要额外动作 ——
+// 刻意不要 override 成一个空函数：那会盖掉基类那个唯一的状态写入点。
 void Live2DRenderer::pointerClick(const QPointF &) {}
 
 bool Live2DRenderer::playNextMotion()

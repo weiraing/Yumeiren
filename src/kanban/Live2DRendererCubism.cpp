@@ -92,17 +92,13 @@ constexpr int kPriorityForce = 3;
 
 // —— 视线追踪调参 ——
 //
-// 作用半径 = 窗口尺寸 × kGazeRadiusFactor。乘以窗口尺寸是为了**跟着缩放走**：
-// 用户把看板娘放大到 300%，视线覆盖的桌面范围也应该同比放大，否则大模型会显得
-// 「只盯着脚尖前面那一小块」。2.2 是实测手感的值 —— 再小会让窗口边缘就饱和，
-// 再大则屏幕另一端和窗口旁边的差别被压平，看着像没在追。
-constexpr float kGazeRadiusFactor = 2.2f;
-// 作用半径下限(逻辑像素)。缩放调到 20% 时窗口只有几十像素，纯按倍数算出的
-// 半径太小，光标轻微抖动就会让模型疯狂偏头 —— 用一个地板值兜住。
-constexpr float kGazeMinRadiusPx = 160.0f;
-// 纵向收敛系数。人体头部上仰幅度小于左右摆，眼睛上看的范围也小于左右看，
-// 所以 y 方向收一点(0.7)，观感比 1:1 自然。
-constexpr float kGazeVerticalScale = 0.7f;
+// 档位 → 作用半径倍数 / 纵向系数的映射表在 KanbanRenderer.h 的 kGazeTuning，
+// 两个后端共用同一张表(占位后端也查它)。这里只说明「作用半径」为什么按
+// 窗口尺寸取倍数：
+//   乘以窗口尺寸是为了**跟着缩放走** —— 用户把看板娘放大到 300%，视线覆盖的
+//   桌面范围也应该同比放大，否则大模型会显得「只盯着脚尖前面那一小块」。
+//   (下限 kGazeMinRadiusPx 也定义在同一张表旁边。)
+
 
 QString logLine(const QString &text)
 {
@@ -1337,11 +1333,15 @@ struct Live2DRenderer::Private
     //
     // 为什么要额外存一份而不是直接调 SetDragTarget：控制器会以 60Hz 左右
     // 的频率喂光标位置，而动画时钟是 30fps。把它们直接写进 CubismTargetPoint
-    // 没问题，但**关掉视线追踪时要能立刻回到正面** —— 那需要知道「复位成什么」。
+    // 没问题，但**换成「无」档时要能立刻回到正面** —— 那需要知道「复位成什么」。
     // 复位成 (0,0) 是错的：用户会看到头先弹回正面再自己转开。所以这里存的是
-    // 最后那个目标方向，供 setGazeEnabled(false) 时判断是否需要归零。
+    // 最后那个目标方向，供关掉时判断是否需要归零。
     float gazeX = 0.0f;
     float gazeY = 0.0f;
+    // 最后收到的**原始窗口坐标**。换档位时要立刻按新半径重算一次目标，
+    // 而重算需要原始坐标 —— 只存归一化后的 gazeX/gazeY 是不够的，那是按**旧**
+    // 半径算出来的，拿它乘新半径没有意义。x < 0 表示还没喂过。
+    QPointF lastPointer{-1.0, -1.0};
     // 是否已经喂过至少一个坐标。没喂过时不应把模型按到 (0,0) ——
     // 启动瞬间光标坐标还没来，先归零会让模型先正一下再转向，一帧的抽动。
     bool gazeSeen = false;
@@ -1553,7 +1553,7 @@ void Live2DRenderer::render()
 
 void Live2DRenderer::pointerMove(const QPointF &pos)
 {
-    if (!m_d->model || !m_gazeEnabled) {
+    if (!m_d->model || !gazeEnabled()) {
         return;
     }
 
@@ -1565,17 +1565,19 @@ void Live2DRenderer::pointerMove(const QPointF &pos)
     //    通常离得很远 —— 若按窗口宽高归一化，只要光标离开窗口十几像素就会撞到
     //    ±1 饱和，表现为「眼珠直接翻到底、之后不管在屏幕哪儿都不再变化」，看着
     //    像坏了。所以用一个远大于窗口的**作用半径**：以窗口中心为原点、按
-    //    kGazeRadiusFactor 倍窗口尺寸取半径，再夹到 ±1。这样窗口附近的分辨率高
+    //    radiusFactor 倍窗口尺寸取半径，再夹到 ±1。这样窗口附近的分辨率高
     //    (轻微移动就有反应)，屏幕另一端也只是缓慢逼近极限，像真的在看你。
+    //    倍率由当前强度档位决定(见 kGazeTuning)：档位越高半径越小 = 越敏感。
     //
     // 2) y 要取反：Qt 的 y 向下为正，Cubism 的 dragY 向上为正。
     const float w = m_width > 0 ? static_cast<float>(m_width) : 1.0f;
     const float h = m_height > 0 ? static_cast<float>(m_height) : 1.0f;
 
-    // 作用半径：取窗口可见范围的 kGazeRadiusFactor 倍，但不小于一个下限，
+    const GazeTuning &tuning = kGazeTuning[clampGazeStrength(m_gazeStrength)];
+    // 作用半径：取窗口可见范围的一定倍数，但不小于一个下限，
     // 免得把缩放调到 20% 时（窗口只有几十像素）模型疯狂抽搐。
-    const float radiusX = std::max(w * kGazeRadiusFactor, kGazeMinRadiusPx);
-    const float radiusY = std::max(h * kGazeRadiusFactor, kGazeMinRadiusPx);
+    const float radiusX = std::max(w * tuning.radiusFactor, kGazeMinRadiusPx);
+    const float radiusY = std::max(h * tuning.radiusFactor, kGazeMinRadiusPx);
 
     // 相对窗口中心的偏移。pos 允许落在窗口外（控制器喂的是全局光标换算值），
     // 所以这里的值可以超过 ±w/2。
@@ -1585,11 +1587,13 @@ void Live2DRenderer::pointerMove(const QPointF &pos)
     const float nx = qBound(-1.0f, dx / radiusX, 1.0f);
     // 生理上头部「上仰」比「低头」幅度小，给 y 单独收一点，观感更自然；
     // dy 仍是窗口坐标(向下为正)，故这里先取反再乘系数。
-    const float ny = qBound(-1.0f, -dy / radiusY * kGazeVerticalScale, 1.0f);
+    const float ny = qBound(-1.0f, -dy / radiusY * tuning.verticalScale, 1.0f);
 
     m_d->gazeX = nx;
     m_d->gazeY = ny;
     m_d->gazeSeen = true;
+    // 存下原始坐标：档位切换时要按新半径重算，见 Private::lastPointer 的说明。
+    m_d->lastPointer = pos;
     // 这里只写「目标方向」。真正的过渡由 CubismTargetPoint 在每帧的
     // CubismLookUpdater 里按加速度/减速度算出来，所以即使光标跳变，
     // 头也不会瞬移 —— 那正是「像在看你」而不是「被鼠标拴住」的关键。
@@ -1608,26 +1612,34 @@ QString Live2DRenderer::gazeDebugText() const
         .arg(m_d->gazeY, 0, 'f', 3);
 }
 
-void Live2DRenderer::setGazeEnabled(bool enabled)
+void Live2DRenderer::setGazeStrength(int strength)
 {
-    // 基类只负责存标志。这里补上「关掉时让模型回正」——
-    // 不归零的话，用户一关开关模型就僵在歪头姿势上，看着像卡住了。
-    if (m_gazeEnabled == enabled) {
+    const int next = clampGazeStrength(strength);
+    if (m_gazeStrength == next) {
         return;
     }
-    m_gazeEnabled = enabled;
+    const bool wasOn = gazeEnabled();
+    m_gazeStrength = next;
+    const bool nowOn = gazeEnabled();
+
     if (!m_d->model) {
         return;
     }
-    if (!enabled && m_d->gazeSeen) {
+    if (wasOn && !nowOn && m_d->gazeSeen) {
         // 归零走同一条平滑通道，模型是「慢慢转回正面」而不是瞬移。
+        // 不归零的话，用户一关模型就僵在歪头姿势上，看着像卡住了。
         m_d->gazeX = 0.0f;
         m_d->gazeY = 0.0f;
         m_d->model->SetDragTarget(0.0f, 0.0f);
-    } else if (enabled && m_d->gazeSeen) {
-        // 重新开启时立刻回到「看当前方向」—— 否则要等下一次鼠标移动才有反应，
-        // 表现为「开了也没用」。
-        m_d->model->SetDragTarget(m_d->gazeX, m_d->gazeY);
+    } else if (nowOn && m_d->gazeSeen) {
+        // 重新开启、或在档位之间切换时，立刻按新档位重算一次目标 ——
+        // 否则要等下一次鼠标移动才有反应，表现为「换了档没变化」。
+        // 换档只改半径，所以这里重喂就能立刻看到强弱差别。
+        if (m_d->lastPointer.x() >= 0.0f) {
+            pointerMove(m_d->lastPointer);
+        } else {
+            m_d->model->SetDragTarget(m_d->gazeX, m_d->gazeY);
+        }
     }
 }
 

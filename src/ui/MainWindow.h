@@ -249,6 +249,7 @@ private:
     QRadioButton *m_tcAudioNo = nullptr;
     QRadioButton *m_tcAudioYes = nullptr;
     QPushButton *m_transcodeBtn = nullptr;
+    QLabel *m_transcodeHint = nullptr;   // 转码卡片的说明文字；缺 ffmpeg 时改写成红色告警
     QProcess *m_transcodeProc = nullptr;
     QString m_transcodeSrc;              // 本次转码的源文件(用于日志与完成后入列)
     QString m_transcodeDst;              // 本次转码的输出文件
@@ -307,10 +308,14 @@ private:
     QCheckBox *m_kanbanTopBox = nullptr;
     QCheckBox *m_kanbanThroughBox = nullptr;
     QCheckBox *m_kanbanInteractBox = nullptr;
-    QCheckBox *m_kanbanGazeBox = nullptr;
-    QCheckBox *m_kanbanAutoStartBox = nullptr;
-    QCheckBox *m_kanbanPauseHiddenBox = nullptr;
-    QCheckBox *m_trayAlwaysBox = nullptr;
+    // 视线追踪是四选一(无/弱/中/强)，所以用互斥单选框而不是复选框：
+    // 「多明显」是一条一维刻度，四个选项各自可读，比「一个开关 + 一个灵敏度
+    // 滑块」更好选。id 直接用 kanban::KanbanRenderer 的档位值，见构建处。
+    QButtonGroup *m_kanbanGazeGroup = nullptr;
+    QRadioButton *m_kanbanGazeOff = nullptr;
+    QRadioButton *m_kanbanGazeWeak = nullptr;
+    QRadioButton *m_kanbanGazeMedium = nullptr;
+    QRadioButton *m_kanbanGazeStrong = nullptr;
     QCheckBox *m_trayMinimizeBox = nullptr;
     // 回填设置时挡住「控件变化 = 用户改动」，否则 loadSettings 会把刚读的值再写回去。
     bool m_kanbanSyncing = false;

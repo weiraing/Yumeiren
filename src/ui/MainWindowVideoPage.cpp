@@ -6,6 +6,7 @@
 #include "config/ConfigKeys.h"
 #include "core/Diagnostics.h"
 #include "ui/TooltipStyle.h"
+#include "ui/UiMetrics.h" // 左列宽度：与看板娘页共用同一个常量
 #include "wallpaper/VideoWallpaper.h"
 
 #include <QButtonGroup>
@@ -90,7 +91,9 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     // ---- left: start / pause + options ----
     auto *leftCard = new QFrame(page);
     leftCard->setObjectName(QStringLiteral("PageCard"));
-    leftCard->setFixedWidth(250);
+    // 宽度不在这里定：它由下面的 leftCol 统一决定（本卡是 leftCol 的唯一子件、
+    // 列内边距为 0，所以会自然撑满整列）。两处各写一个宽度迟早会漂开，
+    // 出现「列宽 300、卡宽 250、右边空一条」那种缝。
     auto *leftLay = new QVBoxLayout(leftCard);
     leftLay->setContentsMargins(14, 14, 14, 14);
     leftLay->setSpacing(10);
@@ -233,8 +236,10 @@ QWidget *MainWindow::buildVideoWallpaperPage()
 
     // 左列两张卡片：上方视频壁纸参数，下方视频转码，中间留出明显间隙。
     // 卡片高度改为随内容收缩(去掉卡内 addStretch)，空白集中到列尾。
+    // 列宽固定、不参与拉伸：窗口变宽时多出来的空间全给右侧播放列表。
+    // 宽度与看板娘页共用同一个常量，免得两页左卡宽度漂开(切页会横向跳)。
     auto *leftCol = new QWidget(page);
-    leftCol->setFixedWidth(250);
+    leftCol->setFixedWidth(uimetrics::kPageLeftColWidth);
     auto *leftColLay = new QVBoxLayout(leftCol);
     leftColLay->setContentsMargins(0, 0, 0, 0);
     leftColLay->setSpacing(18);
@@ -334,19 +339,56 @@ QWidget *MainWindow::buildVideoWallpaperPage()
 
 namespace {
 
+// 找 ffmpeg：**只看两个地方，顺序固定**（2026-09-17 按用户要求收敛到这里）。
+//   1) 系统 PATH —— 自己装过 ffmpeg 的机器走这条，用的就是他挑的那个版本；
+//   2) 程序所在目录下的 ffmpeg.exe —— 便携用法，拷进来就能用。
+// 刻意不再看 tools/、resources/ 这些子目录：每多一个候选，就多一种「为什么我这台
+// 机器上命中的是另一个 ffmpeg」的可能，出问题时搜索面越小越好排查。
+// 两处都没有 → 回空串，调用方据此把「立即转码」置灰。
 QString findFfmpeg()
 {
-    const QString appDir = QCoreApplication::applicationDirPath();
-    const QStringList candidates = {
-        appDir + QStringLiteral("/ffmpeg.exe"),
-        appDir + QStringLiteral("/tools/ffmpeg.exe"),
-        appDir + QStringLiteral("/resources/ffmpeg.exe"),
-    };
-    for (const QString &c : candidates) {
-        if (QFileInfo::exists(c))
-            return QFileInfo(c).absoluteFilePath();
-    }
-    return QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    // PATH 优先。findExecutable 在 Windows 上会自己补 .exe，所以只写 "ffmpeg"。
+    const QString onPath = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (!onPath.isEmpty())
+        return onPath;
+
+    const QString beside = QCoreApplication::applicationDirPath()
+                           + QStringLiteral("/ffmpeg.exe");
+    if (QFileInfo::exists(beside))
+        return QFileInfo(beside).absoluteFilePath();
+
+    return QString();
+}
+
+// 「立即转码」的文案：能转的时候讲怎么用，不能转的时候讲缺什么、该放哪儿。
+// 两个地方都要用：按钮的 tooltip，以及卡片里的说明文字。
+// **说明文字才是主力** —— 禁用状态的控件在 Qt 里未必收得到 tooltip 事件
+// （实测本机探针里连可点状态的 tooltip 都抓不到，没法依赖），
+// 而「为什么点不了」必须让人一眼看见，不能藏在悬浮提示里。
+QString transcodeReadyTip()
+{
+    return tooltipstyle::format(QStringLiteral(
+        "先在右侧列表选中一个视频再点\n"
+        "输出名：{源文件名}_{帧率}fps_{无声0/有声1}.mp4，保存在源视频所在文件夹\n"
+        "转码完成后自动加入视频列表"));
+}
+
+QString transcodeNoFfmpegTip()
+{
+    return tooltipstyle::format(QStringLiteral(
+        "未找到 ffmpeg，转码功能不可用\n"
+        "把 ffmpeg.exe 放进程序目录，或把它的目录加入系统 PATH 后重启本程序"));
+}
+
+QString transcodeHintNormal()
+{
+    return QStringLiteral("转码列表中选中的视频：重采样帧率、可选去掉音频，结果保存在源视频同目录。");
+}
+
+QString transcodeHintNoFfmpeg()
+{
+    return QStringLiteral("未找到 ffmpeg，转码不可用：把 ffmpeg.exe 放进程序目录，"
+                          "或把它的目录加入系统 PATH。");
 }
 
 // 编码器运行时探测(结果缓存)：有些发行版(例如 conda 构建)是 --disable-gpl，
@@ -425,12 +467,10 @@ QWidget *MainWindow::buildTranscodeCard(QWidget *parent)
     t->setObjectName(QStringLiteral("GroupTitle"));
     lay->addWidget(t);
 
-    auto *hint = new QLabel(
-        QStringLiteral("转码列表中选中的视频：重采样帧率、可选去掉音频，结果保存在源视频同目录。"),
-        card);
-    hint->setObjectName(QStringLiteral("HintLabel"));
-    hint->setWordWrap(true);
-    lay->addWidget(hint);
+    m_transcodeHint = new QLabel(transcodeHintNormal(), card);
+    m_transcodeHint->setObjectName(QStringLiteral("HintLabel"));
+    m_transcodeHint->setWordWrap(true);
+    lay->addWidget(m_transcodeHint);
 
     // 帧率：15/24/30/60 帧互斥单选，默认 24 帧(250px 卡片里排版很紧，行距压到 2)
     auto *fpsRow = new QHBoxLayout();
@@ -472,11 +512,8 @@ QWidget *MainWindow::buildTranscodeCard(QWidget *parent)
     m_transcodeBtn = new QPushButton(QStringLiteral("⚡ 立即转码"), card);
     m_transcodeBtn->setObjectName(QStringLiteral("PrimaryButton"));
     m_transcodeBtn->setMinimumHeight(36);
-    m_transcodeBtn->setEnabled(false); // 恰好选中一个视频才可点
-    m_transcodeBtn->setToolTip(tooltipstyle::format(QStringLiteral(
-            "先在右侧列表选中一个视频再点\n"
-            "输出名：{源文件名}_{帧率}fps_{无声0/有声1}.mp4，保存在源视频所在文件夹\n"
-            "转码完成后自动加入视频列表")));
+    m_transcodeBtn->setEnabled(false); // 恰好选中一个视频、且本机有 ffmpeg 才可点
+    m_transcodeBtn->setToolTip(transcodeReadyTip());
     connect(m_transcodeBtn, &QPushButton::clicked, this, &MainWindow::transcodeSelectedVideo);
     lay->addWidget(m_transcodeBtn);
 
@@ -492,6 +529,23 @@ void MainWindow::updateTranscodeButton()
         return;
     }
     m_transcodeBtn->setText(QStringLiteral("⚡ 立即转码"));
+    // 本机没有 ffmpeg 就置灰，并**把原因写在卡片说明里**（tooltip 只当补充）：
+    // 跟看板娘「没有表情」的入口置灰是同一个套路。
+    // 注意这里**不缓存**查找结果：用户现把 ffmpeg.exe 拷进程序目录，
+    // 只要列表选中项变一下就重新判断，不必重启。
+    const bool hasFfmpeg = !findFfmpeg().isEmpty();
+    if (m_transcodeHint) {
+        m_transcodeHint->setText(hasFfmpeg ? transcodeHintNormal() : transcodeHintNoFfmpeg());
+        m_transcodeHint->setProperty("data-err", hasFfmpeg ? 0 : 1);
+        m_transcodeHint->style()->unpolish(m_transcodeHint);
+        m_transcodeHint->style()->polish(m_transcodeHint);
+    }
+    if (!hasFfmpeg) {
+        m_transcodeBtn->setEnabled(false);
+        m_transcodeBtn->setToolTip(transcodeNoFfmpegTip());
+        return;
+    }
+    m_transcodeBtn->setToolTip(transcodeReadyTip());
     m_transcodeBtn->setEnabled(m_videoList && m_videoList->selectedItems().size() == 1);
 }
 
@@ -515,7 +569,10 @@ void MainWindow::transcodeSelectedVideo()
     }
     const QString exe = findFfmpeg();
     if (exe.isEmpty()) {
-        setLog(QStringLiteral("未找到 ffmpeg.exe：请把它放到程序目录或加入 PATH 后重试。"), true);
+        // 正常情况下按钮已经置灰，能走到这里说明运行期间 ffmpeg 被移走了，
+        // 或者是从别处调进来的；提示口径跟 tooltip 保持一致。
+        setLog(QStringLiteral("未找到 ffmpeg：把 ffmpeg.exe 放进程序目录，"
+                              "或把它的目录加入系统 PATH 后重试。"), true);
         return;
     }
     const QString encoder = pickVideoEncoder();

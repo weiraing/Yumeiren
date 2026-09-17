@@ -1193,9 +1193,9 @@ void MainWindow::closeEvent(QCloseEvent *event)
 void MainWindow::hideEvent(QHideEvent *event)
 {
     QMainWindow::hideEvent(event);
+    // 主窗口的可见性**不再**联动看板娘（见 KanbanController 里 applyMainWindowVisible
+    // 的删除说明）；这里只记录状态供托盘菜单等处读取。
     ApplicationRuntimeState::instance().setMainWindowVisible(false);
-    if (m_kanban)
-        m_kanban->applyMainWindowVisible(false);
 }
 
 void MainWindow::resizeEvent(QResizeEvent *event)
@@ -1210,8 +1210,6 @@ void MainWindow::showEvent(QShowEvent *event)
 {
     QMainWindow::showEvent(event);
     ApplicationRuntimeState::instance().setMainWindowVisible(true);
-    if (m_kanban)
-        m_kanban->applyMainWindowVisible(true);
     // 延迟到首次布局完成后再启用 resizeEvent 记录，避免构造期布局漂移
     QMetaObject::invokeMethod(this, [this] { m_windowShown = true; }, Qt::QueuedConnection);
 }

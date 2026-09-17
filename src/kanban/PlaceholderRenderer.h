@@ -36,8 +36,9 @@ public:
     void paint(QPainter *painter, const QSize &logicalSize) override;
 
     void pointerMove(const QPointF &pos) override;
-    // 视线追踪开关。关掉时把视线平滑带回中心(见实现处的说明)。
-    void setGazeEnabled(bool enabled) override;
+    // 视线追踪强度(无/弱/中/强)。切到「无」时把视线平滑带回中心；
+    // 档位之间切换时按新半径立刻重算目标(见实现处的说明)。
+    void setGazeStrength(int strength) override;
     void pointerClick(const QPointF &pos) override;
     bool playNextMotion() override;
     // 占位后端有 3 个写死的动作(见 .cpp 的 kMotions)：降级路径下「播放下一个动作」
@@ -75,6 +76,9 @@ private:
     float m_nextBlinkIn = 2.0f;
     QPointF m_gaze;             // 视线偏移(-1..1)，由鼠标位置换算
     QPointF m_gazeTarget;
+    // 最后收到的原始窗口坐标：换档位时要按新半径重算，只存归一化值不够
+    // (那是按旧半径算的)。x < 0 表示还没喂过。与 Live2D 侧同名同义。
+    QPointF m_lastPointer{-1.0, -1.0};
     TimedMotion m_motion;
     bool m_motionActive = false;
     int m_motionIndex = 0;     // 见 kMotions，索引即「下一个动作」的游标

@@ -76,11 +76,8 @@ const char *kBoolRules[] = {
     ConfigKeys::Kanban::Enabled,
     ConfigKeys::Kanban::AlwaysOnTop,
     ConfigKeys::Kanban::MouseThrough,
-    ConfigKeys::Kanban::AutoStart,
-    ConfigKeys::Kanban::PauseWhenHidden,
     ConfigKeys::Kanban::AllowInteraction,
     ConfigKeys::Tray::Enabled,
-    ConfigKeys::Tray::ShowWhenBackgroundTaskRunning,
     ConfigKeys::Tray::MinimizeToTrayOnClose,
 };
 
@@ -94,10 +91,8 @@ const char *kBoolDefaultTrue[] = {
     ConfigKeys::Video::Reclaim,
     ConfigKeys::Video::AffinityLimit,
     ConfigKeys::Kanban::AlwaysOnTop,
-    ConfigKeys::Kanban::PauseWhenHidden,
     ConfigKeys::Kanban::AllowInteraction,
     ConfigKeys::Tray::Enabled,
-    ConfigKeys::Tray::ShowWhenBackgroundTaskRunning,
     // 任务书 §7.6：有后台任务时点关闭应「隐藏而不是退出」，所以这项默认开，
     // 用户想改回传统行为再取消勾选。读取端(closeEvent / 界面勾选框)默认值同为 true。
     ConfigKeys::Tray::MinimizeToTrayOnClose,

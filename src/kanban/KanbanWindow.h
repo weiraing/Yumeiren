@@ -75,6 +75,8 @@ signals:
     void playNextRequested();
     void nextExpressionRequested();
     void nextModelRequested();
+    // 视线追踪档位**不走这个窗口的右键菜单**(档位在设置页与托盘两处)，
+    // 所以这里没有 gazeStrengthRequested —— 别再往右键菜单里加回去。
     void hideRequested();
     void settingsRequested();
     void quitRequested();         // 「取消看板娘」

@@ -66,15 +66,20 @@ private:
 
     // 稳定 action 指针：只改状态，不重建。
     QAction *m_actShowWindow = nullptr;
-    QAction *m_actWallStart = nullptr;
+    // 「启动 / 取消」是一个双态开关(与页面上那颗按钮同语义)，不是两个菜单项：
+    // 合成一项后子菜单短一行，也不会出现「运行中时启动项灰着、取消项亮着」这种
+    // 靠置灰来暗示状态的间接表达。
+    QAction *m_actWallToggle = nullptr;
     QAction *m_actWallPause = nullptr;
     QAction *m_actWallNext = nullptr;
-    QAction *m_actWallStop = nullptr;
-    QAction *m_actKanbanStart = nullptr;
+    QAction *m_actKanbanToggle = nullptr;
     QAction *m_actKanbanPause = nullptr;
     QAction *m_actKanbanNext = nullptr;
-    QAction *m_actKanbanStop = nullptr;
-    QAction *m_actKanbanGaze = nullptr;
+    // 视线追踪四档(无/弱/中/强)，互斥，挂在「看板娘 > 视线追踪 >」子菜单下。
+    QAction *m_actGazeOff = nullptr;
+    QAction *m_actGazeWeak = nullptr;
+    QAction *m_actGazeMedium = nullptr;
+    QAction *m_actGazeStrong = nullptr;
     QAction *m_actQuit = nullptr;
 
     bool m_available = false;

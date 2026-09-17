@@ -423,6 +423,11 @@ bool KanbanWindow::eventFilter(QObject *watched, QEvent *event)
         topAct->setChecked(m_alwaysOnTop);
         connect(topAct, &QAction::toggled, this, &KanbanWindow::setAlwaysOnTop);
         menu.addSeparator();
+
+        // 视线追踪**刻意不放进这个菜单**：档位是「一次定好、长期不动」的偏好，
+        // 不是对着小人临场要调的东西。它已经在设置页(四个互斥单选框)和托盘
+        // 「看板娘 > 视线追踪 >」两处，这里再来一份只会让右键菜单变长、
+        // 还容易在调窗口行为时误点到。要改档位请走那两处。
         QAction *settingAct = menu.addAction(QStringLiteral("打开主界面设置"));
         connect(settingAct, &QAction::triggered, this, &KanbanWindow::settingsRequested);
 

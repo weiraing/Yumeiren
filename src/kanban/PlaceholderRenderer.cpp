@@ -18,12 +18,9 @@ constexpr float kBreathOmega = 1.15f;
 constexpr float kSwayOmega = 0.55f;
 constexpr float kBlinkDuration = 0.13f;
 
-// 视线追踪调参：必须与 Live2DRendererCubism.cpp 里那几个同名常量保持一致。
-// 两份实现在不同 translation unit，没法共享 constexpr，所以这里刻意重复定义
-// 并注明 —— 改动其中一个必须同步另一个，否则两种后端的手感会分叉。
-constexpr float kGazeRadiusFactor = 2.2f;
-constexpr float kGazeMinRadiusPx = 160.0f;
-constexpr float kGazeVerticalScale = 0.7f;
+// 视线追踪调参：档位表在 KanbanRenderer.h 的 kGazeTuning，两个后端共用 ——
+// 刻意连常量都不在这里重复定义，避免「改了一个忘了另一个」。
+// 本文件只需知道「查表」这件事。
 
 // 一次性动作表：占位渲染器没有 motion3.json，动作是写死的三形变。
 // 名称与 Live2D 侧的 motion 语义对齐，方便接入后逐项替换。
@@ -165,35 +162,46 @@ void PlaceholderRenderer::update(float deltaSeconds)
 
 void PlaceholderRenderer::pointerMove(const QPointF &pos)
 {
-    if (!m_gazeEnabled) {
+    if (!gazeEnabled()) {
         return;
     }
-    // 与 Live2D 后端用同一套映射口径：以窗口中心为原点、按作用半径归一化、
-    // 纵向再收一点。两份实现必须一致 —— 否则用户在降级路径下看到的手感
-    // 跟 Live2D 路径不一样，会以为「升级后变迟钝了」。
+    // 与 Live2D 后端用同一套映射口径、同一张档位表：以窗口中心为原点、
+    // 按作用半径归一化、纵向再收一点。两份实现必须一致 —— 否则用户在降级
+    // 路径下看到的手感跟 Live2D 路径不一样，会以为「升级后变迟钝了」。
     //
     // 这里同样**不按半窗宽归一化**：看板娘窗口很小，鼠标几乎总在窗外，
     // 除以半窗宽会让光标一离开窗口就瞬间饱和到 ±1，眼睛直接翻到底。
-    const float radiusX = qMax(m_width * kGazeRadiusFactor, kGazeMinRadiusPx);
-    const float radiusY = qMax(m_height * kGazeRadiusFactor, kGazeMinRadiusPx);
+    const GazeTuning &tuning = kGazeTuning[clampGazeStrength(m_gazeStrength)];
+    const float radiusX = qMax(m_width * tuning.radiusFactor, kGazeMinRadiusPx);
+    const float radiusY = qMax(m_height * tuning.radiusFactor, kGazeMinRadiusPx);
     const float dx = static_cast<float>(pos.x()) - m_width * 0.5f;
     const float dy = static_cast<float>(pos.y()) - m_height * 0.5f;
     m_gazeTarget.setX(qBound(-1.0f, dx / radiusX, 1.0f));
     // 符号约定与 Live2D 后端统一：+1 表示「光标在上方」。而这里的绘制坐标是
     // 屏幕系(y 向下)，所以取负号 —— 否则鼠标往上移、眼睛反而往下看。
-    m_gazeTarget.setY(qBound(-1.0f, -dy / radiusY * kGazeVerticalScale, 1.0f));
+    m_gazeTarget.setY(qBound(-1.0f, -dy / radiusY * tuning.verticalScale, 1.0f));
+    m_lastPointer = pos;
 }
 
-void PlaceholderRenderer::setGazeEnabled(bool enabled)
+void PlaceholderRenderer::setGazeStrength(int strength)
 {
-    if (m_gazeEnabled == enabled) {
+    const int next = clampGazeStrength(strength);
+    if (m_gazeStrength == next) {
         return;
     }
-    m_gazeEnabled = enabled;
-    if (!enabled) {
+    const bool wasOn = gazeEnabled();
+    m_gazeStrength = next;
+
+    if (wasOn && !gazeEnabled()) {
         // 只清目标值，让 update() 里的低通缓动把 m_gaze 平滑地带回中心 ——
         // 直接把 m_gaze 抹零是瞬移，看着像抽了一下。
         m_gazeTarget = QPointF(0.0, 0.0);
+    } else if (gazeEnabled()) {
+        // 开起来、或在档位之间切换：按新半径立刻重算一次目标，否则要等下一次
+        // 鼠标移动才看得出差别，表现为「换了档没变化」。
+        if (m_lastPointer.x() >= 0.0) {
+            pointerMove(m_lastPointer);
+        }
     }
 }
 

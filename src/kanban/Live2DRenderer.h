@@ -72,8 +72,9 @@ public:
     void setGlHost(KanbanGlHost *host) override;
 
     void pointerMove(const QPointF &pos) override;
-    // 视线追踪开关。关掉时把模型平滑地放回正面(见实现处的说明)。
-    void setGazeEnabled(bool enabled) override;
+    // 视线追踪强度(无/弱/中/强)。切到「无」时把模型平滑地放回正面，
+    // 在档位之间切换时立刻按新档位重算目标(见实现处的说明)。
+    void setGazeStrength(int strength) override;
 
     // 视线相关参数的实时快照(值 + 取值范围)，诊断探针用。
     // 「鼠标动但模型不转头」有三种成因：参数名对不上、被运动每帧压回、

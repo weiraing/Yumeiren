@@ -81,20 +81,26 @@ public:
     bool mouseThrough() const { return m_mouseThrough; }
     void setInteractionEnabled(bool enabled);
     bool interactionEnabled() const { return m_interactionEnabled; }
-    void setAutoStart(bool on);
-    bool autoStart() const;
-    void setPauseWhenMainHidden(bool on);
-    bool pauseWhenMainHidden() const;
-    // 视线追踪：头/眼/身体跟着鼠标转。开启时控制器在每帧末尾读一次全局光标，
-    // 换算成窗口坐标喂给渲染器(见 onFrameTick 里的说明)。
-    void setGazeTracking(bool on);
-    bool gazeTracking() const { return m_gazeTracking; }
+    // 「记住上次状态」：进程启动时要不要自动拉起看板娘。
+    // 判据是 kanban/enabled —— publishState() 实时维护它、stop()/enterError() 清它、
+    // 而 shutdownForExit() 不碰它，所以它恰好等于「上次退出时在不在跑」。
+    // 首次安装没有这个键 → 默认 false → 不启动。
+    // (2026-09-17 之前是独立的 kanban/autoStart 勾选框，已删。)
+    bool wasRunningLastTime() const;
+    // 视线追踪强度：0=无 1=弱 2=中 3=强。头/眼/身体跟着鼠标转。
+    // 开启时控制器在每帧末尾读一次全局光标，换算成窗口坐标喂给渲染器
+    // (见 onFrameTick 里的说明)。
+    void setGazeStrength(int strength);
+    int gazeStrength() const { return m_gazeStrength; }
+    // 「有没有开」= 档位 > 0。做成一处判据，免得各调用点自己写 `!= 0`。
+    bool gazeTracking() const { return m_gazeStrength != 0; }
     bool setModelPath(const QString &modelJsonPath);
     QString modelPath() const { return m_modelPath; }
     int refreshModels(); // 重新扫描模型目录，返回可用模型数
 
     void loadSettings(); // 从配置读回全部看板娘设置
-    void applyMainWindowVisible(bool visible); // 主窗口显示/隐藏联动(§7.7)
+    // 主窗口显示/隐藏**不再**联动看板娘（2026-09-17 按用户要求撤掉「隐藏时暂停」）：
+    // 主界面收进托盘时看板娘还露在桌面上，冻住它只会看起来像坏了。
     void shutdownForExit();                    // 退出收口：不留 GL 资源与定时器
 
 signals:
@@ -152,7 +158,8 @@ private:
     bool m_alwaysOnTop = true;
     bool m_mouseThrough = false;
     bool m_interactionEnabled = true;
-    bool m_gazeTracking = true;
+    // 视线追踪档位(0=无 1=弱 2=中 3=强)。>0 即在喂目标。
+    int m_gazeStrength = 2;
 };
 
 } // namespace kanban

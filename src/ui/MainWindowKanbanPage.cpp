@@ -5,15 +5,19 @@
 #include "config/ConfigKeys.h"
 #include "core/Diagnostics.h"
 #include "ui/TooltipStyle.h"
+#include "ui/UiMetrics.h" // 左列宽度：与动态壁纸页共用同一个常量
 
 #include "app/ApplicationRuntimeState.h"
 #include "app/ApplicationShutdown.h"
 #include "kanban/KanbanController.h"
 #include "kanban/KanbanModelManager.h"
+// 视线档位枚举(GazeOff/Weak/Medium/Strong)与它的译名函数。
+#include "kanban/KanbanRenderer.h"
 #include "tray/SystemTrayController.h"
 #include "wallpaper/VideoWallpaper.h"
 
 #include <QApplication>
+#include <QButtonGroup>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDesktopServices>
@@ -24,6 +28,7 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QPushButton>
+#include <QRadioButton>
 #include <QScrollArea>
 #include <QSlider>
 #include <QStackedWidget>
@@ -40,10 +45,20 @@ QWidget *MainWindow::buildKanbanPage()
     lay->setContentsMargins(18, 16, 18, 16);
     lay->setSpacing(14);
 
-    // ---- 左：运行控制 + 状态 ----
-    auto *leftCard = new QFrame(page);
+    // ---- 左：运行控制 + 状态，以及「显示与互动 / 开机与托盘」参数 ----
+    //
+    // 左列整体定宽、装两张卡片，与动态壁纸页同一套写法（见 MainWindowVideoPage
+    // 里那段注释）：列宽固定不参与拉伸，窗口变宽时多出来的空间全给右侧；
+    // 卡片高度随内容收缩，空白集中到列尾 —— 所以**卡内不要 addStretch**，
+    // 否则卡片会被撑成一大片空框（这正是本次改动前左卡的样子）。
+    auto *leftCol = new QWidget(page);
+    leftCol->setFixedWidth(uimetrics::kPageLeftColWidth);
+    auto *leftColLay = new QVBoxLayout(leftCol);
+    leftColLay->setContentsMargins(0, 0, 0, 0);
+    leftColLay->setSpacing(18);
+
+    auto *leftCard = new QFrame(leftCol);
     leftCard->setObjectName(QStringLiteral("PageCard"));
-    leftCard->setFixedWidth(250);
     auto *leftLay = new QVBoxLayout(leftCard);
     leftLay->setContentsMargins(14, 14, 14, 14);
     leftLay->setSpacing(10);
@@ -109,17 +124,20 @@ QWidget *MainWindow::buildKanbanPage()
     m_kanbanLog->setObjectName(QStringLiteral("LogLabel"));
     m_kanbanLog->setWordWrap(true);
     leftLay->addWidget(m_kanbanLog);
-    leftLay->addStretch(1);
 
-    lay->addWidget(leftCard);
+    leftColLay->addWidget(leftCard);
+    // 「显示与互动 / 开机与托盘」原本在右列，2026-09-17 按用户要求移到左列。
+    // 左卡本来就有一大片空底，参数放这里正好填上；右列只剩模型卡。
+    leftColLay->addWidget(buildKanbanParamCard(leftCol));
+    leftColLay->addStretch(1);
+    lay->addWidget(leftCol);
 
-    // ---- 右：模型 + 参数 ----
+    // ---- 右：模型 ----
     auto *right = new QWidget(page);
     auto *rightLay = new QVBoxLayout(right);
     rightLay->setContentsMargins(0, 0, 0, 0);
     rightLay->setSpacing(14);
     rightLay->addWidget(buildKanbanModelCard(right));
-    rightLay->addWidget(buildKanbanParamCard(right));
     rightLay->addStretch(1);
     lay->addWidget(right, 1);
 
@@ -248,8 +266,10 @@ QWidget *MainWindow::buildKanbanParamCard(QWidget *parent)
     lay->addLayout(grid);
 
     // 互动三项：置顶与穿透互相独立(置顶只管层级，穿透只管鼠标)，所以用复选框而非单选。
-    auto *checkRow = new QHBoxLayout();
-    checkRow->setSpacing(14);
+    //
+    // 分两行排：这三项并排约需 275 逻辑像素，而移到左列后卡片内宽只有 ~272
+    // （列宽 300 减左右各 14 内边距）—— 硬挤一行会把「允许点击互动」压到省略号。
+    // 前两项短、第三项长，所以 2+1 分行最省高度。
     m_kanbanTopBox = new QCheckBox(QStringLiteral("窗口置顶"), card);
     connect(m_kanbanTopBox, &QCheckBox::toggled, this, [this](bool on) {
         if (!m_kanbanSyncing)
@@ -262,24 +282,69 @@ QWidget *MainWindow::buildKanbanParamCard(QWidget *parent)
         if (!m_kanbanSyncing)
             m_kanban->setMouseThrough(on);
     });
+    auto *checkRow = new QHBoxLayout();
+    checkRow->setSpacing(14);
+    checkRow->addWidget(m_kanbanTopBox);
+    checkRow->addWidget(m_kanbanThroughBox);
+    checkRow->addStretch(1);
+    lay->addLayout(checkRow);
+
     m_kanbanInteractBox = new QCheckBox(QStringLiteral("允许点击互动"), card);
     connect(m_kanbanInteractBox, &QCheckBox::toggled, this, [this](bool on) {
         if (!m_kanbanSyncing)
             m_kanban->setInteractionEnabled(on);
     });
-    m_kanbanGazeBox = new QCheckBox(QStringLiteral("视线追踪"), card);
-    m_kanbanGazeBox->setToolTip(tooltipstyle::format(
-        QStringLiteral("头、眼与身体跟随鼠标方向转动；关闭后模型保持正面")));
-    connect(m_kanbanGazeBox, &QCheckBox::toggled, this, [this](bool on) {
-        if (!m_kanbanSyncing)
-            m_kanban->setGazeTracking(on);
+    auto *interactRow = new QHBoxLayout();
+    interactRow->setSpacing(14);
+    interactRow->addWidget(m_kanbanInteractBox);
+    interactRow->addStretch(1);
+    lay->addLayout(interactRow);
+
+    // 视线追踪单独占一行，四档互斥。
+    //
+    // 为什么不是复选框：用户要的是「多明显」这个刻度，而不是「开/关」。做成四个
+    // 选项后，「关掉」和「调强弱」合成同一个动作 —— 不会出现「勾着开关却看不出
+    // 任何变化」(因为默认档太弱)这种要来回试的困惑。
+    auto *gazeRow = new QHBoxLayout();
+    gazeRow->setSpacing(10);
+    auto *gazeLbl = new QLabel(QStringLiteral("视线追踪"), card);
+    gazeRow->addWidget(gazeLbl);
+    gazeRow->addSpacing(4);
+
+    auto makeGazeRadio = [this, card, gazeRow](const QString &text, int strength,
+                                               const QString &tip) {
+        auto *radio = new QRadioButton(text, card);
+        radio->setToolTip(tooltipstyle::format(tip));
+        gazeRow->addWidget(radio);
+        return radio;
+    };
+    m_kanbanGazeOff = makeGazeRadio(
+        QStringLiteral("无"), kanban::KanbanRenderer::GazeOff,
+        QStringLiteral("关闭视线追踪，模型保持正面"));
+    m_kanbanGazeWeak = makeGazeRadio(
+        QStringLiteral("弱"), kanban::KanbanRenderer::GazeWeak,
+        QStringLiteral("轻微跟随：鼠标要移开较远才看得出转头，安静不打扰"));
+    m_kanbanGazeMedium = makeGazeRadio(
+        QStringLiteral("中"), kanban::KanbanRenderer::GazeMedium,
+        QStringLiteral("默认档：鼠标在窗口附近移动就能明显看到头眼跟随"));
+    m_kanbanGazeStrong = makeGazeRadio(
+        QStringLiteral("强"), kanban::KanbanRenderer::GazeStrong,
+        QStringLiteral("追得最紧：鼠标稍动即大幅转头，存在感最强"));
+
+    // id 直接用档位值：槽里拿到的就是能交给控制器的数，不用再映射一次。
+    m_kanbanGazeGroup = new QButtonGroup(this);
+    m_kanbanGazeGroup->setExclusive(true);
+    m_kanbanGazeGroup->addButton(m_kanbanGazeOff, kanban::KanbanRenderer::GazeOff);
+    m_kanbanGazeGroup->addButton(m_kanbanGazeWeak, kanban::KanbanRenderer::GazeWeak);
+    m_kanbanGazeGroup->addButton(m_kanbanGazeMedium, kanban::KanbanRenderer::GazeMedium);
+    m_kanbanGazeGroup->addButton(m_kanbanGazeStrong, kanban::KanbanRenderer::GazeStrong);
+    connect(m_kanbanGazeGroup, &QButtonGroup::idClicked, this, [this](int strength) {
+        // idClicked 只在用户点击时发出(不是回填)，所以这里不必再查 m_kanbanSyncing
+        // —— 回填走的是 setChecked()，不触发这个信号。与视频页播放模式同一写法。
+        m_kanban->setGazeStrength(strength);
     });
-    checkRow->addWidget(m_kanbanTopBox);
-    checkRow->addWidget(m_kanbanThroughBox);
-    checkRow->addWidget(m_kanbanInteractBox);
-    checkRow->addWidget(m_kanbanGazeBox);
-    checkRow->addStretch(1);
-    lay->addLayout(checkRow);
+    gazeRow->addStretch(1);
+    lay->addLayout(gazeRow);
 
     auto *sep = new QFrame(card);
     sep->setObjectName(QStringLiteral("SideCardSep"));
@@ -290,47 +355,23 @@ QWidget *MainWindow::buildKanbanParamCard(QWidget *parent)
     trayTitle->setObjectName(QStringLiteral("GroupTitle"));
     lay->addWidget(trayTitle);
 
-    auto *trayRow1 = new QHBoxLayout();
-    trayRow1->setSpacing(14);
-    m_kanbanAutoStartBox = new QCheckBox(QStringLiteral("程序启动时自动运行看板娘"), card);
-    connect(m_kanbanAutoStartBox, &QCheckBox::toggled, this, [this](bool on) {
-        if (!m_kanbanSyncing)
-            m_kanban->setAutoStart(on);
-    });
-    m_kanbanPauseHiddenBox = new QCheckBox(QStringLiteral("主界面隐藏时暂停动画"), card);
-    m_kanbanPauseHiddenBox->setToolTip(tooltipstyle::format(
-        QStringLiteral("开启后收起主界面即停帧，省 CPU/GPU；关闭则继续动")));
-    connect(m_kanbanPauseHiddenBox, &QCheckBox::toggled, this, [this](bool on) {
-        if (!m_kanbanSyncing)
-            m_kanban->setPauseWhenMainHidden(on);
-    });
-    trayRow1->addWidget(m_kanbanAutoStartBox);
-    trayRow1->addWidget(m_kanbanPauseHiddenBox);
-    trayRow1->addStretch(1);
-    lay->addLayout(trayRow1);
-
-    auto *trayRow2 = new QHBoxLayout();
-    trayRow2->setSpacing(14);
+    // 这一节原有四个勾选框，2026-09-17 按用户要求删掉三个，只剩托盘那一条：
+    //   「主界面隐藏时暂停动画」—— 开关本身说不通：主界面收进托盘时看板娘还露在
+    //     桌面上，把它冻住只会看起来像坏了。`applyMainWindowVisible` 一并撤掉。
+    //   「程序启动时自动运行看板娘」—— 换成「记住上次状态」，见 wasRunningLastTime()
+    //     与 setupKanbanAndTray() 里的自动拉起；`kanban/autoStart` 键一并撤掉。
+    //   「仅在后台任务运行时显示托盘」—— 托盘现在常驻，有没有后台任务都看得见它。
+    auto *trayRow = new QHBoxLayout();
+    trayRow->setSpacing(14);
     m_trayMinimizeBox = new QCheckBox(QStringLiteral("关闭主窗口时收进托盘(需有后台任务)"), card);
     connect(m_trayMinimizeBox, &QCheckBox::toggled, this, [this](bool on) {
         if (m_kanbanSyncing)
             return;
         AppConfig::instance().setValue(ConfigKeys::Tray::MinimizeToTrayOnClose, on);
     });
-    m_trayAlwaysBox = new QCheckBox(QStringLiteral("仅在后台任务运行时显示托盘"), card);
-    m_trayAlwaysBox->setToolTip(tooltipstyle::format(
-        QStringLiteral("取消勾选 = 托盘常驻，无论有没有启动壁纸或看板娘")));
-    connect(m_trayAlwaysBox, &QCheckBox::toggled, this, [this](bool on) {
-        if (m_kanbanSyncing)
-            return;
-        AppConfig::instance().setValue(ConfigKeys::Tray::ShowWhenBackgroundTaskRunning, on);
-        if (m_tray)
-            m_tray->updateRuntimeState();
-    });
-    trayRow2->addWidget(m_trayMinimizeBox);
-    trayRow2->addWidget(m_trayAlwaysBox);
-    trayRow2->addStretch(1);
-    lay->addLayout(trayRow2);
+    trayRow->addWidget(m_trayMinimizeBox);
+    trayRow->addStretch(1);
+    lay->addLayout(trayRow);
 
     return card;
 }
@@ -413,8 +454,18 @@ void MainWindow::setupKanbanAndTray()
             m_tray->hideTray();
     });
 
-    // 自动启动：等事件循环转起来再拉起，避免在构造函数里 show 一个顶层窗口。
-    if (m_kanban->autoStart()) {
+    // 自动拉起：**记住上次状态**（2026-09-17 按用户要求改）。
+    //
+    // 判据是 `kanban/enabled` —— 由 publishState() 实时维护、stop()/enterError()
+    // 会清掉、而 shutdownForExit() **不碰**，所以它恰好等于「上次退出时在不在跑」。
+    // 首次安装没有这个键 → 默认 false → 不启动。
+    //
+    // 以前读的是设置页那个独立的「程序启动时自动运行看板娘」勾选框，于是出现
+    // 「明明关了它，下次启动又自己冒出来」：退出走的是 shutdownForExit()，
+    // 它根本不改那个键。勾选框已删除。
+    //
+    // 等事件循环转起来再拉起，避免在构造函数里 show 一个顶层窗口。
+    if (m_kanban->wasRunningLastTime()) {
         QMetaObject::invokeMethod(
             this,
             [this] {
@@ -547,16 +598,29 @@ void MainWindow::updateKanbanControls()
     m_kanbanTopBox->setChecked(m_kanban->alwaysOnTop());
     m_kanbanThroughBox->setChecked(m_kanban->mouseThrough());
     m_kanbanInteractBox->setChecked(m_kanban->interactionEnabled());
-    m_kanbanGazeBox->setChecked(m_kanban->gazeTracking());
-    m_kanbanAutoStartBox->setChecked(m_kanban->autoStart());
-    m_kanbanPauseHiddenBox->setChecked(m_kanban->pauseWhenMainHidden());
-    // 托盘两项直接读配置：它们不归 KanbanController 管，不回填的话
+    // 四选一回填：按档位选中对应的那一个。用 setChecked 而不是 group 的
+    // checkedId 设置器 —— 逐个 setChecked 时 QButtonGroup 的互斥会自动把
+    // 其他三个取消选中，不必自己写「其余置 false」那种容易漏的状态同步。
+    switch (kanban::KanbanRenderer::clampGazeStrength(m_kanban->gazeStrength())) {
+    case kanban::KanbanRenderer::GazeOff:
+        m_kanbanGazeOff->setChecked(true);
+        break;
+    case kanban::KanbanRenderer::GazeWeak:
+        m_kanbanGazeWeak->setChecked(true);
+        break;
+    case kanban::KanbanRenderer::GazeStrong:
+        m_kanbanGazeStrong->setChecked(true);
+        break;
+    case kanban::KanbanRenderer::GazeMedium:
+    default:
+        m_kanbanGazeMedium->setChecked(true);
+        break;
+    }
+    // 托盘这项直接读配置：它不归 KanbanController 管，不回填的话
     // 每次重绘都会显示成未勾选，用户以为设置丢了。
     auto &cfg = AppConfig::instance();
     m_trayMinimizeBox->setChecked(
         cfg.value(ConfigKeys::Tray::MinimizeToTrayOnClose, true).toBool());
-    m_trayAlwaysBox->setChecked(
-        cfg.value(ConfigKeys::Tray::ShowWhenBackgroundTaskRunning, true).toBool());
     m_kanbanSyncing = false;
 
     if (m_tray)
@@ -588,6 +652,76 @@ void MainWindow::updateKanbanControls()
                            .arg(m_kanbanStartBtn->isVisible() ? 1 : 0)
                            .arg(m_kanban->stateText()),
                        QStringLiteral("Kanban"));
+
+        // 「暂停/继续」按钮同样打印。
+        //
+        // 起因：2026-09-17 删掉了 `applyMainWindowVisible()`（主窗口隐藏时冻结看板娘），
+        // 那个函数里也调 `m_renderer->pause()/resume()`，于是需要一条能证明
+        // **用户自己的暂停仍然好使** 的证据。走的是 `pauseResume()`，与窗口可见性无关。
+        //
+        // 坐标给**窗内中心**（`mapTo(this, ...)` = 主窗口客户区逻辑像素）：探针往顶层
+        // 窗口 PostMessage 时用的就是客户区坐标，直接拿这个值点，不必过 ClientToScreen
+        // —— 实测那条路两次运行会差 16 逻辑像素，点整排控件时会偏一格。
+        if (m_kanbanPauseBtn) {
+            const QSize psz = m_kanbanPauseBtn->size();
+            const QPoint pc = m_kanbanPauseBtn->mapTo(
+                this, QPoint(psz.width() / 2, psz.height() / 2));
+            videodiag::log(videodiag::Level::Debug,
+                           QStringLiteral("[KanbanPage] 暂停按钮 enabled=%1 text=%2 "
+                                          "窗内中心=%3,%4 状态=%5")
+                               .arg(m_kanbanPauseBtn->isEnabled() ? 1 : 0)
+                               .arg(m_kanbanPauseBtn->text())
+                               .arg(pc.x()).arg(pc.y())
+                               .arg(m_kanban->stateText()),
+                           QStringLiteral("Kanban"));
+        }
+
+        // 视线四档的选中态与可点坐标。
+        //
+        // 为什么也要打印：四选一是「必须恰好选中一个」的控件，而回填走的是
+        // setChecked()、点击走的是 QButtonGroup::idClicked —— 这两条路一旦有一条
+        // 接错，表现就是「点不动」或者「显示的和存的不一样」，光看代码很难确认。
+        // 打印 checked 状态 + 窗内坐标，就能既核对互斥性、又能直接照着坐标点。
+        {
+            struct GazeRadio {
+                QRadioButton *radio;
+                int strength;
+            };
+            const GazeRadio radios[] = {
+                {m_kanbanGazeOff, kanban::KanbanRenderer::GazeOff},
+                {m_kanbanGazeWeak, kanban::KanbanRenderer::GazeWeak},
+                {m_kanbanGazeMedium, kanban::KanbanRenderer::GazeMedium},
+                {m_kanbanGazeStrong, kanban::KanbanRenderer::GazeStrong},
+            };
+            int checkedCount = 0;
+            QStringList parts;
+            for (const GazeRadio &g : radios) {
+                if (g.radio->isChecked())
+                    ++checkedCount;
+                const QSize rsz = g.radio->size();
+                const QPoint rc = g.radio->mapTo(
+                    this, QPoint(rsz.width() / 2, rsz.height() / 2));
+                // 同时给出**屏幕坐标**：自动化要照着点，而「窗内坐标」还要经过
+                // 客户区原点换算，窗口一移动/多屏/DPI 一变就容易算错。
+                // mapToGlobal 是 Qt 自己算的，拿它直接点不会错。
+                const QPoint rg = g.radio->mapToGlobal(QPoint(rsz.width() / 2, rsz.height() / 2));
+                parts << QStringLiteral("%1[checked=%2 中心=%3,%4 屏幕=%5,%6 %7x%8]")
+                             .arg(kanban::KanbanRenderer::gazeStrengthName(g.strength))
+                             .arg(g.radio->isChecked() ? 1 : 0)
+                             .arg(rc.x()).arg(rc.y())
+                             .arg(rg.x()).arg(rg.y())
+                             .arg(rsz.width()).arg(rsz.height());
+            }
+            videodiag::log(videodiag::Level::Debug,
+                           QStringLiteral("[KanbanPage] 视线档位=%1(%2) 选中数=%3 可见=%4 | %5")
+                               .arg(kanban::KanbanRenderer::gazeStrengthName(
+                                        m_kanban->gazeStrength()))
+                               .arg(m_kanban->gazeStrength())
+                               .arg(checkedCount)
+                               .arg(m_kanbanGazeOff->isVisible() ? 1 : 0)
+                               .arg(parts.join(QStringLiteral(" "))),
+                           QStringLiteral("Kanban"));
+        }
     }
 }
 

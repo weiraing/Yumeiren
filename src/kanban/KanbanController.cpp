@@ -95,31 +95,49 @@ void KanbanController::loadSettings()
     m_alwaysOnTop = cfg.value(QString::fromLatin1(ConfigKeys::Kanban::AlwaysOnTop), true).toBool();
     m_mouseThrough = cfg.value(QString::fromLatin1(ConfigKeys::Kanban::MouseThrough), false).toBool();
     m_interactionEnabled = cfg.value(QString::fromLatin1(ConfigKeys::Kanban::AllowInteraction), true).toBool();
-    m_gazeTracking = cfg.value(QString::fromLatin1(ConfigKeys::Kanban::GazeTracking), true).toBool();
+
+    // —— 视线档位的读取与旧配置迁移 ——
+    //
+    // 这个键经历过一次语义升级：老版本是布尔(kanban/gazeTracking)，现在是四档
+    // 整数(kanban/gazeStrength)。老用户的 .ini 里只有旧键，直接读新键会拿到
+    // 默认值「中」，于是「我明明关过视线追踪，升级后又自己开了」。
+    //
+    // 迁移只在**新键确实不存在**时按旧键折算：新键存在就以它为准 —— 否则用户
+    // 在新版里改过档位、而旧键还留着 true，每次启动都会被旧键拖回去。
+    // 读到旧键后顺手把新键写下去(旧键留着不管，无害且能回滚)。
+    const QString strengthKey = QString::fromLatin1(ConfigKeys::Kanban::GazeStrength);
+    if (cfg.contains(strengthKey)) {
+        m_gazeStrength = KanbanRenderer::clampGazeStrength(cfg.value(strengthKey).toInt());
+    } else {
+        const bool legacyOn =
+            cfg.value(QString::fromLatin1(ConfigKeys::Kanban::GazeTrackingLegacy), true).toBool();
+        m_gazeStrength = legacyOn ? KanbanRenderer::GazeMedium : KanbanRenderer::GazeOff;
+        cfg.setValue(strengthKey, m_gazeStrength);
+        videodiag::log(videodiag::Level::Info,
+                       QStringLiteral("[Kanban] 视线追踪配置迁移: 旧布尔=%1 → 档位=%2")
+                           .arg(legacyOn ? QStringLiteral("开") : QStringLiteral("关"))
+                           .arg(KanbanRenderer::gazeStrengthName(m_gazeStrength)),
+                       QLatin1String("Kanban"));
+    }
+
     m_modelPath = cfg.value(QString::fromLatin1(ConfigKeys::Kanban::ModelPath)).toString();
 
     m_clock->setTargetFps(m_targetFps);
     emit settingsChanged();
 }
 
-bool KanbanController::autoStart() const
+// 「记住上次状态」。读的是 `kanban/enabled`，不是另立一个开关：
+//   publishState() 每次状态变化都把它写成 `running`；
+//   stop()（用户点「取消」）与 enterError() 明确写 false；
+//   shutdownForExit()（用户退出程序）**不碰它** —— 这一条是关键，它让这个键
+//   在进程结束时保留「退出那一刻在不在跑」，下次启动照它决定。
+// 首次安装没有这个键 → false → 不启动。
+//
+// 老写法读 `kanban/autoStart`，那是个只能从设置页勾选框改的独立键，而退出路径
+// 根本不写它 —— 于是「我明明关了它，下次启动又自己冒出来」。勾选框已删。
+bool KanbanController::wasRunningLastTime() const
 {
-    return AppConfig::instance().value(QString::fromLatin1(ConfigKeys::Kanban::AutoStart), false).toBool();
-}
-
-void KanbanController::setAutoStart(bool on)
-{
-    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::AutoStart), on);
-}
-
-bool KanbanController::pauseWhenMainHidden() const
-{
-    return AppConfig::instance().value(QString::fromLatin1(ConfigKeys::Kanban::PauseWhenHidden), true).toBool();
-}
-
-void KanbanController::setPauseWhenMainHidden(bool on)
-{
-    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::PauseWhenHidden), on);
+    return AppConfig::instance().value(QString::fromLatin1(ConfigKeys::Kanban::Enabled), false).toBool();
 }
 
 int KanbanController::refreshModels()
@@ -189,11 +207,13 @@ bool KanbanController::ensureWindow()
         // 两条路同时喂会互相覆盖，而 hover 只在鼠标位于窗口内时才有事件 ——
         // 它会把刚由全局光标算好的「在左边」一把拽回窗口内的小范围，表现为
         // 「鼠标一离开窗口，视线就自己收回中间」。
-        if (m_renderer && !m_machine.isPaused() && !m_gazeTracking) {
+        if (m_renderer && !m_machine.isPaused() && !gazeTracking()) {
             m_renderer->pointerMove(pos);
         }
     });
     connect(m_window, &KanbanWindow::clicked, this, &KanbanController::handleClicked);
+    // 视线档位只有两条入口：设置页的四档单选框、托盘「看板娘 > 视线追踪 >」。
+    // 看板娘窗口的右键菜单刻意不带这一项(见 KanbanWindow.cpp 里的说明)。
     connect(m_window, &KanbanWindow::dragStarted, this, [this] {
         m_machine.transition(State::Dragging, "dragStarted");
     });
@@ -384,7 +404,7 @@ bool KanbanController::activateKanban()
     // (Live2D 成功 / 降级到占位 / 重试) 的唯一汇合点：写在 pickRenderer 里
     // 会漏掉降级后新建的那个 PlaceholderRenderer，写在 ensureWindow 里又太早
     // —— 那时渲染器还没 initialize()。
-    m_renderer->setGazeEnabled(m_gazeTracking);
+    m_renderer->setGazeStrength(m_gazeStrength);
 
     if (!m_machine.transition(State::Idle, "activateKanban")) {
         return false;
@@ -619,37 +639,10 @@ void KanbanController::hideWindow()
                    QLatin1String(kModule));
 }
 
-void KanbanController::applyMainWindowVisible(bool visible)
-{
-    if (!m_machine.isRunning()) {
-        return;
-    }
-    if (!visible && pauseWhenMainHidden()) {
-        if (!m_machine.isPaused()) {
-            m_clock->stop();
-            if (m_renderer) {
-                m_renderer->pause();
-            }
-            m_machine.transition(State::Paused, "mainHidden");
-            if (m_window) {
-                m_window->setPausedVisual(true);
-            }
-            publishState();
-        }
-    } else if (visible && m_machine.isPaused()) {
-        m_machine.transition(State::Idle, "mainShown");
-        if (m_renderer) {
-            m_renderer->resume();
-        }
-        if (m_window && m_window->isVisible()) {
-            m_clock->start();
-        }
-        if (m_window) {
-            m_window->setPausedVisual(false);
-        }
-        publishState();
-    }
-}
+// 曾有一个 applyMainWindowVisible(bool)：主窗口隐藏时把看板娘冻住、显示时解冻。
+// 2026-09-17 按用户要求连同「主界面隐藏时暂停动画」勾选框一起删除 —— 主界面收进托盘时
+// 看板娘还露在桌面上，冻住它只会看起来像坏了。顺带也去掉了「显示主窗口就把暂停解除」
+// 这条：暂停现在只能由用户自己发起，不该被窗口的可见性悄悄改掉。
 
 void KanbanController::shutdownForExit()
 {
@@ -687,7 +680,7 @@ void KanbanController::onFrameTick(float deltaSeconds)
     // 应当反映「此刻光标在哪」。所以先让 TargetPoint 嚼完上一帧的值，再把新值
     // 放进去，画出来的就是最新方向。反过来写也没大错，只是永远慢一帧 ——
     // 鼠标快速划过时能看出来「眼珠追着背影跑」。
-    if (m_gazeTracking) {
+    if (gazeTracking()) {
         feedGazeTarget();
     }
     if (m_window) {
@@ -833,23 +826,33 @@ void KanbanController::setInteractionEnabled(bool enabled)
     }
 }
 
-void KanbanController::setGazeTracking(bool on)
+void KanbanController::setGazeStrength(int strength)
 {
-    m_gazeTracking = on;
-    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::GazeTracking), on);
+    const int next = KanbanRenderer::clampGazeStrength(strength);
+    if (m_gazeStrength == next) {
+        return;
+    }
+    m_gazeStrength = next;
+    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::GazeStrength), next);
+    // 顺手把旧键也写成一致的值：留着旧键 true 而新键是「无」，回退到旧版本时
+    // 会又变成开着。旧版本读的是布尔，这里相当于把语义也一起带过去。
+    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::GazeTrackingLegacy),
+                                   next != KanbanRenderer::GazeOff);
 
     // 立刻作用到当前渲染器，而不是等下一帧的 feedGazeTarget：
-    // 关掉时渲染器要把角度平滑复位(否则模型僵在歪头姿势)，重新打开时要马上
-    // 看向当前光标。两条都需要「现在就告诉渲染器」。
+    // 切到「无」时渲染器要把角度平滑复位(否则模型僵在歪头姿势)，换档时要按
+    // 新半径马上重算(否则要等鼠标动一下才看得出强弱)。两条都需要「现在就
+    // 告诉渲染器」。
     if (m_renderer) {
-        m_renderer->setGazeEnabled(on);
-        if (on) {
+        m_renderer->setGazeStrength(next);
+        if (next != KanbanRenderer::GazeOff) {
             feedGazeTarget();
         }
     }
     videodiag::log(videodiag::Level::Info,
-                   QStringLiteral("[Kanban] 视线追踪=%1").arg(on ? QStringLiteral("开")
-                                                                  : QStringLiteral("关")),
+                   QStringLiteral("[Kanban] 视线追踪强度=%1(%2)")
+                       .arg(KanbanRenderer::gazeStrengthName(next))
+                       .arg(next),
                    QLatin1String("Kanban"));
 }
 

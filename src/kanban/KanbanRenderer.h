@@ -19,6 +19,44 @@ class QPainter;
 
 namespace kanban {
 
+// —— 视线强度档位到「实际幅度」的唯一映射表 ——
+//
+// 放在抽象层而不是各后端各写一份：两个后端必须给出**逐位一致**的手感，
+// 否则用户在降级路径(占位渲染器)上调好了档位，切回 Live2D 会发现同一档
+// 效果不一样。这类「两处常量要手工同步」的约定，写在一起才守得住。
+//
+// 两个系数的含义：
+//   radiusFactor —— 作用半径 = 窗口尺寸 × 该系数。档位越高系数越小，
+//                   即「转过同样角度所需的鼠标偏移更小」= 更敏感。
+//                   这不是「幅度上限」：CubismLook 的最终幅度由参数范围
+//                   (ParamAngleX ±30、EyeBall ±1)封顶，档位改的是**到达
+//                   上限的快慢**，也就是「窗口附近动一动就有反应」的程度。
+//   verticalScale —— 纵向收敛，生理上抬头幅度小于左右摆，观感更自然。
+struct GazeTuning {
+    float radiusFactor;
+    float verticalScale;
+};
+
+// 索引即档位(GazeOff 也占一格，值无意义 —— 关闭时根本不查表)。
+//
+// 三档的半径倍数取 3.6 / 2.2 / 1.5：
+//   · 中档 2.2 是此前实测满意的值，作为基准不动；
+//   · 弱档 3.6 让「鼠标要移开挺远才看得出转头」，安静不打扰；
+//   · 强档 1.5 在窗口外一小段距离就接近最大转角，存在感最强。
+// 强档刻意**不**再往下压(试过 1.3)：那样在 230px 宽的窗口上，光标离中心
+// 150px 就彻底饱和，屏幕上绝大多数位置看到的都是同一个「顶到极限」的姿势 ——
+// 用户会觉得「强档 = 卡住了」，而不是「跟得紧」。留一点行程才有强弱之分。
+inline constexpr GazeTuning kGazeTuning[4] = {
+    {2.2f, 0.70f}, // GazeOff   —— 占位，不参与计算
+    {3.6f, 0.55f}, // GazeWeak  —— 半径大得多，轻微跟随；纵向更收
+    {2.2f, 0.70f}, // GazeMedium
+    {1.5f, 0.85f}, // GazeStrong—— 追得紧，纵向几乎不压
+};
+
+// 作用半径下限(逻辑像素)。缩放调到 20% 时窗口只有几十像素，纯按倍数算出的
+// 半径太小，光标轻微抖动就会让模型疯狂偏头 —— 用一个地板值兜住。
+inline constexpr float kGazeMinRadiusPx = 160.0f;
+
 // GL 宿主能力：让渲染器能在「非 paintGL 时机」把 GL 上下文取回来。
 //
 // 为什么需要它：QOpenGLWidget 只在 initializeGL/resizeGL/paintGL 里替我们
@@ -108,21 +146,48 @@ public:
     // 播放下一个动作；返回 true 表示确实播了，返回 false 表示没有可播动作。
     virtual bool playNextMotion() = 0;
 
-    // —— 视线追踪开关 ——
-    // 关掉后指针移动不再改变头/眼角度，模型回到正面。
+    // —— 视线追踪强度 ——
     //
-    // 为什么放在渲染器而不是窗口：能不能「看向某处」是后端能力(Live2D 靠
-    // CubismLook 把归一化坐标映射到 ParamAngleX/EyeBallX 等参数，占位后端靠自己
-    // 那几个字段)，而「什么时候该看哪里」才是交互策略。能力留在渲染器、策略留在
-    // 控制器，两边不混。
-    // 关掉时必须把角度**复位**而不是保留最后那个值，否则用户一关开关，模型就
-    // 僵在一个歪头的姿势上。
-    virtual void setGazeEnabled(bool enabled) { m_gazeEnabled = enabled; }
-    bool gazeEnabled() const { return m_gazeEnabled; }
+    // 四档枚举，「无」= 关闭，其余三档是同一套映射换不同的作用半径。
+    //
+    // 为什么是「强度」而不是「开关 + 单独调灵敏度滑块」：用户对这功能的诉求是
+    // 「让它看着我」，他会描述成「有点弱 / 挺明显 / 太夸张了」—— 这是一条
+    // 一维的档位，不是两个正交参数。做成四选一既能关掉，又把「多明显」收进
+    // 一个说得清的刻度里，比两个控件更好选。
+    //
+    // 为什么档位语义放在渲染器而不是窗口：能不能「看向某处」是后端能力(Live2D
+    // 靠 CubismLook 把归一化坐标映射到 ParamAngleX/EyeBallX 等参数，占位后端靠
+    // 自己那几个字段)，而「什么时候该看哪里」才是交互策略。能力留在渲染器、
+    // 策略留在控制器，两边不混。
+    //
+    // 档位→实际幅度的映射表定义在 KanbanGaze 命名空间(本头文件下方)，两个后端
+    // 共用同一张表 —— 否则降级路径下手感会和 Live2D 路径分叉，用户会以为
+    // 「升级后变迟钝了」。
+    enum GazeStrength {
+        GazeOff = 0,   // 无：不跟随，模型保持正面
+        GazeWeak = 1,  // 弱
+        GazeMedium = 2, // 中
+        GazeStrong = 3, // 强
+    };
+
+    // 设置强度。传 GazeOff 时必须把角度**复位**而不是保留最后那个值，
+    // 否则用户一关，模型就僵在一个歪头的姿势上(见两个后端的实现)。
+    virtual void setGazeStrength(int strength);
+    int gazeStrength() const { return m_gazeStrength; }
+
+    // 「有没有开」是强度 > 0 的派生判据。刻意做成函数而不是让各处自己写
+    // `strength != 0`：这条判断在控制器、两个后端、三处界面入口都要用，
+    // 各写各的迟早漏一处。
+    bool gazeEnabled() const { return m_gazeStrength != GazeOff; }
+
+    // 档位名(「无/弱/中/强」)，界面与日志共用一处，避免两处译名不一致。
+    static QString gazeStrengthName(int strength);
+    // 把任意数值夹进合法档位。配置是从磁盘读的，可能是旧版遗留的布尔值或脏数据。
+    static int clampGazeStrength(int strength);
 
 protected:
     // 默认实现只写这个字段，派生类在 pointerMove / update 里自行判断。
-    bool m_gazeEnabled = true;
+    int m_gazeStrength = GazeMedium;
 
 public:
 
@@ -159,6 +224,37 @@ public:
     // 释放全部后端资源；调用后允许再次 initialize()(允许用户重试)。
     virtual void shutdown() = 0;
 };
+
+// 这三个在头文件里内联定义：它们只碰一个 int 和一个静态表，没有需要藏起来的
+// 实现细节，放进 .cpp 反而要多一个 translation unit(且两份后端实现都要链接它)。
+inline int KanbanRenderer::clampGazeStrength(int strength)
+{
+    if (strength < GazeOff)
+        return GazeOff;
+    if (strength > GazeStrong)
+        return GazeStrong;
+    return strength;
+}
+
+inline void KanbanRenderer::setGazeStrength(int strength)
+{
+    m_gazeStrength = clampGazeStrength(strength);
+}
+
+inline QString KanbanRenderer::gazeStrengthName(int strength)
+{
+    switch (clampGazeStrength(strength)) {
+    case GazeWeak:
+        return QStringLiteral("弱");
+    case GazeMedium:
+        return QStringLiteral("中");
+    case GazeStrong:
+        return QStringLiteral("强");
+    case GazeOff:
+    default:
+        return QStringLiteral("无");
+    }
+}
 
 } // namespace kanban
 

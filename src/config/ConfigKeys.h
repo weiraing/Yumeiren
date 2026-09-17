@@ -73,7 +73,8 @@ inline constexpr auto Maximized = "window/maximized";
 }
 
 // 看板娘(Live2D 桌宠)。只持久化用户设置，运行态(当前状态机状态、当前动作)
-// 一律不落盘：进程重启后回到"未启动"，由 kanban/autoStart 决定是否自动拉起。
+// 一律不落盘：进程重启后回到"未启动"，再由 kanban/enabled 决定是否自动拉起
+// ——「记住上次状态」，首次安装该键不存在，默认不启动。
 namespace Kanban {
 inline constexpr auto Enabled = "kanban/enabled";         // 用户最后一次是否让它在跑
 inline constexpr auto ModelPath = "kanban/modelPath";     // 当前模型 model3.json 绝对路径
@@ -86,18 +87,18 @@ inline constexpr auto PosY = "kanban/y";
 inline constexpr auto AlwaysOnTop = "kanban/alwaysOnTop"; // 置顶(关=贴在桌面之上的一般层)
 inline constexpr auto MouseThrough = "kanban/mouseThrough"; // 鼠标穿透
 inline constexpr auto TargetFps = "kanban/targetFps";     // 动画目标帧率
-inline constexpr auto AutoStart = "kanban/autoStart";     // 程序启动时自动运行
-inline constexpr auto PauseWhenHidden = "kanban/pauseWhenHidden"; // 主窗口隐藏后仍动画
 inline constexpr auto AllowInteraction = "kanban/allowInteraction"; // 允许点击/悬停互动
-// 视线追踪：头/眼/身体跟着鼠标转。默认 true —— 这是「看起来像活物」的核心，
-// 关掉之后模型只会呆立着，所以默认开。
-inline constexpr auto GazeTracking = "kanban/gazeTracking";
+// 视线追踪强度：0=无 1=弱 2=中 3=强。默认 2(中) —— 这是「看起来像活物」的核心，
+// 关掉之后模型只会呆立着，所以默认开；而中档是此前实测手感满意的那个值。
+inline constexpr auto GazeStrength = "kanban/gazeStrength";
+// 旧版的布尔开关(有则视为「开=中档」)。只在读配置时作为迁移来源使用，
+// 新写入一律走 GazeStrength —— 见 KanbanController::loadSettings 里的迁移注释。
+inline constexpr auto GazeTrackingLegacy = "kanban/gazeTracking";
 }
 
 // 系统托盘与"关窗不等于退出"策略。
 namespace Tray {
 inline constexpr auto Enabled = "tray/enabled";                       // 允许使用托盘
-inline constexpr auto ShowWhenBackgroundTaskRunning = "tray/showWhenBackgroundTaskRunning";
 inline constexpr auto MinimizeToTrayOnClose = "tray/minimizeToTrayOnClose";
 }
 

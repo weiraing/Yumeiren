@@ -172,6 +172,10 @@ QPushButton#HeaderTab:focus { border: none; }
     font-size: 12px;
 }
 
+/* 提示语变成「当前做不了这件事」时的样子(如视频转码缺 ffmpeg)：
+   入口置灰的同时必须让原因可见 —— 禁用控件未必收得到 tooltip。 */
+#HintLabel[data-err="1"] { color: #e58a92; }
+
 QLabel#FieldLabel {
     color: #b9bcc4;
     font-size: 12px;

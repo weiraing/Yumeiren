@@ -7,6 +7,7 @@
 #include "config/ConfigKeys.h"
 #include "core/Diagnostics.h"
 #include "kanban/KanbanController.h"
+#include "kanban/KanbanRenderer.h" // 视线档位枚举与它的译名函数
 #include "wallpaper/VideoWallpaper.h"
 
 #include <QApplication>
@@ -89,10 +90,11 @@ bool SystemTrayController::initialize()
 
     m_available = true;
     ApplicationRuntimeState::instance().setTrayAvailable(true);
-    videodiag::log(videodiag::Level::Info, QStringLiteral("托盘: 已就绪(初始可见性按后台状态决定)"),
+    videodiag::log(videodiag::Level::Info, QStringLiteral("托盘: 已就绪(常驻显示)"),
                    QStringLiteral("Tray"));
 
-    // 后台状态一变，托盘可见性与菜单项同步刷新(单一订阅点，别处不直连菜单)。
+    // 后台状态一变，托盘菜单项同步刷新(单一订阅点，别处不直连菜单)。
+    // 2026-09-17 起可见性不再跟着后台状态走，但菜单文字与 tooltip 还要它。
     connect(&ApplicationRuntimeState::instance(), &ApplicationRuntimeState::stateChanged, this,
             &SystemTrayController::updateRuntimeState);
 
@@ -115,15 +117,25 @@ void SystemTrayController::buildContextMenu()
     m_contextMenu->addSeparator();
 
     QMenu *wallMenu = addSubmenu(m_contextMenu, QStringLiteral("动态壁纸"));
-    m_actWallStart = addEntry(wallMenu, QStringLiteral("启动"), [] {
+    // 「启动 / 取消」是一项双态开关，与动态壁纸页那颗「▶ 启动 / ■ 取消」按钮
+    // **同一条判据、同一组副作用**：启动失败要留日志，成功要回写 WasPlaying
+    // —— 少了这次回写，从托盘启动的壁纸下次开机不会自动恢复(启动时的自动恢复
+    // 就是读这个键，见 MainWindow.cpp 里 earlyWasPlaying 那段)。
+    m_actWallToggle = addEntry(wallMenu, QStringLiteral("启动 / 取消"), [] {
         VideoWallpaper &wall = VideoWallpaper::instance();
-        if (wall.isStarted())
+        if (wall.isStarted()) {
+            wall.stopAll();
+            AppConfig::instance().setValue(ConfigKeys::Video::WasPlaying, false);
             return;
+        }
         QString err;
-        if (!wall.startPlaying(&err))
+        if (!wall.startPlaying(&err)) {
             videodiag::log(videodiag::Level::Warning,
                            QStringLiteral("托盘启动动态壁纸失败: %1").arg(err),
                            QStringLiteral("Tray"));
+            return;
+        }
+        AppConfig::instance().setValue(ConfigKeys::Video::WasPlaying, true);
     });
     m_actWallPause = addEntry(wallMenu, QStringLiteral("暂停"), [] {
         VideoWallpaper::instance().pauseResume();
@@ -136,15 +148,27 @@ void SystemTrayController::buildContextMenu()
         const int next = (wall.currentIndex() + 1) % wall.playlist().size();
         wall.switchToTrack(next);
     });
-    m_actWallStop = addEntry(wallMenu, QStringLiteral("取消"), [] {
-        VideoWallpaper::instance().stopAll();
-        AppConfig::instance().setValue(ConfigKeys::Video::WasPlaying, false);
-    });
 
     QMenu *kanbanMenu = addSubmenu(m_contextMenu, QStringLiteral("看板娘"));
-    m_actKanbanStart = addEntry(kanbanMenu, QStringLiteral("启动"), [this] {
-        if (m_kanban)
-            m_kanban->start();
+    // 同看板娘页的「▶ 启动 / ■ 取消」按钮：判据只看 isRunning()。
+    // Error 态也算 running(状态机把它归在 running 集合里)，所以「出错时点一下
+    // 是收口而不是重试」这条与页面一致 —— 页面上那句 `|| state()==Error`
+    // 在这里是冗余的，写了反而容易让人以为 Error 不属于 running。
+    m_actKanbanToggle = addEntry(kanbanMenu, QStringLiteral("启动 / 取消"), [this] {
+        if (!m_kanban)
+            return;
+        if (m_kanban->isRunning()) {
+            m_kanban->stop();
+            return;
+        }
+        if (!m_kanban->start()) {
+            videodiag::log(videodiag::Level::Warning,
+                           QStringLiteral("托盘启动看板娘失败: %1")
+                               .arg(m_kanban->lastError().isEmpty()
+                                        ? QStringLiteral("未知原因")
+                                        : m_kanban->lastError()),
+                           QStringLiteral("Tray"));
+        }
     });
     m_actKanbanPause = addEntry(kanbanMenu, QStringLiteral("暂停"), [this] {
         if (m_kanban)
@@ -154,20 +178,26 @@ void SystemTrayController::buildContextMenu()
         if (m_kanban)
             m_kanban->playNext();
     });
-    m_actKanbanStop = addEntry(kanbanMenu, QStringLiteral("取消"), [this] {
-        if (m_kanban)
-            m_kanban->stop();
-    });
-    // 视线追踪开关：与设置页「视线追踪」复选框是同一个配置键(kanban/gazeTracking)，
-    // 这里用 checkable 项只是为了不在托盘里塞一个「设置」入口。
-    // 注意勾选态用 triggered(bool) 而不是「触发后翻转自己」—— 权威状态在控制器那边，
-    // 菜单显示的是它的回读值，两边打架时以控制器为准。
-    m_actKanbanGaze = kanbanMenu->addAction(QStringLiteral("视线追踪"));
-    m_actKanbanGaze->setCheckable(true);
-    connect(m_actKanbanGaze, &QAction::triggered, this, [this](bool checked) {
-        if (m_kanban)
-            m_kanban->setGazeTracking(checked);
-    });
+    // 视线追踪四档：做成子菜单而不是一个可勾选项 —— 四档是互斥的单选语义，
+    // 挨在「看板娘」下面平铺四个菜单项会让主菜单变长且看不出互斥关系。
+    //
+    // 每项都用 setCheckable + 手动回读勾选态(见 updateMenuState)：QAction 的
+    // checkable 在子菜单里不会自动互斥，所以「唯一被勾选」这件事必须由回读保证，
+    // 权威状态在控制器那边。
+    QMenu *gazeMenu = addSubmenu(kanbanMenu, QStringLiteral("视线追踪"));
+    auto addGazeEntry = [this, gazeMenu](int strength) {
+        auto *act = gazeMenu->addAction(kanban::KanbanRenderer::gazeStrengthName(strength));
+        act->setCheckable(true);
+        connect(act, &QAction::triggered, this, [this, strength] {
+            if (m_kanban)
+                m_kanban->setGazeStrength(strength);
+        });
+        return act;
+    };
+    m_actGazeOff = addGazeEntry(kanban::KanbanRenderer::GazeOff);
+    m_actGazeWeak = addGazeEntry(kanban::KanbanRenderer::GazeWeak);
+    m_actGazeMedium = addGazeEntry(kanban::KanbanRenderer::GazeMedium);
+    m_actGazeStrong = addGazeEntry(kanban::KanbanRenderer::GazeStrong);
 
     m_contextMenu->addSeparator();
     m_actQuit = addEntry(m_contextMenu, QStringLiteral("关闭软件"), [this] {
@@ -190,30 +220,41 @@ void SystemTrayController::updateMenuState()
 
     const bool wallStarted = wall.isStarted();
     const bool wallHasList = !wall.playlist().isEmpty();
-    m_actWallStart->setEnabled(!wallStarted && wallHasList);
+    // 双态开关的可用性 = 页面 updateVideoButtons() 的 `setEnabled(!empty || started)`：
+    // 只有「没列表可播且当前没在跑」才真的没得切；在跑的时候必须可点，否则取消不掉。
+    m_actWallToggle->setEnabled(wallStarted || wallHasList);
     m_actWallPause->setEnabled(wallStarted);
     m_actWallNext->setEnabled(wallStarted && wall.playlist().size() > 1);
-    m_actWallStop->setEnabled(wallStarted);
     m_actWallPause->setText(wall.isManualPaused() ? QStringLiteral("继续")
                                                   : QStringLiteral("暂停"));
 
     const bool kanbanRunning = m_kanban && m_kanban->isRunning();
-    m_actKanbanStart->setEnabled(m_kanban && !kanbanRunning);
+    // 同页面 updateKanbanControls()：唯一该置灰的是 Stopping 那一瞬 ——
+    // 窗口与渲染器正在拆，此时再点一次既没有可撤销的对象，也会撞上
+    // Starting->Stopping 之外的非法转移。Running 与 Error 都必须可点。
+    const bool kanbanStopping =
+        m_kanban && m_kanban->state() == kanban::State::Stopping;
+    m_actKanbanToggle->setEnabled(m_kanban && !kanbanStopping);
     m_actKanbanPause->setEnabled(kanbanRunning);
     // 「播放下一个」跟随渲染器的可播动作数置灰：菜单项点了没反应，
     // 和灰掉一样让人怀疑程序坏了，但灰掉至少不骗人。
     m_actKanbanNext->setEnabled(kanbanRunning && m_kanban->canPlayNextMotion());
-    m_actKanbanStop->setEnabled(kanbanRunning);
-    // 开关项本身不禁用：看板娘没跑时也可以先把偏好定下来，下次启动生效。
-    // 但没注入控制器时无从读回状态，此时灰掉更诚实。
-    m_actKanbanGaze->setEnabled(m_kanban != nullptr);
-    if (m_kanban) {
-        m_actKanbanGaze->setChecked(m_kanban->gazeTracking());
-        // 「点下一个会换模型」是多数模型的常态，这里用 tooltip 说清「看不到效果」的两种可能。
-        m_actKanbanGaze->setToolTip(
-            m_kanban->gazeTracking()
-                ? QStringLiteral("模型朝鼠标方向转头/转眼。关掉后模型缓慢回到正面。")
-                : QStringLiteral("已关闭：模型不再跟随鼠标。"));
+    // 四档开关不禁用：看板娘没跑时也可以先把偏好定下来，下次启动生效。
+    // 但没注入控制器时无从读回状态，此时整组灰掉更诚实。
+    {
+        const bool gazeKnown = m_kanban != nullptr;
+        QAction *gazeActs[] = {m_actGazeOff, m_actGazeWeak, m_actGazeMedium, m_actGazeStrong};
+        const int gazeStrengths[] = {kanban::KanbanRenderer::GazeOff,
+                                     kanban::KanbanRenderer::GazeWeak,
+                                     kanban::KanbanRenderer::GazeMedium,
+                                     kanban::KanbanRenderer::GazeStrong};
+        // 当前档位只读一次：这一组里必须恰好有一项被勾上，逐项各读一次
+        // 万一中途被别的入口改掉，会出现两项同时勾选或一项都没勾。
+        const int current = gazeKnown ? m_kanban->gazeStrength() : -1;
+        for (int i = 0; i < 4; ++i) {
+            gazeActs[i]->setEnabled(gazeKnown);
+            gazeActs[i]->setChecked(gazeKnown && current == gazeStrengths[i]);
+        }
     }
     if (m_kanban)
         m_actKanbanPause->setText(m_kanban->isPaused() ? QStringLiteral("继续")
@@ -238,19 +279,10 @@ void SystemTrayController::updateRuntimeState()
     if (!m_available)
         return;
 
-    ApplicationRuntimeState &runtime = ApplicationRuntimeState::instance();
-    const AppConfig &settings = AppConfig::instance();
-    const bool onlyWhenRunning =
-        settings.value(ConfigKeys::Tray::ShowWhenBackgroundTaskRunning, true).toBool();
-
-    // §7.5：可见性只看「有没有后台任务」，不看主窗口是否可见 —— 否则用户在
-    // 设置里勾掉「仅后台运行时显示」的行为会被窗口状态覆盖。
-    const bool shouldShow = runtime.hasBackgroundTask() || !onlyWhenRunning;
-    if (shouldShow)
-        showTray();
-    else
-        hideTray();
-
+    // 托盘常驻（2026-09-17 按用户要求撤掉「仅在后台任务运行时显示托盘」勾选框）：
+    // 有没有后台任务在跑都显示托盘，用户随时能从这里启停壁纸/看板娘。
+    // 仍保留这个函数与它的信号连接 —— 下面还要刷菜单文字与 tooltip。
+    showTray();
     updateMenuState();
 }
 
