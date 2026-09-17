@@ -77,9 +77,20 @@ QString Live2DRenderer::gazeDebugText() const
     return QStringLiteral("未接入 SDK");
 }
 void Live2DRenderer::pointerMove(const QPointF &) {}
-// 未接入 SDK 时没有任何可跟视线转的东西。基类的 setGazeStrength 已经把值
-// 记进 m_gazeStrength(界面据此回填档位)，这里不需要额外动作 ——
-// 刻意不要 override 成一个空函数：那会盖掉基类那个唯一的状态写入点。
+// 未接入 SDK 时没有任何可跟视线转的东西。函数体只做一件事：转发给基类，
+// 让基类那个唯一的状态写入点(m_gazeStrength)保持原样 —— 界面靠回读它来
+// 回填档位，所以这一句不能省。
+//
+// **必须给这个定义**：头文件里它被声明成了 `override`，编译器就会在
+// Live2DRenderer 的虚表里指向 `Live2DRenderer::setGazeStrength` 这个符号，
+// 而不是基类那个内联实现 —— 不定义就是链接错误。
+// (2026-09-17 在 -DYUMEIREN_WITH_LIVE2D=OFF 的构建里实测 ld 报
+//  undefined reference to `kanban::Live2DRenderer::setGazeStrength(int)`；
+//  这个缺陷从加视线功能那天起就在，只是降级构建平时不跑，一直没暴露。)
+void Live2DRenderer::setGazeStrength(int strength)
+{
+    KanbanRenderer::setGazeStrength(strength);
+}
 void Live2DRenderer::pointerClick(const QPointF &) {}
 
 bool Live2DRenderer::playNextMotion()

@@ -99,6 +99,11 @@ set(YUMEIREN_SOURCES
     src/kanban/KanbanSoftwareView.cpp
     src/kanban/KanbanStateMachine.cpp
     src/kanban/KanbanWindow.cpp
+    # 模型预览图：缓存命名(ModelThumbCache)与隐藏的离屏生成模式(ModelThumbJob)。
+    # 两个都在 YUMEIREN_SOURCES 里，所以正式版/测试版/探针都能用 —— 测试版能直接
+    # 命令行驱动生成，不必去点界面。
+    src/kanban/ModelThumbCache.cpp
+    src/kanban/ModelThumbJob.cpp
     src/kanban/PlaceholderRenderer.cpp
 )
 

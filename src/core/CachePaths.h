@@ -21,6 +21,14 @@ class CachePaths
 public:
     static QString root();        // <程序目录>/.cache
     static QString thumbnails();  // .cache/thumbnails  图库缩略图缓存
+    // .cache/model-thumbs  看板娘「模型」模块的静态预览图缓存。
+    //
+    // 为什么不并进 thumbnails：那个目录的命名是「绝对路径+修改时间的哈希」，
+    // 这里的命名是「模型文件夹名」。两种命名混在一个目录里，将来按规则清理
+    // 时必然互相误伤(哈希名删不掉、模型名被当成孤儿)。
+    //
+    // 文件是 Cubism 离屏渲染出的透明底 PNG，一张约几十 KB，一个模型一张。
+    static QString modelThumbs();
     static QString media();       // .cache/media       处理后/转存的背景图缓存
     // .cache/bg_random  「随机」模式的背景图池。与 media 平级而不是它的子目录：
     // Hook DLL 只按 folder= 目录取图，单图模式的 folder 指向 media，池子放外面

@@ -76,6 +76,15 @@ public:
     // 在档位之间切换时立刻按新档位重算目标(见实现处的说明)。
     void setGazeStrength(int strength) override;
 
+    // 待机动作固定取第 0 个，而不是每次随机挑一个。**只给离屏出图进程用**：
+    // 生成模型预览图要求同一份素材每次出图都是同一张(不同待机动作的取景能差到
+    // 「大头特写」与「全身站立」)，而产品运行时恰恰要随机、不能每次同一段。
+    // 实现里只在 Live2D 后端生效；未接入 SDK 的构建它就是个没人读的开关。
+    //
+    // 刻意**不**放进 KanbanRenderer 抽象：界面从不需要它，加进接口只会逼
+    // 占位后端实现一个没有意义的空函数，违反「抽象只放上层真会调的能力」。
+    void setDeterministicIdle(bool on) { m_deterministicIdle = on; }
+
     // 视线相关参数的实时快照(值 + 取值范围)，诊断探针用。
     // 「鼠标动但模型不转头」有三种成因：参数名对不上、被运动每帧压回、
     // 模型参数范围本来就窄 —— 只有把值打出来才分得清是哪种。
@@ -100,6 +109,8 @@ private:
     bool m_ready = false;
     bool m_modelLoaded = false;
     bool m_paused = false;
+    // 待机动作是否固定取第 0 个(见 setDeterministicIdle)。默认关 = 产品行为。
+    bool m_deterministicIdle = false;
     int m_width = 320;
     int m_height = 480;
     float m_dpr = 1.0f;

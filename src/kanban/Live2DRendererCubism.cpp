@@ -440,6 +440,10 @@ public:
 
     // —— 交互 ——
     void SetDragTarget(float x, float y);
+
+    // 待机动作是否**确定地**取第 0 个，而不是每次随机挑一个。
+    // 只有「生成模型预览图」那个离屏进程会打开它，理由见 StartIdleMotion 的说明。
+    void SetDeterministicIdle(bool on) { _deterministicIdle = on; }
     bool StartHitReaction(const QPointF &normalized);
     bool PlayNextMotion();
     bool StartIdleMotion();
@@ -572,6 +576,8 @@ private:
     QString _homeDir;
     bool _glLive = false;      // 渲染器与纹理确实活在某个上下文里
     int _idleGroup = -1;      // 名为 idle 的组，没有则退化为第 0 组
+    // 待机动作固定取第 0 个(见 StartIdleMotion)。默认关，只有离屏出图进程打开。
+    bool _deterministicIdle = false;
     int _nextExpression = 0;  // PlayNextExpression 的游标
     int _lastExpression = -1; // 当前生效的表情下标，用于避免「切了跟没切一样」
     csmBool _motionUpdated = false;
@@ -1110,12 +1116,21 @@ bool KanbanCubismModel::StartIdleMotion()
 {
     const int count = motionCount(_idleGroup);
     if (count > 0) {
-        return startGroupMotion(_idleGroup, randomBelow(count), kPriorityIdle);
+        // 确定模式下固定取第 0 个待机动作。
+        //
+        // 产品运行时该随机(用户盯着看，每次都是同一段会腻)，但**离屏出图必须确定**：
+        // 实测同一个模型的不同待机动作取景可以差到「大头特写」与「全身站立」的程度，
+        // 随机挑意味着点一次「刷新」封面就换一张脸，而且常常正好看不到全貌 ——
+        // 与「一张能看清全貌的基本图」这个用途直接冲突。固定取第 0 个之后，
+        // 同一份素材每次出图逐字节一致(可用 md5 验收)。
+        const int index = _deterministicIdle ? 0 : randomBelow(count);
+        return startGroupMotion(_idleGroup, index, kPriorityIdle);
     }
     // 没有 idle 组就随便挑一组顶上，站桩不动比动作重复更难看。
     for (int g = 0; g < _motionGroups.size(); ++g) {
         const int n = motionCount(g);
-        if (n > 0 && startGroupMotion(g, randomBelow(n), kPriorityIdle)) {
+        if (n > 0 && startGroupMotion(g, _deterministicIdle ? 0 : randomBelow(n),
+                                      kPriorityIdle)) {
             return true;
         }
     }
@@ -1440,6 +1455,7 @@ bool Live2DRenderer::loadModel(const QString &modelJsonPath, QString *outError)
     }
 
     m_d->model = model;
+    model->SetDeterministicIdle(m_deterministicIdle);
     m_modelPath = modelJsonPath;
     m_modelLoaded = true;
     logInfo(QStringLiteral("已装载 %1：纹理 %2 张 / 动作组 %3 个(可播动作 %4 个) / 表情 %5 个")

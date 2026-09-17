@@ -3,6 +3,7 @@
 #include "config/ConfigKeys.h"
 #include "core/CachePaths.h"
 #include "core/Diagnostics.h"
+#include "kanban/ModelThumbJob.h"
 #include "platform/windows/desktopmount.h"
 #include "ui/MainWindow.h"
 #include "wallpaper/VideoWallpaper.h"
@@ -48,6 +49,28 @@ int main(int argc, char *argv[])
     videodiag::stage(QStringLiteral("Qt 应用对象创建"));
     if (!cacheReady)
         videodiag::log(videodiag::Level::Error, cacheError, QStringLiteral("Cache"));
+
+    // —— 隐藏的「生成模型预览图」模式 ——
+    //
+    // 看板娘页模型格子里那张静态预览图，由本程序**再起一个自己的进程**渲染。
+    // 为什么不能在当前进程里开个线程做：Cubism 的着色器缓存是进程级单例，
+    // 存的是 GL program id，而 program id 只在创建它的上下文里有效。在第二个
+    // 上下文里渲染，要么沿用主上下文编出来的 id(glUseProgram 静默失败、出空图)，
+    // 要么为了换上下文把正在跑的看板娘的着色器一起丢掉(桌面上小人当场黑掉)。
+    // 详见 src/kanban/ModelThumbJob.h 的说明。
+    //
+    // 位置的两点讲究：
+    //   · 在单实例守卫**之前** —— 这个模式不建主窗口、不挂壁纸、不碰托盘，
+    //     也不该被「虞美人已经在运行」挡住：用户开着主程序时正是最需要它的时候。
+    //   · 在 AppConfig::load() **之前** —— 生成进程不该读、更不该写用户的配置
+    //     (load() 会做目录创建/迁移/校验)，否则开一次页面就动一次设置文件。
+    if (QCoreApplication::arguments().contains(QStringLiteral("--render-model-thumbs"))) {
+        QString jobError;
+        const int jobExit = kanban::runModelThumbJob(QCoreApplication::arguments(), &jobError);
+        if (!jobError.isEmpty())
+            videodiag::log(videodiag::Level::Warning, jobError, QStringLiteral("ModelThumb"));
+        return jobExit;
+    }
 
     AppConfig::instance().load(); // 统一配置: 主窗口创建前加载(目录创建/迁移/校验)
     videodiag::stage(QStringLiteral("配置加载(含注册表迁移与校验)"));

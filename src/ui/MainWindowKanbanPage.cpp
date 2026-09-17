@@ -4,6 +4,7 @@
 #include "config/AppConfig.h"
 #include "config/ConfigKeys.h"
 #include "core/Diagnostics.h"
+#include "kanban/ModelThumbCache.h"
 #include "ui/TooltipStyle.h"
 #include "ui/UiMetrics.h" // 左列宽度：与动态壁纸页共用同一个常量
 
@@ -20,19 +21,98 @@
 #include <QButtonGroup>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDir>
+#include <QFileInfo>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QLabel>
 #include <QListWidget>
+#include <QPainter>
+#include <QPixmap>
+#include <QProcess>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QScrollArea>
 #include <QSlider>
 #include <QStackedWidget>
+#include <QTimer>
 #include <QUrl>
+
+namespace {
+
+// —— 模型网格的格子尺寸 ——
+//
+// 格子是**竖的**(宽:高 ≈ 1:1.65)，不是图片浏览页那种正方形：模型预览图是
+// 320×480 的竖图，塞进正方形格子只能缩成一小条，「能看清全貌」就无从谈起。
+// 宽度 121 时，三列正好落在右列(约 377px 可用宽)里。
+constexpr int kModelCellWidth = 121;
+constexpr int kModelCellHeight = 201;
+constexpr int kModelIconWidth = 105;
+constexpr int kModelIconHeight = 157;
+
+// 还没出图的格子用什么占位。
+//
+// 用**半透明**灰而不是某个具体颜色：这套界面有浅色/深色两套主题，写死任何一种
+// 颜色都会在另一套上显得脏。半透明灰在两套底色上都读作「这里是空的」。
+QPixmap kanbanThumbPlaceholder(const QSize &size)
+{
+    QPixmap pm(size);
+    pm.fill(Qt::transparent);
+    QPainter painter(&pm);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(128, 128, 128, 38));
+    painter.drawRoundedRect(QRectF(pm.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 8, 8);
+    painter.setPen(QColor(128, 128, 128, 150));
+    painter.drawText(pm.rect(), Qt::AlignCenter, QStringLiteral("…"));
+    return pm;
+}
+
+// 按缓存给一个格子贴图标。缓存里没有就贴占位图。
+//
+// 抽成自由函数是因为它有两条调用路径：整体重贴(reloadKanbanModelIcons)与
+// 单张出图后即时贴(applyKanbanModelThumb)，两处必须给出完全一致的结果。
+void applyKanbanThumbIcon(QListWidgetItem *item, const QSize &iconSize)
+{
+    if (!item)
+        return;
+    const QString id = item->data(Qt::UserRole + 1).toString();
+    const QString path = kanban::ModelThumbCache::pathFor(id);
+
+    // 缩放要按**设备**像素算，不是逻辑像素。
+    // iconSize 是逻辑尺寸，本机 150% 缩放意味着屏幕上的图标实际有 158×236 个物理
+    // 像素；只缩到 105×157 再交给 QIcon，Qt 还得把它放大 1.5 倍填满，
+    // 结果是白糊一道 —— 截图里看得很清楚。缩到物理尺寸并告知 dpr，
+    // Qt 就一比一贴上去，不再有二次重采样。
+    qreal dpr = 1.0;
+    if (QWidget *view = item->listWidget())
+        dpr = view->devicePixelRatioF();
+    const QSize pixelSize(int(qRound(iconSize.width() * dpr)),
+                          int(qRound(iconSize.height() * dpr)));
+
+    QPixmap thumb;
+    // 先缩到格子要显示的大小再交给 QIcon：原图是 320×480，16 个模型全按原尺寸
+    // 留在内存里要占近 10MB，而格子里只显示 105×157(物理 158×236)。
+    // 用户明确要求省资源。
+    if (!path.isEmpty() && kanban::ModelThumbCache::has(id) && thumb.load(path)) {
+        QPixmap scaled =
+            thumb.scaled(pixelSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        scaled.setDevicePixelRatio(dpr);
+        item->setIcon(QIcon(scaled));
+        item->setData(Qt::UserRole + 2, true);
+    } else {
+        QPixmap placeholder = kanbanThumbPlaceholder(pixelSize);
+        placeholder.setDevicePixelRatio(dpr);
+        item->setIcon(QIcon(placeholder));
+        item->setData(Qt::UserRole + 2, false);
+    }
+}
+
+} // namespace
 
 
 QWidget *MainWindow::buildKanbanPage()
@@ -133,12 +213,16 @@ QWidget *MainWindow::buildKanbanPage()
     lay->addWidget(leftCol);
 
     // ---- 右：模型 ----
+    //
+    // 与左列相反，这一列唯一的卡片要**占满高度**(addWidget 带 stretch=1、列尾不留
+    // stretch)：卡里是一面网格墙，高度不够时该由网格自己滚动，而不是让卡片缩成
+    // 几行、下面留一大片空白。左列那种「卡片收缩、空白集中到列尾」的写法在这里
+    // 恰好是反的。
     auto *right = new QWidget(page);
     auto *rightLay = new QVBoxLayout(right);
     rightLay->setContentsMargins(0, 0, 0, 0);
     rightLay->setSpacing(14);
-    rightLay->addWidget(buildKanbanModelCard(right));
-    rightLay->addStretch(1);
+    rightLay->addWidget(buildKanbanModelCard(right), 1);
     lay->addWidget(right, 1);
 
     scroll->setWidget(page);
@@ -159,27 +243,18 @@ QWidget *MainWindow::buildKanbanModelCard(QWidget *parent)
 
     auto *row = new QHBoxLayout();
     row->setSpacing(8);
-    m_kanbanModelCombo = new QComboBox(card);
-    styleCombo(m_kanbanModelCombo);
-    m_kanbanModelCombo->setToolTip(tooltipstyle::format(
-        QStringLiteral("下拉里只列「文件齐全」的模型\n缺 moc3 / 贴图 / 动作的模型会被跳过并记入日志")));
-    connect(m_kanbanModelCombo, QOverload<int>::of(&QComboBox::activated), this, [this](int index) {
-        if (m_kanbanSyncing || index < 0)
-            return;
-        const QVector<kanban::ModelInfo> models = m_kanban->validModelList();
-        if (index >= models.size())
-            return;
-        m_kanban->setModelPath(models.at(index).modelJsonPath);
-        updateKanbanControls();
-    });
-    row->addWidget(m_kanbanModelCombo, 1);
 
     auto *refreshBtn = new QPushButton(QStringLiteral("↻ 刷新"), card);
     refreshBtn->setMinimumHeight(32);
     refreshBtn->setToolTip(tooltipstyle::format(
-        QStringLiteral("重新扫描模型目录(新增/删除模型后点一下)")));
+        QStringLiteral("重新扫描模型目录，并重新生成全部预览图\n"
+                       "换过贴图或动作的模型靠这个更新封面")));
     connect(refreshBtn, &QPushButton::clicked, this, [this] {
         refreshKanbanModels();
+        // 刷新 = 重扫 + **强制**重出图。缓存只按名字找、刻意不做失效判断
+        // (见 ModelThumbCache 的说明)，所以「素材换过了」这件事只能由用户
+        // 显式点一下来传达。
+        ensureKanbanModelThumbs(true);
         setKanbanLog(QStringLiteral("已重新扫描模型目录。"), false);
     });
     row->addWidget(refreshBtn);
@@ -192,7 +267,48 @@ QWidget *MainWindow::buildKanbanModelCard(QWidget *parent)
         QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
     });
     row->addWidget(openBtn);
+    row->addStretch(1);
     lay->addLayout(row);
+
+    // —— 模型网格：一格一个模型，格子里是它的静态效果图 ——
+    //
+    // 2026-09-17 按用户要求，由「下拉框选模型」改成图片浏览那样的网格墙：
+    // 每个模型一张能看清全貌的静态预览图，不播动作。
+    m_kanbanModelGrid = new QListWidget(card);
+    auto *grid = m_kanbanModelGrid;
+    // 复用图库浏览那套 objectName：格子卡片(圆角/描边/悬停/选中)直接继承
+    // 文件夹美化页「图片浏览」的样式，浅色深色两套主题都不必再写一遍 QSS。
+    grid->setObjectName(QStringLiteral("GalleryList"));
+    grid->setViewMode(QListView::IconMode);
+    grid->setResizeMode(QListView::Adjust); // 视口变宽就自动多排一列
+    grid->setMovement(QListView::Static);
+    grid->setFlow(QListView::LeftToRight);
+    grid->setWrapping(true);
+    grid->setIconSize(QSize(kModelIconWidth, kModelIconHeight));
+    grid->setGridSize(QSize(kModelCellWidth, kModelCellHeight));
+    grid->setSpacing(0);      // 间隙由 gridSize 与 QSS 的 margin 提供，叠加会挤掉一列
+    grid->setWordWrap(false); // 模型名单行，放不下就省略
+    grid->setUniformItemSizes(true);
+    grid->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    grid->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    // 横向 sizeHint 不参与布局分配：否则会形成「宽度→列数→sizeHint→宽度」的自激环，
+    // 拖动窗口边框时界面无限重排直至未响应。与图片浏览页同一处理。
+    grid->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
+    grid->setMinimumHeight(240);
+    grid->setSelectionMode(QAbstractItemView::SingleSelection);
+    connect(grid, &QListWidget::currentItemChanged, this,
+            [this](QListWidgetItem *item, QListWidgetItem *) {
+                if (m_kanbanSyncing || !item)
+                    return;
+                // 路径存在条目里而不是按下标回查：网格顺序由扫描结果决定，
+                // 将来一加排序，按下标就会切错模型。
+                const QString jsonPath = item->data(Qt::UserRole).toString();
+                if (jsonPath.isEmpty() || jsonPath == m_kanban->modelPath())
+                    return;
+                m_kanban->setModelPath(jsonPath);
+                updateKanbanControls();
+            });
+    lay->addWidget(grid, 1);
 
     m_kanbanModelInfo = new QLabel(card);
     m_kanbanModelInfo->setObjectName(QStringLiteral("HintLabel"));
@@ -201,7 +317,9 @@ QWidget *MainWindow::buildKanbanModelCard(QWidget *parent)
 
     auto *pathHint = new QLabel(
         QStringLiteral("把 Cubism 模型整个文件夹放进 <程序目录>\\data\\models，"
-                       "每个模型一个子目录，内含 *.model3.json。"),
+                       "每个模型一个子目录，内含 *.model3.json。\n"
+                       "格子里的预览图按需生成，缓存在 <程序目录>\\.cache\\model-thumbs\\"
+                       "，文件名就是模型文件夹名。"),
         card);
     pathHint->setObjectName(QStringLiteral("HintLabel"));
     pathHint->setWordWrap(true);
@@ -477,31 +595,234 @@ void MainWindow::setupKanbanAndTray()
     }
 }
 
-// 重扫模型目录并回填下拉框，尽量保住用户当前选中的那一项。
+// 重扫模型目录并重建模型网格，尽量保住用户当前选中的那一项。
 void MainWindow::refreshKanbanModels()
 {
-    if (!m_kanbanModelCombo)
+    if (!m_kanbanModelGrid)
         return;
     m_kanban->refreshModels(); // 触发实际扫描，而非仅读缓存
     const QString current = m_kanban->modelPath();
     const QVector<kanban::ModelInfo> models = m_kanban->validModelList();
 
     m_kanbanSyncing = true;
-    m_kanbanModelCombo->clear();
-    if (models.isEmpty()) {
-        m_kanbanModelCombo->addItem(QStringLiteral("未发现可用模型"));
-        m_kanbanModelCombo->setEnabled(false);
-    } else {
-        m_kanbanModelCombo->setEnabled(true);
-        int keep = 0;
-        for (int i = 0; i < models.size(); ++i) {
-            m_kanbanModelCombo->addItem(models.at(i).name);
-            if (!current.isEmpty() && models.at(i).modelJsonPath == current)
-                keep = i;
-        }
-        m_kanbanModelCombo->setCurrentIndex(keep);
+    m_kanbanModelGrid->clear();
+    int keepRow = models.isEmpty() ? -1 : 0;
+    for (int i = 0; i < models.size(); ++i) {
+        const kanban::ModelInfo &model = models.at(i);
+        auto *item = new QListWidgetItem(m_kanbanModelGrid);
+        item->setText(model.name);
+        // UserRole   = .model3.json 绝对路径：点击时直接拿它切模型
+        // UserRole+1 = 模型文件夹名：预览图的文件名就是它
+        // UserRole+2 = 该格子的图是不是真预览图(占位图时为 false)，用于 tooltip
+        item->setData(Qt::UserRole, model.modelJsonPath);
+        item->setData(Qt::UserRole + 1, model.id);
+        item->setTextAlignment(Qt::AlignHCenter | Qt::AlignTop);
+        item->setSizeHint(m_kanbanModelGrid->gridSize());
+        if (!current.isEmpty() && model.modelJsonPath == current)
+            keepRow = i;
     }
     m_kanbanSyncing = false;
+
+    if (keepRow >= 0)
+        m_kanbanModelGrid->setCurrentRow(keepRow);
+
+    reloadKanbanModelIcons();
+}
+
+// 按当前缓存重贴全部格子图标。
+// 缺图的贴占位图 —— 生成是异步的，每张图落地后会再叫一次 applyKanbanModelThumb。
+void MainWindow::reloadKanbanModelIcons()
+{
+    if (!m_kanbanModelGrid)
+        return;
+    const QSize iconSize = m_kanbanModelGrid->iconSize();
+    for (int i = 0; i < m_kanbanModelGrid->count(); ++i) {
+        QListWidgetItem *item = m_kanbanModelGrid->item(i);
+        applyKanbanThumbIcon(item, iconSize);
+        if (!item)
+            continue;
+        const bool real = item->data(Qt::UserRole + 2).toBool();
+        item->setToolTip(real
+                             ? tooltipstyle::format(
+                                   QStringLiteral("点击把看板娘换成「%1」").arg(item->text()))
+                             : tooltipstyle::format(
+                                   QStringLiteral("「%1」的预览图还没生成好\n"
+                                                  "生成在后台进行，完成后会自动出现")
+                                       .arg(item->text())));
+    }
+}
+
+// 单个模型出图后即时贴图：不必整面墙重贴，用户能看着格子一个个亮起来。
+void MainWindow::applyKanbanModelThumb(const QString &modelId)
+{
+    if (!m_kanbanModelGrid || modelId.isEmpty())
+        return;
+    const QSize iconSize = m_kanbanModelGrid->iconSize();
+    for (int i = 0; i < m_kanbanModelGrid->count(); ++i) {
+        QListWidgetItem *item = m_kanbanModelGrid->item(i);
+        if (!item || item->data(Qt::UserRole + 1).toString() != modelId)
+            continue;
+        applyKanbanThumbIcon(item, iconSize);
+        item->setToolTip(tooltipstyle::format(
+            QStringLiteral("点击把看板娘换成「%1」").arg(item->text())));
+        return;
+    }
+}
+
+// 发现缺图就起一个生成进程。
+//
+// 整条链路只有「本程序再起一个自己」这一步，没有线程、没有共享 GL 上下文 ——
+// 原因见 src/kanban/ModelThumbJob.h(Cubism 的着色器缓存是进程级单例，
+// 在第二个上下文里渲染要么出空图、要么把桌面上正在跑的看板娘搞黑)。
+void MainWindow::ensureKanbanModelThumbs(bool force)
+{
+    if (!m_kanbanModelGrid)
+        return;
+    // m_kanbanThumbJob 非空即「正在生成」，这是唯一的重入闸门。
+    if (m_kanbanThumbJob)
+        return;
+    // 没有 Live2D 后端就没有离屏渲染，起了也是白起(它只会回一句「本构建无 Live2D」)。
+    if (!m_kanban->live2dAvailable())
+        return;
+
+    // 先算清楚缺几张。全都在缓存里就什么都不做 —— 这是绝大多数启动的情形，
+    // 也是「省资源」的关键：只有第一次进这个页面才真的会跑渲染。
+    QStringList missing;
+    for (int i = 0; i < m_kanbanModelGrid->count(); ++i) {
+        const QListWidgetItem *item = m_kanbanModelGrid->item(i);
+        if (!item)
+            continue;
+        const QString id = item->data(Qt::UserRole + 1).toString();
+        if (id.isEmpty())
+            continue;
+        if (force || !kanban::ModelThumbCache::has(id))
+            missing << id;
+    }
+    if (missing.isEmpty())
+        return;
+
+    // 走到这里说明确实要出图了，也说明此刻没有别的生成进程在跑(上面那道闸门)。
+    // 顺手清掉上次被杀留下的 .tmp —— 用户被告知过这个目录在哪，别让他看到垃圾。
+    kanban::ModelThumbCache::sweepTempFiles();
+
+    auto *job = new QProcess(this);
+    QStringList args;
+    args << QStringLiteral("--render-model-thumbs");
+    if (force)
+        args << QStringLiteral("--force");
+    // 用本程序自己的 exe：渲染代码与应用绝对同版本，不必额外发布一个生成器，
+    // 也不用担心它跟主程序版本漂移。正式版是 requireAdministrator 清单，
+    // 但父进程已经提权，子进程直接继承令牌，不会弹 UAC。
+    job->setProgram(QCoreApplication::applicationFilePath());
+    job->setArguments(args);
+
+    m_kanbanThumbJob = job;
+
+    // 记下基线：任务开始前每张图是什么样。之后「修改时间变了」= 这张图刚生成好。
+    // 这个哈希同时充当「还没出图的待办清单」—— 谁完成就从里面摘掉。
+    m_kanbanThumbBaseline.clear();
+    for (const QString &id : missing) {
+        const QString path = kanban::ModelThumbCache::pathFor(id);
+        m_kanbanThumbBaseline.insert(
+            id, path.isEmpty() ? 0 : QFileInfo(path).lastModified().toMSecsSinceEpoch());
+    }
+    m_kanbanThumbTotal = missing.size();
+
+    connect(job, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+            [this](int exitCode, QProcess::ExitStatus) { onKanbanThumbFinished(exitCode); });
+    connect(job, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+        // 只有「压根没起来」需要在这里收尾 —— FailedToStart 不会再有 finished 信号。
+        // 其余错误(崩溃等)随后一定有 finished，交给它统一收口。
+        if (error != QProcess::FailedToStart)
+            return;
+        const QString reason = m_kanbanThumbJob ? m_kanbanThumbJob->errorString() : QString();
+        videodiag::log(videodiag::Level::Warning,
+                       QStringLiteral("预览图生成进程启动失败: %1").arg(reason),
+                       QStringLiteral("Kanban"));
+        onKanbanThumbFinished(-1);
+    });
+
+    // 边生成边贴：每 250ms 看一眼缓存目录，谁先落盘谁先亮。
+    // 不读子进程的 stdout —— 见 m_kanbanThumbPoll 的说明。
+    if (!m_kanbanThumbPoll) {
+        m_kanbanThumbPoll = new QTimer(this);
+        m_kanbanThumbPoll->setInterval(250);
+        connect(m_kanbanThumbPoll, &QTimer::timeout, this, &MainWindow::pollKanbanModelThumbs);
+    }
+    m_kanbanThumbPoll->start();
+
+    setKanbanLog(QStringLiteral("正在生成 %1 个模型的预览图…(后台进行，不影响使用)")
+                     .arg(missing.size()),
+                 false);
+    job->start();
+}
+
+// 任务期间的轮询：已经落盘的图先贴上去。
+//
+// 判据是「文件修改时间与基线不同」，而不是「文件存在」—— 强制重建时文件本来
+// 就在，只有修改时间能说明它刚被重写过。
+void MainWindow::pollKanbanModelThumbs()
+{
+    if (m_kanbanThumbBaseline.isEmpty())
+        return;
+    for (auto it = m_kanbanThumbBaseline.begin(); it != m_kanbanThumbBaseline.end(); ++it) {
+        const QString path = kanban::ModelThumbCache::pathFor(it.key());
+        if (path.isEmpty())
+            continue;
+        const QFileInfo info(path);
+        if (!info.exists() || info.size() <= 0)
+            continue;
+        const qint64 stamp = info.lastModified().toMSecsSinceEpoch();
+        if (stamp == it.value())
+            continue; // 还是任务开始前那一张，没被重写
+        // 贴图 + 从待办里摘掉(erase 后 it 失效，所以用返回值续接)。
+        applyKanbanModelThumb(it.key());
+        it = m_kanbanThumbBaseline.erase(it);
+        if (m_kanbanThumbBaseline.isEmpty())
+            break;
+    }
+}
+
+void MainWindow::onKanbanThumbFinished(int exitCode)
+{
+    if (!m_kanbanThumbJob)
+        return;
+
+    if (m_kanbanThumbPoll)
+        m_kanbanThumbPoll->stop();
+
+    QProcess *job = m_kanbanThumbJob;
+    m_kanbanThumbJob = nullptr;
+    job->deleteLater();
+
+    // 收尾时再轮询一次：进程退出与上一次定时器触发之间落盘的那几张，别漏掉。
+    pollKanbanModelThumbs();
+
+    // 剩下的就是没出图的。这里不去解析子进程的标准输出 —— 完成与否只看磁盘，
+    // 因为文件一定写得出来，而 GUI 子系统进程的 stdout 不一定(见 report 的说明)。
+    const int failed = int(m_kanbanThumbBaseline.size());
+    const int ok = m_kanbanThumbTotal - failed;
+    m_kanbanThumbBaseline.clear();
+    m_kanbanThumbTotal = 0;
+
+    // 整面重贴一遍兜底：万一某个文件的修改时间恰好与基线相同(同一毫秒内被
+    // 重写)，轮询会漏掉它，而这里按「有没有图」重贴一定对。
+    reloadKanbanModelIcons();
+
+    if (failed > 0) {
+        setKanbanLog(QStringLiteral("预览图生成完成：成功 %1 张，%2 个模型没能出图，详见日志。")
+                         .arg(ok)
+                         .arg(failed),
+                     true);
+    } else if (exitCode < 0) {
+        setKanbanLog(QStringLiteral("预览图生成进程没能启动，详见 .cache/logs。"), true);
+    } else if (exitCode != 0) {
+        setKanbanLog(QStringLiteral("预览图生成进程异常退出(码 %1)，详见 .cache/logs。")
+                         .arg(exitCode),
+                     true);
+    } else {
+        setKanbanLog(QStringLiteral("预览图已就绪(本次生成 %1 张)。").arg(ok), false);
+    }
 }
 
 // 看板娘页所有可见状态的唯一出口：按钮可用性 + 状态行 + 控件回填。
@@ -571,14 +892,36 @@ void MainWindow::updateKanbanControls()
     m_kanbanStatus->setText(status);
 
     // 模型明细：把校验结果如实摊开，比「能不能用」四个字有用得多。
+    //
+    // 顺带把网格的选中态同步过来。放在这里回填(而不是只在点击时设)，是为了让
+    // 「控制器里的当前模型」与「网格上高亮的那一格」不可能长期不一致 ——
+    // 托盘菜单、右键菜单、自动拉起都会换模型，它们都不经过网格。
     const QVector<kanban::ModelInfo> models = m_kanban->validModelList();
     QString info;
+    int selectedRow = -1;
     if (models.isEmpty()) {
         info = QStringLiteral("可用模型 0 个。");
     } else {
-        int index = m_kanbanModelCombo ? m_kanbanModelCombo->currentIndex() : -1;
-        if (index < 0 || index >= models.size())
-            index = 0;
+        const bool wasSyncing = m_kanbanSyncing;
+        m_kanbanSyncing = true;
+        if (m_kanbanModelGrid) {
+            const QString currentPath = m_kanban->modelPath();
+            for (int i = 0; i < m_kanbanModelGrid->count(); ++i) {
+                const QListWidgetItem *item = m_kanbanModelGrid->item(i);
+                if (item && item->data(Qt::UserRole).toString() == currentPath) {
+                    selectedRow = i;
+                    break;
+                }
+            }
+            // 当前模型不在列表里(被删掉/被换掉)时高亮第一个，与改版前下拉框的
+            // 兜底行为一致 —— 空着不高亮会让用户以为「一个模型都没有」。
+            if (selectedRow < 0)
+                selectedRow = 0;
+            m_kanbanModelGrid->setCurrentRow(selectedRow);
+        }
+        m_kanbanSyncing = wasSyncing;
+
+        const int index = (selectedRow >= 0 && selectedRow < models.size()) ? selectedRow : 0;
         const kanban::ModelInfo &sel = models.at(index);
         info = QStringLiteral("可用模型 %1 个 · 当前：%2 · 贴图 %3 · 动作组 %4 · 表情 %5")
                    .arg(models.size())
@@ -768,8 +1111,12 @@ void MainWindow::switchPage(int row)
         selectHeaderTab(m_stack->currentIndex());
     else if (row == 1)
         selectWallTab(m_wallStack->currentIndex());
-    else if (row == 2)
+    else if (row == 2) {
         updateKanbanControls();
+        // 预览图**按需生成**：切到这一页才去补缺的图，而不是程序一启动就把
+        // 十几个模型全渲染一遍。缓存齐全时这一句什么都不做(见 ensureKanbanModelThumbs)。
+        ensureKanbanModelThumbs();
+    }
 }
 
 void MainWindow::selectHeaderTab(int index)

@@ -5,6 +5,7 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#include <QHash>
 #include <QLabel>
 #include <QMainWindow>
 #include <QMutex>
@@ -149,11 +150,23 @@ private:
     QWidget *buildKanbanParamCard(QWidget *parent);
     // 控制器 + 托盘 + 退出步骤的装配(在 UI 建好之后调用，顺序有讲究)。
     void setupKanbanAndTray();
-    void refreshKanbanModels();          // 重扫模型目录并回填下拉框
+    void refreshKanbanModels();          // 重扫模型目录并重建模型网格
     void updateKanbanControls();         // 按钮可用性/状态文本(单一出口，别处不直改)
     void setKanbanLog(const QString &text, bool isError);
     void showFromTray();                 // 托盘「显示窗口」/双击图标
     void onTrayQuitRequested();
+
+    // —— 模型静态预览图 ——
+    //
+    // 取图逻辑：先按模型文件夹名到 .cache/model-thumbs 找同名 PNG，找不到才生成。
+    // 生成由**独立进程**(本程序自己的 --render-model-thumbs 模式)完成，原因见
+    // src/kanban/ModelThumbJob.h。这里只负责「发现缺图 → 起进程 → 盯缓存目录
+    // → 贴图标」。进度信号是**文件落盘**，不是子进程的标准输出。
+    void ensureKanbanModelThumbs(bool force = false);
+    void reloadKanbanModelIcons();       // 按当前缓存重贴全部格子图标
+    void applyKanbanModelThumb(const QString &modelId); // 单个模型出图后即时贴图
+    void pollKanbanModelThumbs();        // 任务期间轮询：已落盘的先贴上去
+    void onKanbanThumbFinished(int exitCode);
 
     // data
     struct PresetImage { QString name; QString res; bool isFigure; };
@@ -297,8 +310,24 @@ private:
     QPushButton *m_kanbanExprBtn = nullptr;
     QLabel *m_kanbanStatus = nullptr;
     QLabel *m_kanbanLog = nullptr;
-    QComboBox *m_kanbanModelCombo = nullptr;
+    QListWidget *m_kanbanModelGrid = nullptr;
     QLabel *m_kanbanModelInfo = nullptr;
+    // 生成预览图的子进程。**非空即表示正在生成** —— 拿它当唯一的重入闸门，
+    // 免得再维护一个布尔量，两个状态迟早打架。
+    QProcess *m_kanbanThumbJob = nullptr;
+    // 任务期间轮询缓存目录的定时器：某个模型的图一落盘就贴到对应格子上。
+    //
+    // 为什么用「查文件」而不是「读子进程的 stdout」：本程序是 GUI 子系统的
+    // 可执行文件，实测它的 stdout 在 GL 上下文建立之后就写不出去了(见
+    // ModelThumbJob.cpp 里 report() 的说明)。而**文件一定写得出来** ——
+    // 图片本身就是这么落盘的。于是「缓存目录里出现了这张图」成了唯一可靠的
+    // 完成信号，也正好就是用户描述的那条取图逻辑。
+    QTimer *m_kanbanThumbPoll = nullptr;
+    // 本次任务的基线：模型 id → 任务开始前该缓存文件的修改时间(0 = 当时没有)。
+    // 用修改时间而不是「文件在不在」判定完成，是为了让 --force(强制重建，
+    // 文件本来就在)也能被识别出来。这个哈希同时充当「还没出图的待办清单」。
+    QHash<QString, qint64> m_kanbanThumbBaseline;
+    int m_kanbanThumbTotal = 0; // 本次任务一共要出几张(收尾算成绩用)
     QSlider *m_kanbanScale = nullptr;
     QSlider *m_kanbanOpacity = nullptr;
     QSlider *m_kanbanFps = nullptr;

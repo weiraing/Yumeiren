@@ -16,6 +16,7 @@ const QStringList &subDirNames()
 {
     static const QStringList dirs = {
         QStringLiteral("thumbnails"),
+        QStringLiteral("model-thumbs"),
         QStringLiteral("media"),
         QStringLiteral("bg_random"),
         QStringLiteral("logs"),
@@ -76,6 +77,11 @@ QString CachePaths::root()
 QString CachePaths::thumbnails()
 {
     return QDir(root()).filePath(QStringLiteral("thumbnails"));
+}
+
+QString CachePaths::modelThumbs()
+{
+    return QDir(root()).filePath(QStringLiteral("model-thumbs"));
 }
 
 QString CachePaths::media()
