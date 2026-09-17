@@ -26,7 +26,13 @@ set(YUMEIREN_GLEW_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/glew"
     CACHE PATH "GLEW 源码根目录(需含 include/GL/glew.h 与 src/glew.c)")
 
 function(yumeiren_live2d_dependencies out_sources out_libraries out_dlls)
-    set(${out_sources} src/kanban/KanbanOpenGLView.cpp src/kanban/Live2DRendererCubism.cpp
+    set(${out_sources}
+        src/kanban/KanbanOpenGLView.cpp
+        src/kanban/Live2DRendererCubism.cpp
+        src/kanban/CubismRuntime.cpp
+        src/kanban/CubismModel.cpp
+        src/kanban/CubismModelGl.cpp
+        src/kanban/CubismModelInteraction.cpp
         PARENT_SCOPE)
 
     if(NOT EXISTS "${YUMEIREN_CUBISM_SDK}/Framework/src/CubismFramework.cpp")

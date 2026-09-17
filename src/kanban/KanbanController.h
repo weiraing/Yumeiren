@@ -1,13 +1,5 @@
-// 看板娘控制器：状态机 + 统一时钟 + 渲染器 + 模型表 + 窗口的唯一组装者。
-//
-// 所有权(任务书 §4.1)：控制器拥有渲染器与窗口，窗口只「引用」渲染器；
-// 换后端 = 换 renderer 指针 + 重新 attach，窗口与配置都不动。
-//
-// 三条设计约束：
-//   · 看板娘失败绝不能拖垮主程序：start() 返回 bool，Live2D 不可用自动降级到
-//     内置占位动画，只有两者都起不来才进 Error；
-//   · 状态判定只在状态机一处：控制器不存 isStarted/isPausing 布尔组合；
-//   · 一律不自己 new QTimer 做动画：动画推进唯一来源是 KanbanAnimationClock。
+// 看板娘控制器：拥有窗口与渲染器，窗口只借用渲染器。
+// 运行状态由状态机管理，动画仅由统一时钟推进；Live2D 失败时降级为占位后端。
 #ifndef KANBANCONTROLLER_H
 #define KANBANCONTROLLER_H
 
@@ -45,11 +37,9 @@ public:
     bool live2dAvailable() const;
     QString currentModelName() const { return m_currentModelName; }
     QStringList modelNames() const;
-    // 当前渲染器的表情数(0 = 没有表情)。界面据此决定「切换表情」入口是否可用；
-    // 问的是渲染器而不是模型表，因为真正能不能切由后端说了算。
+    // 返回后端实际支持的表情数，界面据此启用入口。
     int expressionCount() const;
-    // 界面下拉框用：有效模型的完整信息(名称/路径/贴图与动作计数)，顺序与
-    // modelNames() 一致。只给名字不够 —— 用户要能看出哪个模型是「空壳」。
+    // 有效模型的完整信息，顺序与 modelNames() 一致。
     QVector<ModelInfo> validModelList() const;
     int measuredFps() const;
     QString lastError() const { return m_lastError; }
@@ -81,15 +71,9 @@ public:
     bool mouseThrough() const { return m_mouseThrough; }
     void setInteractionEnabled(bool enabled);
     bool interactionEnabled() const { return m_interactionEnabled; }
-    // 「记住上次状态」：进程启动时要不要自动拉起看板娘。
-    // 判据是 kanban/enabled —— publishState() 实时维护它、stop()/enterError() 清它、
-    // 而 shutdownForExit() 不碰它，所以它恰好等于「上次退出时在不在跑」。
-    // 首次安装没有这个键 → 默认 false → 不启动。
-    // (2026-09-17 之前是独立的 kanban/autoStart 勾选框，已删。)
+    // 读取上次运行状态：停止或错误时清除，正常退出时保留，首次安装为 false。
     bool wasRunningLastTime() const;
-    // 视线追踪强度：0=无 1=弱 2=中 3=强。头/眼/身体跟着鼠标转。
-    // 开启时控制器在每帧末尾读一次全局光标，换算成窗口坐标喂给渲染器
-    // (见 onFrameTick 里的说明)。
+    // 视线强度：0=无、1=弱、2=中、3=强；开启时每帧采样全局光标。
     void setGazeStrength(int strength);
     int gazeStrength() const { return m_gazeStrength; }
     // 「有没有开」= 档位 > 0。做成一处判据，免得各调用点自己写 `!= 0`。
@@ -99,11 +83,10 @@ public:
     int refreshModels(); // 重新扫描模型目录，返回可用模型数
 
     void loadSettings(); // 从配置读回全部看板娘设置
-    // 主窗口显示/隐藏**不再**联动看板娘（2026-09-17 按用户要求撤掉「隐藏时暂停」）：
-    // 主界面收进托盘时看板娘还露在桌面上，冻住它只会看起来像坏了。
-    void shutdownForExit();                    // 退出收口：不留 GL 资源与定时器
+    void shutdownForExit(); // 先释放 GL 资源再销毁窗口，保留自动恢复设置
 
 signals:
+    void measuredFpsChanged(); // 时钟统计更新，仅刷新状态文本
     void runningChanged(bool running);
     void pausedChanged(bool paused);
     void stateChanged(const QString &stateText);

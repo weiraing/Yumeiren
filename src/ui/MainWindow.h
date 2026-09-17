@@ -152,6 +152,7 @@ private:
     void setupKanbanAndTray();
     void refreshKanbanModels();          // 重扫模型目录并重建模型网格
     void updateKanbanControls();         // 按钮可用性/状态文本(单一出口，别处不直改)
+    void updateKanbanStatus();           // 低频统计只更新状态文本
     void setKanbanLog(const QString &text, bool isError);
     void showFromTray();                 // 托盘「显示窗口」/双击图标
     void onTrayQuitRequested();

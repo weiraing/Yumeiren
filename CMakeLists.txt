@@ -95,6 +95,8 @@ set(YUMEIREN_SOURCES
     # kanban/ module
     src/kanban/KanbanAnimationClock.cpp
     src/kanban/KanbanController.cpp
+    src/kanban/KanbanControllerInteraction.cpp
+    src/kanban/KanbanControllerSettings.cpp
     src/kanban/KanbanModelManager.cpp
     src/kanban/KanbanSoftwareView.cpp
     src/kanban/KanbanStateMachine.cpp
@@ -191,6 +193,10 @@ qt_add_resources(YumeirenTest app_res
     BASE resources
     FILES ${APP_RESOURCES}
 )
+
+# 可选的渲染生命周期回归。
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/RenderTests.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ControllerTests.cmake")
 
 # QVideoSink A/B 实验探针(第二阶段内存归因；非产品组件，可整体删除)。
 # 探针源码不在仓库里时跳过该目标，产品目标 Yumeiren / YumeirenTest 照常构建。

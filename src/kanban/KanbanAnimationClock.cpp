@@ -16,7 +16,6 @@ KanbanAnimationClock::KanbanAnimationClock(QObject *parent) : QObject(parent)
     // 动画只要求「每秒约 30 次」，不要求精确到毫秒。
     m_timer->setTimerType(Qt::CoarseTimer);
     connect(m_timer, &QTimer::timeout, this, &KanbanAnimationClock::onTimeout);
-    m_clock = new QElapsedTimer();
 }
 
 KanbanAnimationClock::~KanbanAnimationClock()
@@ -44,10 +43,10 @@ void KanbanAnimationClock::start()
     if (m_running)
         return; // 重复 start 不得造出第二个 tick 源
     m_running = true;
-    m_clock->restart();
+    m_clock.restart();
     m_lastMs = -1;
     m_frameAccum = 0;
-    m_fpsWindowStart = m_clock->elapsed();
+    m_fpsWindowStart = m_clock.elapsed();
     applyInterval();
     m_timer->start();
 }
@@ -59,11 +58,12 @@ void KanbanAnimationClock::stop()
     m_running = false;
     m_timer->stop();
     m_measuredFps = 0.0;
+    emit measuredFpsChanged();
 }
 
 void KanbanAnimationClock::onTimeout()
 {
-    const qint64 now = m_clock->elapsed();
+    const qint64 now = m_clock.elapsed();
     float delta = kMaxDeltaSeconds;
     if (m_lastMs >= 0)
         delta = qMin(float(now - m_lastMs) / 1000.0f, kMaxDeltaSeconds);
@@ -74,6 +74,7 @@ void KanbanAnimationClock::onTimeout()
         m_measuredFps = double(m_frameAccum) * 1000.0 / double(now - m_fpsWindowStart);
         m_frameAccum = 0;
         m_fpsWindowStart = now;
+        emit measuredFpsChanged();
     }
     emit tick(delta);
 }

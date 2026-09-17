@@ -540,6 +540,8 @@ void MainWindow::setupKanbanAndTray()
     m_kanban = std::make_unique<kanban::KanbanController>(this);
     kanban::KanbanController &kan = *m_kanban;
 
+    connect(&kan, &kanban::KanbanController::measuredFpsChanged,
+            this, &MainWindow::updateKanbanStatus);
     connect(&kan, &kanban::KanbanController::runningChanged, this,
             [this](bool running) {
                 if (running)
@@ -871,8 +873,26 @@ void MainWindow::onKanbanThumbFinished(int exitCode)
     }
 }
 
-// 看板娘页所有可见状态的唯一出口：按钮可用性 + 状态行 + 控件回填。
-// 回填放在同一个函数里，是为了让「控制器里的值」和「滑块上的值」不可能长期不一致。
+void MainWindow::updateKanbanStatus()
+{
+    if (!m_kanban || !m_kanbanStatus)
+        return;
+
+    QString status = QStringLiteral("状态：%1").arg(m_kanban->stateText());
+    if (m_kanban->isRunning())
+        status += QStringLiteral(" · 后端 %1 · 实测 %2 fps")
+                      .arg(m_kanban->backendText())
+                      .arg(m_kanban->measuredFps());
+    else
+        status += QStringLiteral(" · 后端 %1").arg(m_kanban->backendText().isEmpty()
+                                                       ? QStringLiteral("未启动")
+                                                       : m_kanban->backendText());
+    if (!m_kanban->currentModelName().isEmpty())
+        status += QStringLiteral(" · 模型 %1").arg(m_kanban->currentModelName());
+    m_kanbanStatus->setText(status);
+}
+
+// 同步按钮、模型选中项与设置控件；帧率通知不触发整页回填。
 void MainWindow::updateKanbanControls()
 {
     if (!m_kanban || !m_kanbanStartBtn)
@@ -924,18 +944,7 @@ void MainWindow::updateKanbanControls()
                                           .arg(exprCount)
                                     : QStringLiteral("当前模型没有表情文件"));
 
-    QString status = QStringLiteral("状态：%1").arg(m_kanban->stateText());
-    if (running)
-        status += QStringLiteral(" · 后端 %1 · 实测 %2 fps")
-                      .arg(m_kanban->backendText())
-                      .arg(m_kanban->measuredFps());
-    else
-        status += QStringLiteral(" · 后端 %1").arg(m_kanban->backendText().isEmpty()
-                                                       ? QStringLiteral("未启动")
-                                                       : m_kanban->backendText());
-    if (!m_kanban->currentModelName().isEmpty())
-        status += QStringLiteral(" · 模型 %1").arg(m_kanban->currentModelName());
-    m_kanbanStatus->setText(status);
+    updateKanbanStatus();
 
     // 模型明细：把校验结果如实摊开，比「能不能用」四个字有用得多。
     //

@@ -11,20 +11,12 @@
 #include "kanban/Live2DRenderer.h"
 #include "kanban/PlaceholderRenderer.h"
 
-#include <QCursor>
-#include <QFileInfo>
-#include <QScreen>
 #include <QTimer>
 
 namespace kanban {
 
 namespace {
 constexpr const char *kModule = "Kanban";
-constexpr int kMinEdgePx = 120;   // 窗口边长下限(与 KanbanWindow 一致)
-constexpr int kMaxEdgePx = 2400;  // 上限：防止滚轮搓出超大 surface
-constexpr int kBaseWidthPx = 320; // scale=100% 时的窗口宽
-constexpr int kBaseHeightPx = 480;
-constexpr int kScaleStepPercent = 5; // 滚轮一格 = 5%
 // 等 GL 上下文的上限。超时说明这台机器/这次会话根本拿不到 GL 宿主，
 // 继续等下去就是状态机卡在 Starting —— 用户看到的正是「点了没反应」。
 constexpr int kGlReadyTimeoutMs = 5000;
@@ -35,6 +27,8 @@ KanbanController::KanbanController(QObject *parent)
 {
     m_clock = new KanbanAnimationClock(this);
     connect(m_clock, &KanbanAnimationClock::tick, this, &KanbanController::onFrameTick);
+    connect(m_clock, &KanbanAnimationClock::measuredFpsChanged,
+            this, &KanbanController::measuredFpsChanged);
     loadSettings();
 }
 
@@ -82,62 +76,6 @@ QVector<ModelInfo> KanbanController::validModelList() const
 int KanbanController::measuredFps() const
 {
     return int(m_clock->measuredFps() + 0.5);
-}
-
-// —— 设置读写 ——
-
-void KanbanController::loadSettings()
-{
-    AppConfig &cfg = AppConfig::instance();
-    m_scalePercent = cfg.value(QString::fromLatin1(ConfigKeys::Kanban::Scale), 100).toInt();
-    m_opacityPercent = cfg.value(QString::fromLatin1(ConfigKeys::Kanban::Opacity), 100).toInt();
-    m_targetFps = cfg.value(QString::fromLatin1(ConfigKeys::Kanban::TargetFps), 30).toInt();
-    m_alwaysOnTop = cfg.value(QString::fromLatin1(ConfigKeys::Kanban::AlwaysOnTop), true).toBool();
-    m_mouseThrough = cfg.value(QString::fromLatin1(ConfigKeys::Kanban::MouseThrough), false).toBool();
-    m_interactionEnabled = cfg.value(QString::fromLatin1(ConfigKeys::Kanban::AllowInteraction), true).toBool();
-
-    // —— 视线档位的读取与旧配置迁移 ——
-    //
-    // 这个键经历过一次语义升级：老版本是布尔(kanban/gazeTracking)，现在是四档
-    // 整数(kanban/gazeStrength)。老用户的 .ini 里只有旧键，直接读新键会拿到
-    // 默认值「中」，于是「我明明关过视线追踪，升级后又自己开了」。
-    //
-    // 迁移只在**新键确实不存在**时按旧键折算：新键存在就以它为准 —— 否则用户
-    // 在新版里改过档位、而旧键还留着 true，每次启动都会被旧键拖回去。
-    // 读到旧键后顺手把新键写下去(旧键留着不管，无害且能回滚)。
-    const QString strengthKey = QString::fromLatin1(ConfigKeys::Kanban::GazeStrength);
-    if (cfg.contains(strengthKey)) {
-        m_gazeStrength = KanbanRenderer::clampGazeStrength(cfg.value(strengthKey).toInt());
-    } else {
-        const bool legacyOn =
-            cfg.value(QString::fromLatin1(ConfigKeys::Kanban::GazeTrackingLegacy), true).toBool();
-        m_gazeStrength = legacyOn ? KanbanRenderer::GazeMedium : KanbanRenderer::GazeOff;
-        cfg.setValue(strengthKey, m_gazeStrength);
-        videodiag::log(videodiag::Level::Info,
-                       QStringLiteral("[Kanban] 视线追踪配置迁移: 旧布尔=%1 → 档位=%2")
-                           .arg(legacyOn ? QStringLiteral("开") : QStringLiteral("关"))
-                           .arg(KanbanRenderer::gazeStrengthName(m_gazeStrength)),
-                       QLatin1String("Kanban"));
-    }
-
-    m_modelPath = cfg.value(QString::fromLatin1(ConfigKeys::Kanban::ModelPath)).toString();
-
-    m_clock->setTargetFps(m_targetFps);
-    emit settingsChanged();
-}
-
-// 「记住上次状态」。读的是 `kanban/enabled`，不是另立一个开关：
-//   publishState() 每次状态变化都把它写成 `running`；
-//   stop()（用户点「取消」）与 enterError() 明确写 false；
-//   shutdownForExit()（用户退出程序）**不碰它** —— 这一条是关键，它让这个键
-//   在进程结束时保留「退出那一刻在不在跑」，下次启动照它决定。
-// 首次安装没有这个键 → false → 不启动。
-//
-// 老写法读 `kanban/autoStart`，那是个只能从设置页勾选框改的独立键，而退出路径
-// 根本不写它 —— 于是「我明明关了它，下次启动又自己冒出来」。勾选框已删。
-bool KanbanController::wasRunningLastTime() const
-{
-    return AppConfig::instance().value(QString::fromLatin1(ConfigKeys::Kanban::Enabled), false).toBool();
 }
 
 int KanbanController::refreshModels()
@@ -544,67 +482,6 @@ void KanbanController::destroyWindow()
     m_window = nullptr;
 }
 
-void KanbanController::playNext()
-{
-    if (!m_machine.isRunning() || m_machine.isPaused() || !m_renderer) {
-        return;
-    }
-    if (m_renderer->playNextMotion()) {
-        // 已经在 Clicked 里就别再转移一次：状态机把 from == to 判为非法，
-        // 会记一条 WARNING。连点两次「播放下一个动作」是正常操作，
-        // 不该在日志里留下「拒绝非法状态转移 互动 -> 互动」这种假警报。
-        if (!m_machine.is(State::Clicked)) {
-            m_machine.transition(State::Clicked, "playNextMotion");
-        }
-        return;
-    }
-    // 没有可播动作就到此为止。
-    //
-    // 这里原来还有一层「换下一个可用模型」的兜底(§7.4)，已去掉 —— 它超出了
-    // 入口的名字：用户点的是「播放下一个动作」，结果模型被换走了，而且换掉的
-    // 正是他自己挑的那个。实测 13 个模型里有 8 个可播动作不足 2 个，所以这
-    // 不是小概率的边角情况，而是多数模型上的常态。想换模型请走「切换模型」
-    // 那个独立入口(KanbanWindow::nextModelRequested)。
-    //
-    // 走得到这里只可能是快捷键或托盘触发：界面上的入口本来就该是灰的
-    // (见 canPlayNextMotion())。
-    m_machine.transition(State::Idle, "playNextNoop");
-}
-
-int KanbanController::playableMotionCount() const
-{
-    // 问渲染器而不是模型表：能播几段最终由后端说了算(占位后端有写死的三段)。
-    return m_renderer ? m_renderer->playableMotionCount() : 0;
-}
-
-bool KanbanController::canPlayNextMotion() const
-{
-    return m_renderer ? m_renderer->canPlayNextMotion() : false;
-}
-
-int KanbanController::expressionCount() const
-{
-    // 问渲染器而不是模型表：能不能切表情，最终由后端说了算(占位后端也有几个)。
-    return m_renderer ? m_renderer->expressionCount() : 0;
-}
-
-void KanbanController::playNextExpression()
-{
-    if (!m_machine.isRunning() || m_machine.isPaused() || !m_renderer) {
-        return;
-    }
-    // 表情与动作是两个独立通道，所以这里既不换模型也不进 Error：
-    // 没有表情就静默返回(界面上的入口本来就该是灰的，走到这里说明是快捷键
-    // 或托盘触发)。动作那边原先有「没动作就换模型」的兜底，也已按同样理由去掉
-    // (见 playNext) —— 为了看表情或动作而把用户的模型换掉，是更糟的体验。
-    if (m_renderer->playNextExpression()) {
-        // 同 playNext：连点两次是正常操作，不该因为 from == to 记一条 WARNING。
-        if (!m_machine.is(State::Clicked)) {
-            m_machine.transition(State::Clicked, "playNextExpression");
-        }
-    }
-}
-
 void KanbanController::showWindow()
 {
     if (!m_window) {
@@ -658,244 +535,6 @@ void KanbanController::shutdownForExit()
     m_renderer.reset();
     m_machine.reset(State::Stopped);
     ApplicationRuntimeState::instance().setKanbanState(false, false);
-}
-
-// —— 每帧 ——
-
-void KanbanController::onFrameTick(float deltaSeconds)
-{
-    if (!m_renderer || !m_machine.isRunning() || m_machine.isPaused()) {
-        return;
-    }
-    if (m_window && !m_window->isVisible()) {
-        // 双保险：窗口被外部(最小化/隐藏)弄没时不推进动画。
-        m_clock->stop();
-        return;
-    }
-    m_renderer->update(deltaSeconds);
-    // 视线目标在 update() 之后、requestFrame() 之前喂。
-    //
-    // 顺序有讲究：update() 里 CubismTargetPoint 会把上一帧的目标推进一格，
-    // 这一格用的是「上一次喂进来的方向」；而本帧的画面(紧跟其后的 requestFrame)
-    // 应当反映「此刻光标在哪」。所以先让 TargetPoint 嚼完上一帧的值，再把新值
-    // 放进去，画出来的就是最新方向。反过来写也没大错，只是永远慢一帧 ——
-    // 鼠标快速划过时能看出来「眼珠追着背影跑」。
-    if (gazeTracking()) {
-        feedGazeTarget();
-    }
-    if (m_window) {
-        m_window->requestFrame();
-    }
-}
-
-// 把全局光标换算成「相对看板娘窗口」的坐标交给渲染器。
-//
-// 为什么必须用全局光标而不是窗口的 hover 事件：看板娘窗口只有两三百像素，
-// 用户看它的时候鼠标绝大多数时间在窗口外 —— 只靠 hover，模型就只在鼠标划过
-// 窗口内部的那零点几秒转一下头，正是「视线追踪」最没意义的一种实现。
-//
-// QCursor::pos() 每帧一次(默认 30fps)比装钩子/开定时器便宜得多，也不会漏事件；
-// 它读的是光标位置的缓存值，不产生消息、不打扰别的进程。
-void KanbanController::feedGazeTarget()
-{
-    if (!m_renderer || !m_window || !m_window->isVisible()) {
-        return;
-    }
-
-    // 用 mapFromGlobal 而不是减窗口左上角：DPI 缩放、多屏不同 DPR 时
-    // geometry() 与全局坐标不在同一个坐标系里，直接相减会在副屏上整体偏掉。
-    const QPoint local = m_window->mapFromGlobal(QCursor::pos());
-    m_renderer->pointerMove(QPointF(local));
-}
-
-// —— 设置落地 ——
-
-void KanbanController::handleClicked(const QPointF &localPos)
-{
-    if (!m_renderer) {
-        return;
-    }
-    m_renderer->pointerClick(localPos);
-    m_machine.transition(State::Clicked, "clicked");
-}
-
-void KanbanController::handleScaleStepped(int steps)
-{
-    setScalePercent(qBound(20, m_scalePercent + steps * kScaleStepPercent, 300));
-}
-
-void KanbanController::setScalePercent(int percent)
-{
-    m_scalePercent = qBound(20, percent, 300);
-    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::Scale), m_scalePercent);
-    applyScaleToWindow();
-    emit settingsChanged();
-}
-
-// 建窗时的首次落位。尺寸口径与 applyScaleToWindow() 完全一致(都从
-// m_scalePercent 推)，所以 GL 就绪后那次 applyScaleToWindow() 不会让窗口跳一下。
-void KanbanController::placeWindowFromConfig()
-{
-    if (!m_window) {
-        return;
-    }
-    AppConfig &cfg = AppConfig::instance();
-    // 位置只在用户真的挪过窗口后才有意义；没存过就交给窗口贴主屏右下角(-1)。
-    const int x = cfg.value(QString::fromLatin1(ConfigKeys::Kanban::PosX), -1).toInt();
-    const int y = cfg.value(QString::fromLatin1(ConfigKeys::Kanban::PosY), -1).toInt();
-
-    const double s = m_scalePercent / 100.0;
-    const int w = qBound(kMinEdgePx, int(kBaseWidthPx * s), kMaxEdgePx);
-    const int h = qBound(kMinEdgePx, int(kBaseHeightPx * s), kMaxEdgePx);
-
-    m_window->placeFromConfig(x, y, w, h);
-    videodiag::log(videodiag::Level::Debug,
-                   QStringLiteral("[Kanban] 窗口首次落位 %1x%2 @(%3,%4)")
-                       .arg(m_window->width())
-                       .arg(m_window->height())
-                       .arg(m_window->x())
-                       .arg(m_window->y()),
-                   QLatin1String(kModule));
-}
-
-void KanbanController::applyScaleToWindow()
-{
-    if (!m_window) {
-        return;
-    }
-    const double s = m_scalePercent / 100.0;
-    const int w = qBound(kMinEdgePx, int(kBaseWidthPx * s), kMaxEdgePx);
-    const int h = qBound(kMinEdgePx, int(kBaseHeightPx * s), kMaxEdgePx);
-
-    // 以「底边中心」为锚：角色站在桌面上，缩放时脚不该离地或陷进屏幕。
-    //
-    // 注意 bottomLeft() 的 y 已经是「顶边 + 高度」了，这里只能再补横向的半宽。
-    // 早先多写了一次 height，锚点落到顶边下方 2 倍身高处，于是每执行一次本函数
-    // 窗口就往下走一整个身高(479 → 958 → 1437 → 1916)，几次之后彻底掉出屏幕 ——
-    // 表现就是「看板娘在运行、窗口枚举得到、但桌面上什么都没有」。
-    const QRect before = m_window->geometry();
-    const QPoint bottomCenter(before.x() + before.width() / 2,
-                              before.y() + before.height());
-    m_window->resize(w, h);
-    m_window->move(bottomCenter.x() - w / 2, bottomCenter.y() - h);
-    saveGeometry();
-}
-
-void KanbanController::setOpacityPercent(int percent)
-{
-    m_opacityPercent = qBound(20, percent, 100);
-    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::Opacity), m_opacityPercent);
-    if (m_window) {
-        m_window->setOpacityPercent(m_opacityPercent);
-    }
-    emit settingsChanged();
-}
-
-void KanbanController::setTargetFps(int fps)
-{
-    m_targetFps = qBound(10, fps, 60);
-    m_clock->setTargetFps(m_targetFps);
-    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::TargetFps), m_targetFps);
-    emit settingsChanged();
-}
-
-void KanbanController::setAlwaysOnTop(bool onTop)
-{
-    m_alwaysOnTop = onTop;
-    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::AlwaysOnTop), onTop);
-    if (m_window) {
-        m_window->setAlwaysOnTop(onTop);
-    }
-}
-
-void KanbanController::setMouseThrough(bool through)
-{
-    m_mouseThrough = through;
-    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::MouseThrough), through);
-    if (m_window) {
-        m_window->setMouseThrough(through);
-    }
-}
-
-void KanbanController::setInteractionEnabled(bool enabled)
-{
-    m_interactionEnabled = enabled;
-    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::AllowInteraction), enabled);
-    if (m_window) {
-        m_window->setInteractionEnabled(enabled);
-    }
-}
-
-void KanbanController::setGazeStrength(int strength)
-{
-    const int next = KanbanRenderer::clampGazeStrength(strength);
-    if (m_gazeStrength == next) {
-        return;
-    }
-    m_gazeStrength = next;
-    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::GazeStrength), next);
-    // 顺手把旧键也写成一致的值：留着旧键 true 而新键是「无」，回退到旧版本时
-    // 会又变成开着。旧版本读的是布尔，这里相当于把语义也一起带过去。
-    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::GazeTrackingLegacy),
-                                   next != KanbanRenderer::GazeOff);
-
-    // 立刻作用到当前渲染器，而不是等下一帧的 feedGazeTarget：
-    // 切到「无」时渲染器要把角度平滑复位(否则模型僵在歪头姿势)，换档时要按
-    // 新半径马上重算(否则要等鼠标动一下才看得出强弱)。两条都需要「现在就
-    // 告诉渲染器」。
-    if (m_renderer) {
-        m_renderer->setGazeStrength(next);
-        if (next != KanbanRenderer::GazeOff) {
-            feedGazeTarget();
-        }
-    }
-    videodiag::log(videodiag::Level::Info,
-                   QStringLiteral("[Kanban] 视线追踪强度=%1(%2)")
-                       .arg(KanbanRenderer::gazeStrengthName(next))
-                       .arg(next),
-                   QLatin1String("Kanban"));
-}
-
-bool KanbanController::setModelPath(const QString &modelJsonPath)
-{
-    const ModelInfo *info = m_models.byJsonPath(modelJsonPath);
-    if (!info || !info->valid) {
-        m_lastError = QStringLiteral("模型不可用");
-        return false;
-    }
-    if (!m_renderer) {
-        m_modelPath = modelJsonPath;
-        AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::ModelPath), m_modelPath);
-        return true;
-    }
-    QString err;
-    if (!m_renderer->loadModel(modelJsonPath, &err)) {
-        m_lastError = err;
-        return false;
-    }
-    m_modelPath = modelJsonPath;
-    m_currentModelName = info->name;
-    m_lastError.clear();
-    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::ModelPath), m_modelPath);
-    if (m_window) {
-        m_window->setModelDisplayName(m_currentModelName);
-        m_window->requestFrame();
-    }
-    emit currentModelChanged(m_currentModelName);
-    return true;
-}
-
-void KanbanController::saveGeometry()
-{
-    if (!m_window) {
-        return;
-    }
-    const QRect g = m_window->geometry();
-    AppConfig &cfg = AppConfig::instance();
-    cfg.setValue(QString::fromLatin1(ConfigKeys::Kanban::Width), g.width());
-    cfg.setValue(QString::fromLatin1(ConfigKeys::Kanban::Height), g.height());
-    cfg.setValue(QString::fromLatin1(ConfigKeys::Kanban::PosX), g.x());
-    cfg.setValue(QString::fromLatin1(ConfigKeys::Kanban::PosY), g.y());
 }
 
 void KanbanController::publishState()

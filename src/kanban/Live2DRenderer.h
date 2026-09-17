@@ -1,36 +1,6 @@
-// Live2D Cubism Native SDK 渲染后端(任务书 §4.1 / §5 / §9)。
-//
-// 本类是 Cubism 与本项目之间唯一的边界。两条铁律：
-//   1. 头文件绝不 include 任何 Cubism 头 —— 全部 Cubism 对象藏在 Private 里，
-//      否则 SDK 头会传染到整个工程(任务书 §17 第 2 条)；
-//   2. GL 资源只在 QOpenGLWidget 的上下文里创建/释放(§4.3)：
-//      initialize() 与 shutdown() 必须发生在 initializeGL / shutdownGL 时刻，
-//      由 KanbanOpenGLView 的 contextReady 信号驱动，控制器不在别的线程碰它。
-//
-// 实现体分两个文件，构建时二选一(见 CMakeLists.txt)：
-//   Live2DRendererStub.cpp    —— SDK 未接入：诚实返回 false，日志写明原因；
-//   Live2DRendererCubism.cpp  —— SDK 接入：真正的 Cubism 装载与绘制。
-//
-// ── Cubism 5 R.5 接入步骤(已核对本地 SDK 头/工程) ─────────────────────────
-// 1. 构建配置：SDK 的 Samples/OpenGL/Demo/proj.win.cmake 用
-//      CSM_TARGET_WIN_GL + Framework 静态库 + Live2DCubismCore + glew_s；
-//      Framework/src/Rendering/OpenGL/CubismRenderer_OpenGLES2.hpp 在
-//      CSM_TARGET_WIN_GL 下 #include <GL/glew.h>，所以 GLEW 是硬依赖
-//      (本地已提供 glew-2.3.1 源码，直接编 source/glew.c，不需要 GLFW：
-//      GL 上下文由 Qt 提供，不用 glfwCreateWindow)。
-// 2. 框架启动：CubismFramework::Initialize(config) → StartUp()，config 里的
-//    Option 内存池与日志回调由 Cubism 自带 LAppAllocator 风格实现提供。
-// 3. 模型装载：QFile 读 .model3.json → CubismJson → CubismModelSettingJson →
-//    Core::Model::CreateModelAndInitialize(moc3 字节) → Framework Model::Initialize →
-//    CubismTextureManager::LoadTexture(逐张 PNG，走 PremultiplyAlpha) →
-//    Physics / Pose / Expressions / MotionGroups 分别建管理器并挂到 model 上。
-// 4. 每帧：update(dt) 推进 CubismMotionManager + CubismPhysics + Pose + Expression
-//    → Model::Update()；render() 里 CubismRenderer_OpenGLES2::DrawModel()，
-//    背景只清 alpha=0(透明窗口必须 SRC_ALPHA/ONE 混合，否则边缘发白)。
-// 5. 释放：unloadModel() 逐个 Delete 回来；shutdown() = unloadModel + Dispose。
-//
-// 内存口径(任务书 §13.2)：模型装载/卸载必须成对，重复 start/stop 10 次不得
-// 出现句柄、纹理或 VBO 累积。
+// Live2D 后端入口，不向控制器暴露 SDK 类型。
+// GL 资源在宿主上下文内释放；CubismRuntime 保持进程级框架存活。
+// 构建时选择 Cubism 或 Stub 实现，关闭后允许重新装载模型。
 #ifndef LIVE2DRENDERER_H
 #define LIVE2DRENDERER_H
 
@@ -76,13 +46,7 @@ public:
     // 在档位之间切换时立刻按新档位重算目标(见实现处的说明)。
     void setGazeStrength(int strength) override;
 
-    // 待机动作固定取第 0 个，而不是每次随机挑一个。**只给离屏出图进程用**：
-    // 生成模型预览图要求同一份素材每次出图都是同一张(不同待机动作的取景能差到
-    // 「大头特写」与「全身站立」)，而产品运行时恰恰要随机、不能每次同一段。
-    // 实现里只在 Live2D 后端生效；未接入 SDK 的构建它就是个没人读的开关。
-    //
-    // 刻意**不**放进 KanbanRenderer 抽象：界面从不需要它，加进接口只会逼
-    // 占位后端实现一个没有意义的空函数，违反「抽象只放上层真会调的能力」。
+    // 装载前设置；预览图固定使用首个待机动作，正常运行保持随机。
     void setDeterministicIdle(bool on) { m_deterministicIdle = on; }
 
     // 视线相关参数的实时快照(值 + 取值范围)，诊断探针用。
@@ -104,7 +68,7 @@ public:
     void shutdown() override;
 
 private:
-    struct Private; // Cubism 对象的唯一藏身处
+    struct Private; // 宿主状态与模型所有权
 
     bool m_ready = false;
     bool m_modelLoaded = false;

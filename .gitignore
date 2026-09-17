@@ -25,6 +25,12 @@ third_party/
 .workbuddy-ai/
 scripts
 tests
+!/tests/
+/tests/*
+!/tests/kanban/
+/tests/kanban/*
+!/tests/kanban/CubismLifecycleTest.cpp
+!/tests/kanban/KanbanControllerTest.cpp
 
 # 软件自身缓存(<程序目录>\.cache)
 .cache/
