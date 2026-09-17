@@ -39,6 +39,7 @@
 #include <QScrollArea>
 #include <QSlider>
 #include <QStackedWidget>
+#include <QStyledItemDelegate>
 #include <QTimer>
 #include <QUrl>
 
@@ -53,6 +54,47 @@ constexpr int kModelCellWidth = 121;
 constexpr int kModelCellHeight = 201;
 constexpr int kModelIconWidth = 105;
 constexpr int kModelIconHeight = 157;
+
+class ModelCardDelegate final : public QStyledItemDelegate
+{
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    void paint(QPainter *painter, const QStyleOptionViewItem &option,
+               const QModelIndex &index) const override
+    {
+        QStyleOptionViewItem opt(option);
+        initStyleOption(&opt, index);
+        const QIcon icon = opt.icon;
+        const QString name = opt.text;
+        opt.icon = QIcon();
+        opt.text.clear();
+        opt.features &= ~(QStyleOptionViewItem::HasDecoration | QStyleOptionViewItem::HasDisplay);
+        const QWidget *widget = opt.widget;
+        QStyle *style = widget ? widget->style() : QApplication::style();
+        painter->save();
+        painter->setFont(opt.font);
+        style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, widget);
+
+        // Fixed image and footer regions keep every name on the same baseline.
+        const QRect card = option.rect.adjusted(4, 4, -4, -4);
+        const int footerHeight = 28;
+        const int dividerY = card.bottom() - footerHeight;
+        const QRect imageRect(card.left() + 4, card.top() + 4,
+                              card.width() - 8, dividerY - card.top() - 8);
+        icon.paint(painter, imageRect, Qt::AlignCenter, QIcon::Normal, QIcon::Off);
+        painter->setPen(QColor(128, 128, 128, 65));
+        painter->drawLine(card.left(), dividerY, card.right(), dividerY);
+
+        // Let QSS supply the theme's text color, but draw only the footer label.
+        opt.rect = QRect(card.left() + 4, dividerY + 1, card.width() - 8, footerHeight - 1);
+        opt.text = opt.fontMetrics.elidedText(name, Qt::ElideRight, opt.rect.width());
+        opt.displayAlignment = Qt::AlignCenter;
+        style->drawItemText(painter, opt.rect, Qt::AlignCenter, opt.palette,
+                            opt.state & QStyle::State_Enabled, opt.text, QPalette::Text);
+        painter->restore();
+    }
+};
 
 // 还没出图的格子用什么占位。
 //
@@ -279,6 +321,8 @@ QWidget *MainWindow::buildKanbanModelCard(QWidget *parent)
     // 复用图库浏览那套 objectName：格子卡片(圆角/描边/悬停/选中)直接继承
     // 文件夹美化页「图片浏览」的样式，浅色深色两套主题都不必再写一遍 QSS。
     grid->setObjectName(QStringLiteral("GalleryList"));
+    grid->setProperty("modelCards", true);
+    grid->setItemDelegate(new ModelCardDelegate(grid));
     grid->setViewMode(QListView::IconMode);
     grid->setResizeMode(QListView::Adjust); // 视口变宽就自动多排一列
     grid->setMovement(QListView::Static);
@@ -316,10 +360,8 @@ QWidget *MainWindow::buildKanbanModelCard(QWidget *parent)
     lay->addWidget(m_kanbanModelInfo);
 
     auto *pathHint = new QLabel(
-        QStringLiteral("把 Cubism 模型整个文件夹放进 <程序目录>\\data\\models，"
-                       "每个模型一个子目录，内含 *.model3.json。\n"
-                       "格子里的预览图按需生成，缓存在 <程序目录>\\.cache\\model-thumbs\\"
-                       "，文件名就是模型文件夹名。"),
+        QStringLiteral("把 Cubism3/4 模型整个文件夹放进 <程序目录>\\data\\models，"
+                       "每个模型一个子目录，内含 *.model3.json。\n"),
         card);
     pathHint->setObjectName(QStringLiteral("HintLabel"));
     pathHint->setWordWrap(true);
@@ -610,7 +652,7 @@ void MainWindow::refreshKanbanModels()
     for (int i = 0; i < models.size(); ++i) {
         const kanban::ModelInfo &model = models.at(i);
         auto *item = new QListWidgetItem(m_kanbanModelGrid);
-        item->setText(model.name);
+        item->setText(model.id);
         // UserRole   = .model3.json 绝对路径：点击时直接拿它切模型
         // UserRole+1 = 模型文件夹名：预览图的文件名就是它
         // UserRole+2 = 该格子的图是不是真预览图(占位图时为 false)，用于 tooltip
@@ -765,21 +807,25 @@ void MainWindow::pollKanbanModelThumbs()
 {
     if (m_kanbanThumbBaseline.isEmpty())
         return;
-    for (auto it = m_kanbanThumbBaseline.begin(); it != m_kanbanThumbBaseline.end(); ++it) {
+    for (auto it = m_kanbanThumbBaseline.begin(); it != m_kanbanThumbBaseline.end();) {
         const QString path = kanban::ModelThumbCache::pathFor(it.key());
-        if (path.isEmpty())
+        if (path.isEmpty()) {
+            ++it;
             continue;
+        }
         const QFileInfo info(path);
-        if (!info.exists() || info.size() <= 0)
+        if (!info.exists() || info.size() <= 0) {
+            ++it;
             continue;
+        }
         const qint64 stamp = info.lastModified().toMSecsSinceEpoch();
-        if (stamp == it.value())
+        if (stamp == it.value()) {
+            ++it;
             continue; // 还是任务开始前那一张，没被重写
-        // 贴图 + 从待办里摘掉(erase 后 it 失效，所以用返回值续接)。
+        }
+        // erase 已返回下一项，不能再 ++it，否则会跳项，甚至递增 end() 导致崩溃。
         applyKanbanModelThumb(it.key());
         it = m_kanbanThumbBaseline.erase(it);
-        if (m_kanbanThumbBaseline.isEmpty())
-            break;
     }
 }
 

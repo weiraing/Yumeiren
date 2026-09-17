@@ -16,6 +16,7 @@
 #include <QGuiApplication>
 #include <QLabel>
 #include <QListWidget>
+#include <QPainter>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QScreen>
@@ -33,15 +34,46 @@ public:
     explicit GalleryDelegate(QObject *parent = nullptr)
         : QStyledItemDelegate(parent) {}
 
+    void paint(QPainter *painter, const QStyleOptionViewItem &option,
+               const QModelIndex &index) const override
+    {
+        QStyleOptionViewItem opt(option);
+        initStyleOption(&opt, index);
+        const QIcon icon = opt.icon;
+        const QString name = opt.text;
+        opt.icon = QIcon();
+        opt.text.clear();
+        opt.features &= ~(QStyleOptionViewItem::HasDecoration | QStyleOptionViewItem::HasDisplay);
+        const QWidget *widget = opt.widget;
+        QStyle *style = widget ? widget->style() : QApplication::style();
+        painter->save();
+        painter->setFont(opt.font);
+        style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, widget);
+
+        // Reserve the footer before fitting the image, including while its icon is loading.
+        const QRect card = option.rect.adjusted(4, 4, -4, -4);
+        const int footerHeight = qMax(28, opt.fontMetrics.height() + 8);
+        const int dividerY = card.bottom() - footerHeight;
+        const QRect imageRect(card.left() + 4, card.top() + 4,
+                              card.width() - 8, dividerY - card.top() - 8);
+        icon.paint(painter, imageRect, Qt::AlignCenter, QIcon::Normal, QIcon::Off);
+        painter->setPen(QColor(128, 128, 128, 65));
+        painter->drawLine(card.left(), dividerY, card.right(), dividerY);
+
+        const QRect textRect(card.left() + 4, dividerY + 1,
+                             card.width() - 8, footerHeight - 1);
+        const QString text = opt.fontMetrics.elidedText(name, Qt::ElideRight, textRect.width());
+        style->drawItemText(painter, textRect, Qt::AlignCenter, opt.palette,
+                            opt.state & QStyle::State_Enabled, text, QPalette::Text);
+        painter->restore();
+    }
+
 protected:
     void initStyleOption(QStyleOptionViewItem *option, const QModelIndex &index) const override
     {
         QStyledItemDelegate::initStyleOption(option, index);
         option->font.setPointSizeF(qMax(7.0, option->font.pointSizeF() - 1.0));
         option->fontMetrics = QFontMetrics(option->font);
-        const int textW = option->rect.width() - 12;
-        if (textW > 0)
-            option->text = option->fontMetrics.elidedText(option->text, Qt::ElideRight, textW);
     }
 };
 
@@ -100,6 +132,7 @@ QWidget *MainWindow::buildImagePage()
     m_galleryList = new QListWidget(leftCard);
     auto *gallery = m_galleryList;
     gallery->setObjectName(QStringLiteral("GalleryList"));
+    gallery->setProperty("imageCards", true);
     gallery->setViewMode(QListView::IconMode);
     gallery->setResizeMode(QListView::Adjust);
     gallery->setMovement(QListView::Static);

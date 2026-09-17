@@ -630,6 +630,11 @@ QListWidget#GalleryList {
     border: none;
 }
 
+QListWidget#GalleryList[modelCards="true"],
+QListWidget#GalleryList[imageCards="true"] {
+    color: #5f6470;
+}
+
 QListWidget#GalleryList::item {
     background: #f7f8fa;
     border: 1px solid #e7e8ec;
