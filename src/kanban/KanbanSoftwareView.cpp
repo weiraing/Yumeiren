@@ -1,10 +1,10 @@
 // 软件绘制视图实现。
 #include "kanban/KanbanSoftwareView.h"
 
+#include "kanban/KanbanRenderer.h"
+
 #include <QPainter>
 #include <QResizeEvent>
-
-#include "kanban/KanbanRenderer.h"
 
 namespace kanban {
 

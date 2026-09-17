@@ -1,5 +1,7 @@
 #include "AppConfig.h"
+
 #include "ConfigKeys.h"
+#include "core/Diagnostics.h"
 
 #include <QApplication>
 #include <QCoreApplication>
@@ -7,9 +9,6 @@
 #include <QFile>
 #include <QRegularExpression>
 #include <QTimer>
-
-#include "core/Diagnostics.h"
-
 #include <windows.h>
 
 namespace {

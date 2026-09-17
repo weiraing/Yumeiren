@@ -1,13 +1,13 @@
 #include "kanban/PlaceholderRenderer.h"
 
+#include "core/Diagnostics.h"
+
 #include <QDir>
 #include <QFileInfo>
 #include <QImage>
 #include <QPainter>
 #include <QPainterPath>
 #include <QtMath>
-
-#include "core/Diagnostics.h"
 
 namespace kanban {
 
@@ -29,6 +29,7 @@ const MotionDef kMotions[] = {
     {"bounce", 0.9f},
     {"wave", 1.2f},
 };
+constexpr int kMotionCount = int(sizeof(kMotions) / sizeof(kMotions[0]));
 
 // 表情表：占位渲染器没有 exp3.json，表情是写死的脸部形变组合。
 // 命名与 Live2D 侧的语义对齐，接入 SDK 后逐项换成真表情即可。
@@ -60,6 +61,7 @@ bool PlaceholderRenderer::initialize(QString *outError)
     m_blinkLeft = 0.0f;
     m_nextBlinkIn = 2.0f;
     m_motionActive = false;
+    m_motionIndex = 0;     // 与表情同理：重启后从头开始，不接着上次的序号
     m_expressionIndex = 0; // 重新初始化 = 回到默认脸，免得「重启后还是上次那副表情」
     videodiag::log(videodiag::Level::Info,
                    QStringLiteral("占位渲染器初始化完成(QPainter 直绘，无位图搬运)"),
@@ -178,14 +180,20 @@ bool PlaceholderRenderer::playNextMotion()
             l << QString::fromLatin1(m.name);
         return l;
     }();
-    static int cursor = 0;
     if (!m_ready || names.isEmpty())
         return false;
-    const int i = cursor % names.size();
-    ++cursor;
+    // 游标是成员而不是函数内 static：static 会被所有实例共用、且重新初始化后
+    // 不回零，同一个进程里重建渲染器会「接着上次的序号往下走」。
+    const int i = m_motionIndex % names.size();
+    m_motionIndex = (i + 1) % names.size();
     m_motion = {names.at(i), 0.0f, kMotions[i].duration};
     m_motionActive = true;
     return true;
+}
+
+int PlaceholderRenderer::playableMotionCount() const
+{
+    return kMotionCount;
 }
 
 int PlaceholderRenderer::expressionCount() const

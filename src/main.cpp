@@ -1,19 +1,18 @@
-#include <QApplication>
-#include <QDateTime>
-#include <QDir>
-#include <QFile>
-#include <QThread>
-#include <QMessageBox>
-#include <QStyleFactory>
-
 #include "app/AppInfo.h"
-#include "core/CachePaths.h"
 #include "config/AppConfig.h"
 #include "config/ConfigKeys.h"
-#include "ui/MainWindow.h"
-#include "platform/windows/desktopmount.h"
+#include "core/CachePaths.h"
 #include "core/Diagnostics.h"
+#include "platform/windows/desktopmount.h"
+#include "ui/MainWindow.h"
 #include "wallpaper/VideoWallpaper.h"
+
+#include <QApplication>
+#include <QDir>
+#include <QFile>
+#include <QMessageBox>
+#include <QStyleFactory>
+#include <QThread>
 
 int main(int argc, char *argv[])
 {

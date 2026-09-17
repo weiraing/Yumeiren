@@ -1,9 +1,15 @@
 #ifndef ENGINE_H
 #define ENGINE_H
 
-#include <QString>
 #include <QStringList>
 
+/**
+ * @brief DLL 注册状态查询结果。
+ *
+ * 由 Engine::queryStatus() 填充，用于界面展示和迁移判断。
+ * registered 表示 CLSID 是否存在于注册表；
+ * ours/foreign/dangling/stale 进一步细分注册表指向的 DLL 是否有效。
+ */
 struct ComponentStatus
 {
     bool registered = false;      // CLSID present in registry

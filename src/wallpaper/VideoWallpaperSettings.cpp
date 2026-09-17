@@ -1,13 +1,10 @@
+// VideoWallpaper 的设置读写与配置同步（播放模式、音量、屏幕模式等）。
 #include "VideoWallpaper.h"
 
-#include "app/AppInfo.h"
 #include "config/AppConfig.h"
-#include "config/ConfigKeys.h"
 #include "core/Diagnostics.h"
-#include "core/CachePaths.h"
 
 #include <QAudioOutput>
-#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QMediaMetaData>
@@ -16,13 +13,10 @@
 #include <QNetworkAccessManager>
 #include <QTimer>
 #include <QVideoWidget>
-#include <QWindow>
 
 #ifdef Q_OS_WIN
 #define NOMINMAX
 #include <windows.h>
-#include <dwmapi.h>
-#include <powrprof.h>
 #pragma comment(lib, "Dwmapi.lib")
 #pragma comment(lib, "Powrprof.lib")
 #endif

@@ -99,8 +99,24 @@ public:
     virtual void pointerMove(const QPointF &pos) = 0;
     // 点击(逻辑像素)：触发一次性动作。
     virtual void pointerClick(const QPointF &pos) = 0;
-    // 播放下一个动作；返回动作名表示确实播了，返回 false 表示没有可播动作。
+    // 播放下一个动作；返回 true 表示确实播了，返回 false 表示没有可播动作。
     virtual bool playNextMotion() = 0;
+
+    // playableMotionCount() 返回「可播动作」数 —— **不含 idle 组**。
+    //
+    // 为什么不算 idle：idle 是待机循环，本来就一直在播。把它算进来，
+    // 「下一个」就永远有得播，而用户点下去看到的是同一段待机 —— 那正是
+    // 这个入口要避免的「点了跟没点一样」。
+    // 按模型文件决定的后端必须给真值：实测 13 个模型里有 8 个的可播动作不足 2 个。
+    virtual int playableMotionCount() const { return 0; }
+
+    // 「播放下一个动作」这个入口该不该可点：至少要有两个可播动作。
+    //
+    // 只有一个时，「下一个」就是原地重播同一段 —— 用户点了看不见任何变化，
+    // 只会以为程序坏了，所以一个也算「不可播」。
+    // 刻意收成基类里的一个派生判据，而不是让各处自己写 playableMotionCount() >= 2：
+    // 右键菜单、设置页按钮、托盘三条入口各写一遍，迟早漏掉一处。
+    bool canPlayNextMotion() const { return playableMotionCount() >= 2; }
 
     // —— 表情 ——
     // 与动作分开是刻意的：Cubism 里表情走 ExpressionMotionManager、动作走

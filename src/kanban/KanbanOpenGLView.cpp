@@ -1,11 +1,11 @@
 // OpenGL 宿主视图实现。仅 YUMEIREN_WITH_LIVE2D=ON 时参与编译。
 #include "kanban/KanbanOpenGLView.h"
 
-#include <QResizeEvent>
-#include <QOpenGLContext>
-
-#include "kanban/KanbanRenderer.h"
 #include "core/Diagnostics.h"
+#include "kanban/KanbanRenderer.h"
+
+#include <QOpenGLContext>
+#include <QResizeEvent>
 
 namespace kanban {
 

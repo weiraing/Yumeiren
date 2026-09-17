@@ -1,20 +1,19 @@
 // 看板娘控制器实现。
 #include "kanban/KanbanController.h"
 
-#include <QFileInfo>
-#include <QGuiApplication>
-#include <QScreen>
-#include <QTimer>
-
 #include "app/ApplicationRuntimeState.h"
 #include "config/AppConfig.h"
 #include "config/ConfigKeys.h"
+#include "core/Diagnostics.h"
 #include "kanban/KanbanAnimationClock.h"
 #include "kanban/KanbanRenderer.h"
 #include "kanban/KanbanWindow.h"
 #include "kanban/Live2DRenderer.h"
 #include "kanban/PlaceholderRenderer.h"
-#include "core/Diagnostics.h"
+
+#include <QFileInfo>
+#include <QScreen>
+#include <QTimer>
 
 namespace kanban {
 
@@ -509,22 +508,36 @@ void KanbanController::playNext()
         return;
     }
     if (m_renderer->playNextMotion()) {
-        m_machine.transition(State::Clicked, "playNextMotion");
-        return;
-    }
-    // 当前模型没有可播动作 → 换下一个可用模型；只剩一个模型则回 Idle(§7.4)。
-    const ModelInfo *next = m_models.nextValidAfter(m_modelPath);
-    if (next && next->modelJsonPath != m_modelPath) {
-        QString err;
-        if (m_renderer->loadModel(next->modelJsonPath, &err)) {
-            m_currentModelName = next->name;
-            m_modelPath = next->modelJsonPath;
-            AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::ModelPath), m_modelPath);
-            emit currentModelChanged(m_currentModelName);
+        // 已经在 Clicked 里就别再转移一次：状态机把 from == to 判为非法，
+        // 会记一条 WARNING。连点两次「播放下一个动作」是正常操作，
+        // 不该在日志里留下「拒绝非法状态转移 互动 -> 互动」这种假警报。
+        if (!m_machine.is(State::Clicked)) {
+            m_machine.transition(State::Clicked, "playNextMotion");
         }
         return;
     }
+    // 没有可播动作就到此为止。
+    //
+    // 这里原来还有一层「换下一个可用模型」的兜底(§7.4)，已去掉 —— 它超出了
+    // 入口的名字：用户点的是「播放下一个动作」，结果模型被换走了，而且换掉的
+    // 正是他自己挑的那个。实测 13 个模型里有 8 个可播动作不足 2 个，所以这
+    // 不是小概率的边角情况，而是多数模型上的常态。想换模型请走「切换模型」
+    // 那个独立入口(KanbanWindow::nextModelRequested)。
+    //
+    // 走得到这里只可能是快捷键或托盘触发：界面上的入口本来就该是灰的
+    // (见 canPlayNextMotion())。
     m_machine.transition(State::Idle, "playNextNoop");
+}
+
+int KanbanController::playableMotionCount() const
+{
+    // 问渲染器而不是模型表：能播几段最终由后端说了算(占位后端有写死的三段)。
+    return m_renderer ? m_renderer->playableMotionCount() : 0;
+}
+
+bool KanbanController::canPlayNextMotion() const
+{
+    return m_renderer ? m_renderer->canPlayNextMotion() : false;
 }
 
 int KanbanController::expressionCount() const
@@ -540,10 +553,13 @@ void KanbanController::playNextExpression()
     }
     // 表情与动作是两个独立通道，所以这里既不换模型也不进 Error：
     // 没有表情就静默返回(界面上的入口本来就该是灰的，走到这里说明是快捷键
-    // 或托盘触发)。动作那边「没动作就换模型」是 §7.4 明确要求的兜底，
-    // 表情没有这条要求 —— 为了看表情而把用户的模型换掉，是更糟的体验。
+    // 或托盘触发)。动作那边原先有「没动作就换模型」的兜底，也已按同样理由去掉
+    // (见 playNext) —— 为了看表情或动作而把用户的模型换掉，是更糟的体验。
     if (m_renderer->playNextExpression()) {
-        m_machine.transition(State::Clicked, "playNextExpression");
+        // 同 playNext：连点两次是正常操作，不该因为 from == to 记一条 WARNING。
+        if (!m_machine.is(State::Clicked)) {
+            m_machine.transition(State::Clicked, "playNextExpression");
+        }
     }
 }
 

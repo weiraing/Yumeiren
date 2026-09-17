@@ -20,14 +20,9 @@
 // 且本文件在第一次进 GL 时调用一次 glewInit()，供框架其它文件读扩展开关。
 #include <GL/glew.h> // 必须第一个：框架的 Windows GL 头以 GLEW 的原型为准，且本文件不碰任何 Qt GL 头
 
-#include <malloc.h> // _aligned_malloc / _aligned_free
-
-#include <algorithm>
-#include <cstdlib>
-#include <cstring>
-#include <memory>
-#include <random>
-#include <vector>
+#include "kanban/Live2DRenderer.h"
+#include "kanban/KanbanRenderer.h"
+#include "core/Diagnostics.h"
 
 #include <QByteArray>
 #include <QCoreApplication>
@@ -36,13 +31,15 @@
 #include <QFileInfo>
 #include <QImage>
 #include <QStringList>
-#include <QVector>
 
+#include <algorithm>
+#include <cstdlib>
+#include <cstring>
+#include <malloc.h> // _aligned_malloc / _aligned_free
+#include <memory>
+#include <random>
 #include <string>
-
-#include "kanban/KanbanRenderer.h"
-#include "kanban/Live2DRenderer.h"
-#include "core/Diagnostics.h"
+#include <vector>
 
 #include "CubismDefaultParameterId.hpp"
 #include "CubismFramework.hpp"
@@ -74,7 +71,6 @@
 #include "Rendering/OpenGL/CubismRenderer_OpenGLES2.hpp"
 #include "Rendering/OpenGL/CubismShader_OpenGLES2.hpp"
 #include "Type/csmMap.hpp"
-#include "Utils/CubismString.hpp"
 
 using namespace Live2D::Cubism::Framework;
 // 渲染层在 R.5 里单独一层命名空间：renderer、离屏管理、遮罩目标都在里头。
@@ -447,10 +443,12 @@ public:
     void SetViewportSize(csmUint32 width, csmUint32 height) { SetRenderTargetSize(width, height); }
     QString textureName(int index) const;
 
-    // 装载完就能问的三件事，门面层写日志时用，不必碰私有成员。
+    // 装载完就能问的四件事，门面层写日志/界面用，不必碰私有成员。
     int textureCount() const { return _textureImages.size(); }
     int motionGroupCount() const { return _motionGroups.size(); }
     int expressionCount() const { return _expressionNames.size(); }
+    // 可播动作数(不含 idle 组)：就是预载成功、可以真的播出来的那些。
+    int PlayableMotionCount() const { return _playableMotions.size(); }
     // 当前生效的表情名(还没切过则为空)，日志用。
     QString currentExpressionName() const
     {
@@ -474,7 +472,10 @@ private:
     bool LoadSettingJson(const QString &jsonPath, QString *outError);
     void ReleaseCpu();
     bool DecodeTextures(QString *outError);
-    void PreloadMotionGroup(const QString &group);
+    // 预载一组的全部动作，返回**真正读进来的**组内序号。
+    // 返回值不能省成 void：调用方要靠它区分「文件里写了 N 段」和「真能播 N 段」，
+    // 后者才是「有没有下一个动作可播」的答案。
+    QVector<int> PreloadMotionGroup(const QString &group);
     void FitProjection(const QSize &pixelSize, CubismMatrix44 *out);
     int motionCount(int group) const;
     bool startGroupMotion(int group, int index, int priority);
@@ -496,12 +497,18 @@ private:
     QVector<QImage> _textureImages;   // CPU 侧解码结果，EnsureGl 才上传
     std::vector<GLuint> _textureIds;  // GPU 侧句柄，本对象负责释放
     QStringList _motionGroups;
+    // 可播动作表：预载成功的非 idle 动作，(组下标, 组内序号) 按 model3.json 的
+    // 声明顺序排好。PlayNextMotion 在这张表上顺序走一圈 —— 不是「按组随机」。
+    //
+    // 为什么记成一张扁平表而不是每次现算：只有预载成功的槽位才播得出来，
+    // 而「有没有可播动作」要用来决定界面置灰。现算会算出「文件里有 N 段」，
+    // 读盘失败的槽位也算进去，于是界面亮着、点下去却纹丝不动。
+    QVector<QPair<int, int>> _playableMotions;
+    int _motionCursor = 0;    // PlayNextMotion 在 _playableMotions 上的游标
     QStringList _expressionNames;
     QString _homeDir;
     bool _glLive = false;      // 渲染器与纹理确实活在某个上下文里
     int _idleGroup = -1;      // 名为 idle 的组，没有则退化为第 0 组
-    int _nextGroup = 0;       // PlayNextMotion 的游标
-    int _nextIndex = 0;
     int _nextExpression = 0;  // PlayNextExpression 的游标
     int _lastExpression = -1; // 当前生效的表情下标，用于避免「切了跟没切一样」
     csmBool _motionUpdated = false;
@@ -674,16 +681,32 @@ bool KanbanCubismModel::Setup(const QString &modelJsonPath, QString *outError)
 
     // 12) 运动全部预载：看板娘会频繁触发动作，边点边读盘会有明显卡顿
     const csmInt32 groupCount = _setting->GetMotionGroupCount();
+    QVector<QVector<int>> loadedPerGroup; // 与 _motionGroups 同序
     for (csmInt32 i = 0; i < groupCount; ++i) {
         const QString group = QString::fromUtf8(_setting->GetMotionGroupName(i));
         _motionGroups << group;
         if (group.compare(QStringLiteral("idle"), Qt::CaseInsensitive) == 0) {
             _idleGroup = _motionGroups.size() - 1;
         }
-        PreloadMotionGroup(group);
+        loadedPerGroup.append(PreloadMotionGroup(group));
     }
     if (_idleGroup < 0 && !_motionGroups.isEmpty()) {
         _idleGroup = 0;
+    }
+    // 可播动作表：把非 idle 组里预载成功的动作按声明顺序摊平。
+    //
+    // 摊平放在这里、而不是并进上面的循环：_idleGroup 的兜底(没有 idle 组就退化为
+    // 第 0 组)要到循环结束才知道，边预载边摊平会把第 0 组当成可播动作收进去。
+    //
+    // 必须跳过 idle 组 —— 它一直在播，算进来「下一个」就永远有得播，
+    // 而用户点下去看到的是同一段待机(见 KanbanRenderer::playableMotionCount)。
+    for (int g = 0; g < _motionGroups.size(); ++g) {
+        if (g == _idleGroup) {
+            continue;
+        }
+        for (const int index : loadedPerGroup.at(g)) {
+            _playableMotions.append(qMakePair(g, index));
+        }
     }
     _motionManager->StopAllMotions();
 
@@ -987,18 +1010,36 @@ bool KanbanCubismModel::startGroupMotion(int group, int index, int priority)
 
 bool KanbanCubismModel::PlayNextMotion()
 {
-    // 轮流走一遍非 idle 组：点一次换一个，不会原地重播同一段。
-    for (int attempt = 0; attempt < _motionGroups.size(); ++attempt) {
-        const int g = _nextGroup % _motionGroups.size();
-        _nextGroup = (g + 1) % _motionGroups.size();
-        if (g == _idleGroup) {
-            continue;
-        }
-        const int count = motionCount(g);
-        if (count > 0 && startGroupMotion(g, randomBelow(count), kPriorityNormal)) {
+    const int total = _playableMotions.size();
+    if (total == 0) {
+        return false;
+    }
+    // 在可播动作表上顺序走一圈，点一次换一段，不原地重播。
+    //
+    // 这里刻意不用「组间轮转 + 组内随机」的老做法：同一组被连着轮到时，
+    // 随机可能抽中刚播过的那一段，用户看到的是「点了没反应」。既然界面已经
+    // 保证「可播动作 ≥ 2 才可点」，就该让每次点击都真的换一段。
+    //
+    // 用 Force 优先级，不用 Normal：CubismMotionManager::ReserveMotion 除了比
+    // _reservePriority，还比 _currentPriority，而 _currentPriority 要等队列空了
+    // 才复位 —— 也就是说动作还在播时，同优先级的请求会被**直接拒绝**。
+    // 老代码用 Normal，于是「播放中再点一次」必然失败，而失败又会掉进
+    // 「没动作就换模型」的兜底：模型明明有动作，点快一点模型却被换走了。
+    // 显式点击是用户的明确意图，不该被静默丢弃(点击模型触发的命中反馈也用 Force)。
+    for (int attempt = 0; attempt < total; ++attempt) {
+        const int slot = _motionCursor;
+        const QPair<int, int> &motion = _playableMotions.at(slot);
+        _motionCursor = (slot + 1) % total;
+        if (startGroupMotion(motion.first, motion.second, kPriorityForce)) {
+            logDebug(QStringLiteral("播放下一个动作「%1_%2」(第 %3/%4 个)")
+                         .arg(_motionGroups.value(motion.first))
+                         .arg(motion.second)
+                         .arg(slot + 1)
+                         .arg(total));
             return true;
         }
     }
+    logDebug(QStringLiteral("播放下一个动作失败：%1 个可播动作全部被优先级挡下").arg(total));
     return false;
 }
 
@@ -1125,8 +1166,9 @@ bool KanbanCubismModel::DecodeTextures(QString *outError)
     return true;
 }
 
-void KanbanCubismModel::PreloadMotionGroup(const QString &group)
+QVector<int> KanbanCubismModel::PreloadMotionGroup(const QString &group)
 {
+    QVector<int> loaded; // 真读进来的组内序号
     const QByteArray groupUtf8 = group.toUtf8();
     const csmChar *groupName = groupUtf8.constData();
     const csmInt32 count = _setting->GetMotionCount(groupName);
@@ -1152,7 +1194,9 @@ void KanbanCubismModel::PreloadMotionGroup(const QString &group)
             _motionKeys << key;
         }
         _motions[name] = motion;
+        loaded << int(i);
     }
+    return loaded;
 }
 
 void KanbanCubismModel::ReleaseCpu()
@@ -1197,9 +1241,10 @@ void KanbanCubismModel::ReleaseCpu()
 
     _textureImages.clear();
     _motionGroups.clear();
+    _playableMotions.clear();
+    _motionCursor = 0;
     _idleGroup = -1;
-    _nextGroup = 0;
-    _nextIndex = 0;
+    _nextExpression = 0;
     _initialized = false;
 }
 
@@ -1314,10 +1359,11 @@ bool Live2DRenderer::loadModel(const QString &modelJsonPath, QString *outError)
     m_d->model = model;
     m_modelPath = modelJsonPath;
     m_modelLoaded = true;
-    logInfo(QStringLiteral("已装载 %1：纹理 %2 张 / 动作组 %3 个 / 表情 %4 个")
+    logInfo(QStringLiteral("已装载 %1：纹理 %2 张 / 动作组 %3 个(可播动作 %4 个) / 表情 %5 个")
                 .arg(QFileInfo(modelJsonPath).completeBaseName())
                 .arg(model->textureCount())
                 .arg(model->motionGroupCount())
+                .arg(model->PlayableMotionCount())
                 .arg(model->expressionCount()));
 
     // 控制器换模型时未必在 paintGL 里，此时没有上下文是常态；
@@ -1446,6 +1492,13 @@ void Live2DRenderer::pointerClick(const QPointF &pos)
 bool Live2DRenderer::playNextMotion()
 {
     return m_d->model && m_d->model->PlayNextMotion();
+}
+
+int Live2DRenderer::playableMotionCount() const
+{
+    // 模型没装载时答 0：界面据此把「播放下一个动作」置灰，
+    // 而不是让用户点了没反应。
+    return m_d->model ? m_d->model->PlayableMotionCount() : 0;
 }
 
 int Live2DRenderer::expressionCount() const

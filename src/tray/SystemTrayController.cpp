@@ -1,6 +1,14 @@
 #include "tray/SystemTrayController.h"
 
-#include <QAction>
+#include "app/AppInfo.h"
+#include "app/ApplicationRuntimeState.h"
+#include "app/ApplicationShutdown.h"
+#include "config/AppConfig.h"
+#include "config/ConfigKeys.h"
+#include "core/Diagnostics.h"
+#include "kanban/KanbanController.h"
+#include "wallpaper/VideoWallpaper.h"
+
 #include <QApplication>
 #include <QIcon>
 #include <QMenu>
@@ -10,17 +18,7 @@
 #include <QSystemTrayIcon>
 
 #include <functional>
-
 #include <utility>
-
-#include "app/ApplicationRuntimeState.h"
-#include "app/ApplicationShutdown.h"
-#include "app/AppInfo.h"
-#include "config/AppConfig.h"
-#include "config/ConfigKeys.h"
-#include "kanban/KanbanController.h"
-#include "core/Diagnostics.h"
-#include "wallpaper/VideoWallpaper.h"
 
 namespace {
 
@@ -105,6 +103,10 @@ bool SystemTrayController::initialize()
 void SystemTrayController::buildContextMenu()
 {
     m_contextMenu = new QMenu(nullptr);
+    // 菜单外框的收口不在这里做：外框改成直角后不再需要给窗口裁 region
+    // (为什么要放弃圆角见 resources/*.qss 里 QMenu 那段注释 —— region 遮罩是
+    // 1 位 alpha，圆角必然是硬台阶)。一二级菜单现在共用同一套 QSS 规则，
+    // 样式天然一致，不会再有「一级圆角、二级方角」。
     // 状态在展开瞬间现读，避免「菜单显示的是三秒前的状态」。
     connect(m_contextMenu, &QMenu::aboutToShow, this, &SystemTrayController::updateMenuState);
 
@@ -188,7 +190,9 @@ void SystemTrayController::updateMenuState()
     const bool kanbanRunning = m_kanban && m_kanban->isRunning();
     m_actKanbanStart->setEnabled(m_kanban && !kanbanRunning);
     m_actKanbanPause->setEnabled(kanbanRunning);
-    m_actKanbanNext->setEnabled(kanbanRunning);
+    // 「播放下一个」跟随渲染器的可播动作数置灰：菜单项点了没反应，
+    // 和灰掉一样让人怀疑程序坏了，但灰掉至少不骗人。
+    m_actKanbanNext->setEnabled(kanbanRunning && m_kanban->canPlayNextMotion());
     m_actKanbanStop->setEnabled(kanbanRunning);
     if (m_kanban)
         m_actKanbanPause->setText(m_kanban->isPaused() ? QStringLiteral("继续")
@@ -264,7 +268,19 @@ void SystemTrayController::showMainWindow()
 void SystemTrayController::onTrayActivated(QSystemTrayIcon::ActivationReason reason)
 {
     switch (reason) {
+    case QSystemTrayIcon::Trigger:
     case QSystemTrayIcon::DoubleClick:
+        // 左键单击与双击都显示窗口。Windows 上单击图标不会弹出关联菜单
+        // (那是右键的 Context)，所以这个手势是空的，正好给「打开主界面」用 ——
+        // 托盘图标最符合直觉的行为就是点一下把窗口叫出来。
+        //
+        // 「单击真的会走到 Trigger 吗」这点不显然，值得记一笔：Qt 的 Windows 后端
+        // 收到的不是 WM_LBUTTONUP，而是 Shell 的通知码 NIN_SELECT，winEvent() 里
+        // 它和 NIN_KEYSELECT 一起被映射成 activated(Trigger)
+        // (见 qtbase/src/plugins/platforms/windows/qwindowssystemtrayicon.cpp)。
+        // 双击则是 WM_LBUTTONDBLCLK → DoubleClick；双击的第二次 NIN_SELECT 会被
+        // Qt 用 m_ignoreNextMouseRelease 吞掉，所以一次双击总共触发
+        // Trigger + DoubleClick 两条 —— 都落到同一个幂等动作上，不会闪两次。
         showMainWindow();
         break;
     case QSystemTrayIcon::Context:
@@ -272,7 +288,7 @@ void SystemTrayController::onTrayActivated(QSystemTrayIcon::ActivationReason rea
         updateMenuState();
         break;
     default:
-        break; // Trigger/MiddleClick/Unknown：Windows 上单击常用于选中图标，不动作
+        break; // MiddleClick/Unknown：中键在 Windows 托盘上没有约定俗成的语义
     }
 }
 

@@ -1,10 +1,9 @@
+// VideoWallpaper 核心实现：播放列表管理、播放器生命周期、挂起策略和错误恢复。
 #include "VideoWallpaper.h"
 
 #include "app/AppInfo.h"
 #include "config/AppConfig.h"
-#include "config/ConfigKeys.h"
 #include "core/Diagnostics.h"
-#include "core/CachePaths.h"
 #include "platform/windows/desktopmount.h"
 
 #include <QAudioOutput>
@@ -25,8 +24,6 @@
 #ifdef Q_OS_WIN
 #define NOMINMAX
 #include <windows.h>
-#include <dwmapi.h>
-#include <powrprof.h>
 #pragma comment(lib, "Dwmapi.lib")
 #pragma comment(lib, "Powrprof.lib")
 #endif
@@ -44,26 +41,6 @@ VideoWallpaper *g_wallpaper = nullptr;
 // 持续挂起多久后卸载解码管线(省显存/内存)，恢复时重建约需 2s。
 // YUMEIREN_LONG_SUSPEND_MS 仅用于自动化测试覆盖阈值。
 constexpr qint64 kLongSuspendReleaseMs = 180000;
-
-// 阶段3 错误分类：把 QMediaPlayer::Error 映射为用户可读文本(错误处理文档见
-// docs/VIDEO_WALLPAPER_ERROR_HANDLING.md)。detail 仅在分类无法覆盖时透传。
-QString mediaErrorText(QMediaPlayer::Error err, const QString &detail)
-{
-    switch (err) {
-    case QMediaPlayer::ResourceError:
-        return QStringLiteral("资源错误（文件缺失、损坏或读取失败）");
-    case QMediaPlayer::FormatError:
-        return QStringLiteral("格式不支持");
-    case QMediaPlayer::NetworkError:
-        return QStringLiteral("网络流错误");
-    case QMediaPlayer::AccessDeniedError:
-        return QStringLiteral("访问被拒绝");
-    case QMediaPlayer::NoError:
-        break;
-    }
-    return detail.isEmpty() ? QStringLiteral("未知错误") : detail;
-}
-
 } // namespace
 
 // 显示模式名(仅诊断日志使用)：多屏问题的时序要靠这一行区分主屏/拉伸/镜像。

@@ -1,21 +1,40 @@
+/**
+ * @file VideoWallpaper.h
+ * @brief 动态壁纸核心类：视频播放、多屏输出、挂起策略与生命周期管理。
+ *
+ * 负责视频播放列表管理、多显示器输出窗口的创建/挂载/销毁、播放/暂停/恢复
+ * 策略（全屏遮挡、锁屏、电池、显示器关闭）、播放错误恢复和内存回收。
+ * 窗口挂载到 Windows 桌面层（WorkerW）由 desktopmount 模块负责。
+ */
 #ifndef VIDEOWALLPAPER_H
 #define VIDEOWALLPAPER_H
 
 #include <QObject>
-#include <QHash>
 #include <QRect>
 #include <QSet>
 #include <QString>
-#include <QStringList>
 
 class QMediaPlayer;
 class QAudioOutput;
 class QVideoWidget;
 class QElapsedTimer;
 class QTimer;
-// Live wallpaper: plays videos in frameless windows mounted behind the desktop
-// icons (WorkerW). Rendering goes through QVideoWidget (GPU path, no per-frame
-// CPU conversion) so memory stays flat while it plays.
+
+/**
+ * @brief 动态壁纸核心类。
+ *
+ * 单例。负责视频播放、多屏输出、挂起/恢复策略和播放器生命周期管理。
+ * 具体的 WorkerW 挂载由 fbswin:: 命名空间函数完成，不在本类范围内。
+ *
+ * 生命周期要求：
+ * - startPlaying() 可重复调用，内部防重入；
+ * - stopAll() 必须释放所有播放器和输出窗口；
+ * - shutdown() 必须在 main() 中、QApplication 存活时调用（详见注释）。
+ *
+ * 线程要求：
+ * - 所有公开方法必须在 Qt GUI 线程调用；
+ * - QMediaPlayer 和 QVideoWidget 的操作不可跨线程。
+ */
 class VideoWallpaper : public QObject
 {
     Q_OBJECT
@@ -92,6 +111,9 @@ private:
         SuspendCovered = 16     // 桌面被前台窗口完全遮挡(主屏模式)
     };
 
+    // 单个显示器的播放器+输出窗口组合。每个显示器一个 VideoOutput，
+    // 由 ensureOutputs() 创建、layoutOutputs() 布局、teardownOutputs() 销毁。
+    // player/audio/widget 的所有权归 VideoWallpaper，输出窗口由 Qt 父子机制管理。
     struct VideoOutput
     {
         QVideoWidget *widget = nullptr;

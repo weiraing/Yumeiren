@@ -1,15 +1,15 @@
 #include "kanban/KanbanModelManager.h"
 
+#include "core/Diagnostics.h"
+
 #include <QCoreApplication>
 #include <QDir>
-#include <QFileInfo>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSet>
-
-#include "core/Diagnostics.h"
 
 namespace kanban {
 

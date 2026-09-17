@@ -1,3 +1,7 @@
+/**
+ * @file MainWindow.h
+ * @brief 主窗口：图片背景、效果样式、动态壁纸、看板娘和系统托盘的统一设置界面。
+ */
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
@@ -33,6 +37,17 @@ class QTimer;
 class QButtonGroup;
 class QProcess;
 
+/**
+ * @brief 主窗口。
+ *
+ * 承载图片背景、效果样式、动态壁纸、看板娘和系统托盘的全部设置界面。
+ * 采用侧边栏导航 + 多页堆栈布局，各页构建逻辑分散在 MainWindowXxxPage.cpp 中。
+ *
+ * 生命周期：
+ * - 析构函数负责关闭图库缩略图后台任务的回调闸门；
+ * - closeEvent 根据后台任务状态决定隐藏还是退出；
+ * - 退出流程通过 ApplicationShutdown 统一收口。
+ */
 class MainWindow : public QMainWindow
 {
     Q_OBJECT

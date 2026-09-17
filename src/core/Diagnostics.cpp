@@ -1,7 +1,10 @@
 #include "core/Diagnostics.h"
 
+#include "config/AppConfig.h"
+#include "config/ConfigKeys.h"
+#include "core/CachePaths.h"
+
 #include <QApplication>
-#include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -9,10 +12,6 @@
 #include <QMutex>
 #include <QObject>
 #include <QTimer>
-
-#include "config/AppConfig.h"
-#include "config/ConfigKeys.h"
-#include "core/CachePaths.h"
 
 #include <windows.h>
 #include <psapi.h>

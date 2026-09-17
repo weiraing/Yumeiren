@@ -1,9 +1,9 @@
+// MainWindow 图片背景页的构建与交互逻辑（含图库浏览、参数调整、随机模式）。
 #include "MainWindow.h"
 
 #include "config/AppConfig.h"
 #include "config/ConfigKeys.h"
 #include "core/CachePaths.h"
-#include "core/Diagnostics.h"
 #include "engine/Engine.h"
 #include "ui/TooltipStyle.h"
 
@@ -342,7 +342,7 @@ QString MainWindow::galleryThumbPath(const QString &image) const
 
 void MainWindow::rebuildGallery()
 {
-    // 图片浏览：内容全部来自当前浏览目录(启动时默认 软件目录/media/image)，
+    // 图片浏览：内容全部来自当前浏览目录(启动时默认 软件目录/data/image)，
     // 目录为空则图库留空；不再包含任何内置预设图片。
     m_presets.clear();
     if (!m_presetDir.isEmpty() && QDir(m_presetDir).exists()) {

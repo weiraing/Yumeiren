@@ -1,10 +1,10 @@
+// MainWindow 动态壁纸页的构建与交互逻辑（含播放列表、播放控制、转码模块）。
 #include "MainWindow.h"
 
 #include "app/ApplicationRuntimeState.h"
 #include "config/AppConfig.h"
 #include "config/ConfigKeys.h"
 #include "core/Diagnostics.h"
-#include "engine/Engine.h"
 #include "ui/TooltipStyle.h"
 #include "wallpaper/VideoWallpaper.h"
 
@@ -14,7 +14,6 @@
 #include <QCoreApplication>
 #include <QDirIterator>
 #include <QFileDialog>
-#include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -50,7 +49,7 @@ QWidget *MainWindow::buildHelpPage()
     const QString text = QStringLiteral(
         "<p style='color:#d5d8de'>「虞美人」整合了三个开源项目的能力，为 Windows 10 / 11 的文件资源管理器设置背景：</p>"
         "<p style='color:#b9bcc4'>• <b>图片背景</b> —— 基于 Maplespe 的 explorerTool(ExplorerBgTool.dll)，"
-        "默认浏览软件目录下的 media/image 文件夹，也可点击“选择文件夹”更换目录，"
+        "默认浏览软件目录下的 data/image 文件夹，也可点击“选择文件夹”更换目录，"
         "支持亮度 / 对比度 / 模糊 / 不透明度 / 显示位置调整，"
         "可选扩展到文件打开、保存对话框。</p>"
         "<p style='color:#b9bcc4'>• <b>效果样式</b> —— 基于 Maplespe 的 ExplorerBlurMica(官方 2.0.1)，"

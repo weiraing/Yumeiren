@@ -1,13 +1,13 @@
 #include "desktopmount.h"
 
 #include <QGuiApplication>
-#include <QRect>
 #include <QScreen>
 #include <QWidget>
 
+#include <vector>
+
 #include <windows.h>
 #include <tlhelp32.h>
-#include <vector>
 
 // Desktop hosts icons inside SHELLDLL_DefView on a WorkerW window. After
 // sending 0x052C to Progman, an extra WorkerW is spawned BEHIND that one; our

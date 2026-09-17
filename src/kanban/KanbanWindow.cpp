@@ -1,21 +1,18 @@
 // 看板娘窗口实现。
 #include "kanban/KanbanWindow.h"
 
-#include <QCloseEvent>
-#include <QGuiApplication>
-#include <QMenu>
-#include <QMouseEvent>
-#include <QResizeEvent>
-#include <QScreen>
-#include <QVBoxLayout>
-#include <QWheelEvent>
-
+#include "core/Diagnostics.h"
 #include "kanban/KanbanRenderer.h"
 #include "kanban/KanbanSoftwareView.h"
 #ifdef YUMEIREN_WITH_LIVE2D
 #include "kanban/KanbanOpenGLView.h"
 #endif
-#include "core/Diagnostics.h"
+
+#include <QGuiApplication>
+#include <QMenu>
+#include <QMouseEvent>
+#include <QScreen>
+#include <QVBoxLayout>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -401,6 +398,10 @@ bool KanbanWindow::eventFilter(QObject *watched, QEvent *event)
         QAction *pauseAct = menu.addAction(QStringLiteral("暂停 / 恢复"));
         connect(pauseAct, &QAction::triggered, this, &KanbanWindow::pauseResumeRequested);
         QAction *nextAct = menu.addAction(QStringLiteral("播放下一个动作"));
+        // 可播动作不足两个就置灰：只有一个时「下一个」就是原地重播同一段，
+        // 用户点了看不见变化，只会以为程序坏了。判据收在渲染器基类一处
+        // (canPlayNextMotion)，三条入口共用，免得各写各的漏掉一处。
+        nextAct->setEnabled(m_renderer && m_renderer->canPlayNextMotion());
         connect(nextAct, &QAction::triggered, this, &KanbanWindow::playNextRequested);
         QAction *exprAct = menu.addAction(QStringLiteral("切换表情"));
         // 没有表情的模型(Natori / ariu 这类)就把入口置灰：一个点了没反应的

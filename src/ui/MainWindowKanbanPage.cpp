@@ -1,9 +1,9 @@
+// MainWindow 看板娘页的构建与交互逻辑（含模型选择、参数调节、托盘联动）。
 #include "MainWindow.h"
 
 #include "config/AppConfig.h"
 #include "config/ConfigKeys.h"
 #include "core/Diagnostics.h"
-#include "engine/Engine.h"
 #include "ui/TooltipStyle.h"
 
 #include "app/ApplicationRuntimeState.h"
@@ -28,7 +28,6 @@
 #include <QSlider>
 #include <QStackedWidget>
 #include <QUrl>
-#include <QVBoxLayout>
 
 
 QWidget *MainWindow::buildKanbanPage()
@@ -53,8 +52,7 @@ QWidget *MainWindow::buildKanbanPage()
     title->setObjectName(QStringLiteral("GroupTitle"));
     leftLay->addWidget(title);
 
-    auto *hint = new QLabel(QStringLiteral("桌面上的小人常驻窗口，无边框、不抢焦点，可用鼠标拖动。"),
-                            leftCard);
+    auto *hint = new QLabel(QStringLiteral("桌面上的小人常驻窗口，无边框、不抢焦点，可用鼠标拖动。"),leftCard);
     hint->setObjectName(QStringLiteral("HintLabel"));
     hint->setWordWrap(true);
     leftLay->addWidget(hint);
@@ -465,7 +463,18 @@ void MainWindow::updateKanbanControls()
     m_kanbanStartBtn->setText(failed ? QStringLiteral("重试启动") : QStringLiteral("启动"));
     m_kanbanPauseBtn->setEnabled(running);
     m_kanbanPauseBtn->setText(paused ? QStringLiteral("继续") : QStringLiteral("暂停"));
-    m_kanbanNextBtn->setEnabled(running && !paused);
+    // 动作入口：可播动作不足两个就置灰，并把原因写进提示 —— 一个不解释原因的
+    // 灰按钮，用户只会当成 bug。实测 13 个模型里有 8 个可播动作不足 2 个，
+    // 所以这里灰掉是常态而不是异常，更要把原因说清楚。
+    const int motionCount = m_kanban->playableMotionCount();
+    const bool canPlayMotion = m_kanban->canPlayNextMotion();
+    m_kanbanNextBtn->setEnabled(running && !paused && canPlayMotion);
+    m_kanbanNextBtn->setToolTip(canPlayMotion
+                                    ? QStringLiteral("当前模型有 %1 个动作，点击逐个切换")
+                                          .arg(motionCount)
+                                    : (motionCount == 0
+                                           ? QStringLiteral("当前模型只有待机动作，没有可播放的动作")
+                                           : QStringLiteral("当前模型只有 1 个动作，没有可切换的对象")));
     // 表情入口：当前模型/后端没有表情就置灰，并把原因写进提示 —— 一个不解释
     // 原因的灰按钮，用户只会当成 bug；写清楚「当前模型没有表情文件」，
     // 他就能自己换一个带表情的模型。

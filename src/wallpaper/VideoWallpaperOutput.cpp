@@ -1,10 +1,9 @@
+// VideoWallpaper 的输出窗口管理与播放器操作（多屏输出、挂载、错误恢复）。
 #include "VideoWallpaper.h"
 
-#include "app/AppInfo.h"
 #include "config/AppConfig.h"
 #include "config/ConfigKeys.h"
 #include "core/Diagnostics.h"
-#include "core/CachePaths.h"
 #include "platform/windows/desktopmount.h"
 
 #include <QAudioOutput>
@@ -20,13 +19,10 @@
 #include <QThread>
 #include <QTimer>
 #include <QVideoWidget>
-#include <QWindow>
 
 #ifdef Q_OS_WIN
 #define NOMINMAX
 #include <windows.h>
-#include <dwmapi.h>
-#include <powrprof.h>
 #pragma comment(lib, "Dwmapi.lib")
 #pragma comment(lib, "Powrprof.lib")
 #endif

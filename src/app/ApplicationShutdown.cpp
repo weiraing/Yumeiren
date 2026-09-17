@@ -1,10 +1,10 @@
 #include "app/ApplicationShutdown.h"
 
-#include <QApplication>
-#include <QElapsedTimer>
-
 #include "config/AppConfig.h"
 #include "core/Diagnostics.h"
+
+#include <QApplication>
+#include <QElapsedTimer>
 
 ApplicationShutdown &ApplicationShutdown::instance()
 {

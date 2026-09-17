@@ -1,120 +1,59 @@
+// MainWindow 核心实现：窗口构造、侧边栏导航、全局状态管理和退出流程。
 #include "MainWindow.h"
 
+#include "app/AppInfo.h"
+#include "app/ApplicationRuntimeState.h"
+#include "app/ApplicationShutdown.h"
 #include "config/AppConfig.h"
 #include "config/ConfigKeys.h"
+#include "core/CachePaths.h"
 #include "core/Diagnostics.h"
 #include "engine/Engine.h"
-#include "ui/TooltipStyle.h"
-
-#include "app/AppInfo.h"
-#include "app/ApplicationRuntimeState.h"
-#include "app/ApplicationShutdown.h"
-#include "core/CachePaths.h"
 #include "kanban/KanbanController.h"
 #include "kanban/KanbanModelManager.h"
-#include "tray/SystemTrayController.h"
-#include "wallpaper/VideoWallpaper.h"
-
-#include <QApplication>
-#include <QCheckBox>
-#include <QCloseEvent>
-#include <QColorDialog>
-#include <QComboBox>
-#include <QCryptographicHash>
-#include <QCoreApplication>
-#include <QDesktopServices>
-#include <QDirIterator>
-#include <QEvent>
-#include <QFileDialog>
-#include <QFileInfo>
-#include <QGuiApplication>
-#include <QHideEvent>
-#include <QMessageBox>
-#include <QScreen>
-#include <QShowEvent>
-#include <QStyleFactory>
-#include <QTimer>
-
-#ifdef Q_OS_WIN
-#define NOMINMAX
-#include <windows.h>
-#include <dwmapi.h>
 #include "platform/windows/desktopmount.h"
-#endif
-
-
-#include "MainWindow.h"
-
-#include "app/AppInfo.h"
-#include "config/AppConfig.h"
-#include "config/ConfigKeys.h"
-#include "core/CachePaths.h"
-#include "core/Diagnostics.h"
-#include "wallpaper/VideoWallpaper.h"
-#include "ui/TooltipStyle.h"
-#include "app/ApplicationRuntimeState.h"
-#include "app/ApplicationShutdown.h"
-#include "kanban/KanbanController.h"
-#include "kanban/KanbanModelManager.h"
 #include "tray/SystemTrayController.h"
+#include "wallpaper/VideoWallpaper.h"
 
+#include <QAbstractScrollArea>
 #include <QApplication>
 #include <QCheckBox>
-#include <QCloseEvent>
-#include <QColorDialog>
 #include <QComboBox>
-#include <QCryptographicHash>
-#include <QCoreApplication>
-#include <QDesktopServices>
-#include <QHideEvent>
-#include <QFile>
-#include <QFileDialog>
-#include <QDirIterator>
-#include <QMessageBox>
-#include <QEvent>
-#include <QFileInfo>
+#include <QDir>
 #include <QFrame>
-#include <QAbstractItemView>
-#include <QGuiApplication>
 #include <QGridLayout>
 #include <QHBoxLayout>
+#include <QHideEvent>
+#include <QImage>
 #include <QLabel>
 #include <QLineEdit>
-#include <QListView>
-#include <QDir>
-#include <QImage>
 #include <QListWidget>
-#include <QMouseEvent>
-#include <QPointer>
-#include <QWindow>
-#include <QPushButton>
 #include <QPainterPath>
-#include <QButtonGroup>
-#include <QProcess>
-#include <QStandardPaths>
+#include <QPointer>
+#include <QPushButton>
 #include <QRadioButton>
 #include <QRegion>
-#include <QAbstractScrollArea>
+#include <QScreen>
 #include <QScrollBar>
-#include <QScrollArea>
-#include <QSettings>
 #include <QStackedWidget>
+#include <QStyle>
+#include <QStyleHints>
 #include <QStyledItemDelegate>
 #include <QTextStream>
 #include <QThreadPool>
-#include <functional>
-#include <QStyle>
-#include <QStyleHints>
 #include <QTimer>
-#include <QUrl>
-#include <QScreen>
-#include <QVBoxLayout>
+#include <QWindow>
+
+#include <functional>
 
 #ifdef Q_OS_WIN
 #define NOMINMAX
 #include <windows.h>
 #include <dwmapi.h>
-#include "platform/windows/desktopmount.h"
+#endif
+
+#ifdef Q_OS_WIN
+#define NOMINMAX
 
 namespace {
 // 旧版 MinGW SDK 头文件可能缺失这些定义
@@ -1107,12 +1046,18 @@ void MainWindow::loadSettings()
         else
             m_imgModeSingle->setChecked(true);
     }
-    // 图片浏览目录：优先恢复用户上次选择的目录，否则默认 软件目录/media/image
+    // 图片浏览目录：优先恢复用户上次选择的目录，否则默认 软件目录/data/image。
+    //
+    // 默认值从 media/image 改成 data/image：data/image 是与 data/models、data/video
+    // 并列的素材目录(见 CMakeLists 里把整个 data/ 复制到输出目录的那一步)，用户放进来的
+    // 图片本来就该在那儿被找到；media/image 是早期版本留下的空目录，指向它等于默认打开
+    // 一个永远没内容的文件夹。rebuildGallery() 是递归扫描的，所以 data/image 下按子目录
+    // 分好的图集(如 data/image/原神)也会一并收进图库。
     const QString savedDir = s.value(ConfigKeys::Image::GalleryDir).toString();
     if (!savedDir.isEmpty() && QDir(savedDir).exists())
         m_presetDir = savedDir;
     else
-        m_presetDir = QCoreApplication::applicationDirPath() + QStringLiteral("/media/image");
+        m_presetDir = QCoreApplication::applicationDirPath() + QStringLiteral("/data/image");
     QDir().mkpath(m_presetDir);
     rebuildGallery();
     m_selectedPreset = s.value(ConfigKeys::Image::Preset, 0).toInt();

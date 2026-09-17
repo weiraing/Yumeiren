@@ -1,3 +1,4 @@
+// MainWindow 效果样式页的构建与交互逻辑。
 #include "MainWindow.h"
 
 #include "config/AppConfig.h"
