@@ -334,7 +334,7 @@ QWidget *MainWindow::buildSidebar()
     m_nav = new QListWidget(side);
     m_nav->setObjectName(QStringLiteral("NavList"));
     m_nav->setFrameShape(QFrame::NoFrame);
-    m_nav->addItem(QStringLiteral("🌸  文件夹美化"));
+    m_nav->addItem(QStringLiteral("📂  文件夹美化"));
     m_nav->addItem(QStringLiteral("🎞  动态壁纸"));
     m_nav->addItem(QStringLiteral("🎎  看板娘"));
     m_nav->setCurrentRow(0);

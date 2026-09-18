@@ -457,38 +457,52 @@ QWidget *MainWindow::buildKanbanParamCard(QWidget *parent)
 
     // 互动三项：置顶与穿透互相独立(置顶只管层级，穿透只管鼠标)，所以用复选框而非单选。
     //
-    // 分两行排：这三项并排约需 275 逻辑像素，而移到左列后卡片内宽只有 ~272
-    // （列宽 300 减左右各 14 内边距）—— 硬挤一行会把「允许点击互动」压到省略号。
-    // 前两项短、第三项长，所以 2+1 分行最省高度。
+    // **三项各占一行**（2026-09-18 用户要求）。左列卡片内宽只有 ~272（列宽 300 减左右
+    // 各 14 内边距），三项并排约需 275 逻辑像素，硬挤一行会把「允许点击互动」压成省略号；
+    // 而两两并排也总要挑一个「落单」的，不如干脆全部拆开 —— 三项的后果差别很大
+    // （置顶只改层级、互动改点击能不能落到小人身上、穿透连鼠标都收不到），
+    // 一行一项正好让每一项都读得完整。
+    //
+    // 每项仍套一层 QHBoxLayout + 尾部 stretch：QCheckBox 直接塞进 QVBoxLayout 会被
+    // 拉成整行宽，于是**点这一行的空白处也会切换**；套一层后控件保持 sizeHint 宽度，
+    // 只有点在方块或文字上才算数（与前两项原来的写法一致）。
+    auto addCheckRow = [lay, card](QCheckBox *box) {
+        auto *row = new QHBoxLayout();
+        row->setSpacing(14);
+        row->addWidget(box);
+        row->addStretch(1);
+        lay->addLayout(row);
+    };
+
     m_kanbanTopBox = new QCheckBox(QStringLiteral("窗口置顶"), card);
+    m_kanbanTopBox->setToolTip(tooltipstyle::format(
+        QStringLiteral("让小人始终浮在其它窗口之上，不被别的程序挡住")));
     connect(m_kanbanTopBox, &QCheckBox::toggled, this, [this](bool on) {
         if (!m_kanbanSyncing)
             m_kanban->setAlwaysOnTop(on);
     });
-    m_kanbanThroughBox = new QCheckBox(QStringLiteral("鼠标穿透"), card);
-    m_kanbanThroughBox->setToolTip(tooltipstyle::format(
-        QStringLiteral("开启后鼠标对窗口隐形，点击全部落到桌面；右键菜单仍可关闭")));
-    connect(m_kanbanThroughBox, &QCheckBox::toggled, this, [this](bool on) {
-        if (!m_kanbanSyncing)
-            m_kanban->setMouseThrough(on);
-    });
-    auto *checkRow = new QHBoxLayout();
-    checkRow->setSpacing(14);
-    checkRow->addWidget(m_kanbanTopBox);
-    checkRow->addWidget(m_kanbanThroughBox);
-    checkRow->addStretch(1);
-    lay->addLayout(checkRow);
+    addCheckRow(m_kanbanTopBox);
 
     m_kanbanInteractBox = new QCheckBox(QStringLiteral("允许点击互动"), card);
+    m_kanbanInteractBox->setToolTip(tooltipstyle::format(
+        QStringLiteral("勾选后可以用鼠标拖动小人、点它触发动作；\n"
+                       "取消勾选则只显示不响应，鼠标拖动会落到桌面")));
     connect(m_kanbanInteractBox, &QCheckBox::toggled, this, [this](bool on) {
         if (!m_kanbanSyncing)
             m_kanban->setInteractionEnabled(on);
     });
-    auto *interactRow = new QHBoxLayout();
-    interactRow->setSpacing(14);
-    interactRow->addWidget(m_kanbanInteractBox);
-    interactRow->addStretch(1);
-    lay->addLayout(interactRow);
+    addCheckRow(m_kanbanInteractBox);
+
+    m_kanbanThroughBox = new QCheckBox(QStringLiteral("鼠标穿透"), card);
+    m_kanbanThroughBox->setToolTip(tooltipstyle::format(
+        QStringLiteral("开启后鼠标对窗口隐形，点击全部落到桌面。\n"
+                       "注意：穿透期间小人收不到鼠标，右键菜单也叫不出来 —— "
+                       "要关掉只能回这一页取消勾选。")));
+    connect(m_kanbanThroughBox, &QCheckBox::toggled, this, [this](bool on) {
+        if (!m_kanbanSyncing)
+            m_kanban->setMouseThrough(on);
+    });
+    addCheckRow(m_kanbanThroughBox);
 
     // 视线追踪单独占一行，四档互斥。
     //
