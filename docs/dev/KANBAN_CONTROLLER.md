@@ -27,21 +27,22 @@
 
 ## 配置回归
 
-```powershell
-cmake -S . -B build -DYUMEIREN_BUILD_CONTROLLER_TESTS=ON
-cmake --build build --target KanbanControllerTest -j 1
-ctest --test-dir build -R KanbanControllerSettings --output-on-failure
-```
+**仓库里没有测试目标**：测试代码用完即删（2026-09-18 定案，说明见 `CMakeLists.txt` 里
+`cmake/*Tests.cmake` 那一段）。这里原有一个 `YUMEIREN_BUILD_CONTROLLER_TESTS` 开关与
+`KanbanControllerTest` 目标，已随测试代码一并移除。
 
-测试默认关闭，不依赖 Cubism SDK，不创建桌面窗口。
-可执行文件及测试配置放在 `build/tests/<配置>/controller-test` 中，
-不读取或清理产品配置，也不执行旧注册表迁移。
+下面这些行为是该控制器必须满足的，改动后请逐条人工确认（探针可读 `build/config/.ini` 与
+`.cache/logs/videowallpaper.log` 来核对副作用）：
 
-覆盖首次启动默认值、旧视线键迁移及优先级、视线四档边界、
-缩放/透明度/帧率限值、配置回读、未知模型拒绝、停止状态下的交互，
-以及重复退出保留设置、显式停止清除设置。
-另验证时钟统计经控制器转发、停止归零、重复停止幂等、重启恢复通知。
-测试使用事件循环，不依赖桌面或 OpenGL；帧率指动画推进频率，不是 GPU 呈现频率。
+- 首次启动的默认值。
+- 旧视线键迁移及优先级（新键优先）。
+- 视线四档边界。
+- 缩放 / 透明度 / 帧率限值。
+- 配置回读、未知模型拒绝、停止状态下的交互。
+- 重复退出保留设置、显式停止清除设置。
+- 时钟统计经控制器转发、停止归零、重复停止幂等、重启恢复通知。
+
+注意「帧率」指动画推进频率，不是 GPU 呈现频率。
 
 ## 状态刷新
 

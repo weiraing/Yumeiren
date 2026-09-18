@@ -27,20 +27,16 @@ SDK 成员和重写接口沿用 SDK 命名；自有模型方法使用 camelCase�
 - CPU 纹理上传后释放，重建 GL 资源时重新解码；渲染热路径不增加图像回读。
 - 预载动作由模型拥有；先停止队列，再释放动作，避免残留引用。
 
-## 回归测试
+## 回归验证
 
-需要本地 Cubism SDK、GLEW、Qt OpenGL 和可用的模型。测试默认关闭，不影响产品构建：
+**仓库里没有测试目标**：测试代码用完即删（2026-09-18 定案，说明见 `CMakeLists.txt` 里
+`cmake/*Tests.cmake` 那一段）。这里原有一个 `YUMEIREN_BUILD_RENDER_TESTS` 开关与
+`CubismLifecycleTest` 目标，已随测试代码一并移除，`YUMEIREN_TEST_MODEL` 缓存变量也不存在了。
 
-```powershell
-cmake -S . -B build -DYUMEIREN_WITH_LIVE2D=ON -DYUMEIREN_BUILD_RENDER_TESTS=ON
-cmake --build build --target CubismLifecycleTest -j 1
-ctest --test-dir build -R CubismLifecycle --output-on-failure
-```
+需要验证渲染链路时用 `tools/kanbanprobe`（离屏自检探针，源码不入库；`KanbanProbe` 目标只在源码
+存在时才进构建）：它把同一条渲染链路搬到离屏上下文里跑，把结论变成可判读的文本和一张 PNG。
 
-默认使用 `data/models/Haru/Haru.model3.json`，可通过 `YUMEIREN_TEST_MODEL` 指定其他模型。
-测试模型和第三方 SDK 不入库。测试链接实际后端，不启动主窗口，不初始化用户配置。
-
-覆盖内容：
+下面这些行为是该后端必须满足的，改动后请逐条人工确认：
 - 3 个独立上下文，每个上下文 10 次装载、绘制、卸载。
 - 首帧延迟上传、重复交付同一宿主、缺失模型返回错误。
 - 画面具有非透明、非黑且不均匀的可见像素，背景不全覆盖。
