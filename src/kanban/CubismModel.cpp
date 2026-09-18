@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QImageReader>
 
 #include <limits>
 
@@ -223,8 +224,9 @@ bool CubismModelImpl::setup(const QString &modelJsonPath, QString *outError)
     _modelMatrix->SetupFromLayout(layout);
     _model->SaveParameters();
 
-    // 11) 纹理解码(还没上 GPU)：这一步就能发现丢图、坏图
-    if (!decodeTextures(outError)) {
+    // 11) 纹理校验(不解出位图)：丢图、坏图要在装载这一步就报出来。
+    //     真正的解码放在 ensureGl，因为上限取决于绘制面尺寸，而那时才拿得到。
+    if (!validateTextures(outError)) {
         return false;
     }
 
@@ -285,7 +287,33 @@ CubismIdHandle CubismModelImpl::parameterId(const csmChar *name)
     return CubismFramework::GetIdManager()->GetId(name);
 }
 
-bool CubismModelImpl::decodeTextures(QString *outError)
+bool CubismModelImpl::validateTextures(QString *outError)
+{
+    const csmInt32 count = m_setting->GetTextureCount();
+    if (count <= 0) {
+        if (outError) {
+            *outError = QStringLiteral("model3.json 里没有 FileReferences.Textures");
+        }
+        return false;
+    }
+    for (csmInt32 i = 0; i < count; ++i) {
+        const QString path = relativeToHome(m_setting->GetTextureFileName(i));
+        if (path.isEmpty()) {
+            continue; // 空名字纹理位：model3.json 允许留空槽，交给 decodeTextures 放占位
+        }
+        QImageReader reader(path);
+        if (!reader.canRead()) {
+            if (outError) {
+                *outError = QStringLiteral("%1 无法解码(不是 PNG 或已损坏)")
+                                .arg(QFileInfo(path).fileName());
+            }
+            return false;
+        }
+    }
+    return true;
+}
+
+bool CubismModelImpl::decodeTextures(int maxDim, QString *outError)
 {
     const csmInt32 count = m_setting->GetTextureCount();
     if (count <= 0) {
@@ -302,25 +330,38 @@ bool CubismModelImpl::decodeTextures(QString *outError)
             m_textureImages << QImage();
             continue;
         }
-        QByteArray buffer;
-        QString readError;
-        if (!readFile(path, &buffer, &readError)) {
-            if (outError) {
-                *outError = readError;
+        QImageReader reader(path);
+        // 解码缩放比例在这里定下：全尺寸位图只在 scaled 之前短暂存在，留下的
+        // 和上传的都是限幅后的那一份。0 = 原尺寸(策略关掉或绘制面未知)。
+        QSize target;
+        if (maxDim > 0) {
+            const QSize source = reader.size();
+            const int longest = qMax(source.width(), source.height());
+            if (source.isValid() && longest > maxDim) {
+                target = QSize(qMax(1, source.width() * maxDim / longest),
+                               qMax(1, source.height() * maxDim / longest));
             }
-            return false;
         }
-        QImage image = QImage::fromData(buffer, "PNG");
+        QImage image = reader.read();
+        if (!image.isNull() && !target.isEmpty()) {
+            // 显式缩放而不是 setScaledSize：Qt 6 不允许指定自动缩放的重采样模式,
+            // 而默认那条路径在大比例缩减下会采出锯齿。
+            image = image.scaled(target, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        }
         if (image.isNull()) {
-            if (outError) {
-                *outError = QStringLiteral("%1 解码失败(不是 PNG 或已损坏)")
+            // 记住失败原因：ensureGl 由 30fps 的时钟驱动，逐帧重试会变成每帧
+            // 读盘 + 解码一次的风暴。
+            m_decodeError = QStringLiteral("%1 解码失败(不是 PNG 或已损坏)")
                                 .arg(QFileInfo(path).fileName());
+            if (outError) {
+                *outError = m_decodeError;
             }
             return false;
         }
         // 统一成「预乘 alpha 的 RGBA8」：GL 侧格式固定，边缘也不会有半透明的白边。
         m_textureImages << image.convertToFormat(QImage::Format_RGBA8888_Premultiplied);
     }
+    m_decodeError.clear();
     return true;
 }
 
@@ -400,6 +441,8 @@ void CubismModelImpl::releaseCpu()
     m_setting = nullptr;
 
     m_textureImages.clear();
+    m_textureMaxDim = 0;
+    m_decodeError.clear();
     m_motionGroups.clear();
     m_playableMotions.clear();
     m_motionCursor = 0;

@@ -5,6 +5,7 @@
 #include <GL/glew.h>
 
 #include "kanban/CubismModel.h"
+#include "kanban/KanbanRenderer.h" // 纹理上限策略(两个后端共用一份)
 #include <QImage>
 #include <QStringList>
 #include <QVector>
@@ -123,7 +124,11 @@ private:
     QString relativeToHome(const csmChar *relative) const;
     bool loadSettingJson(const QString &jsonPath, QString *outError);
     void releaseCpu();
-    bool decodeTextures(QString *outError);
+    // 只判断每张纹理能否解码，不产出位图：坏图要在装载阶段就报出来，
+    // 但全尺寸位图一旦为「校验」而常驻就白白占掉几百 MB。
+    bool validateTextures(QString *outError);
+    // maxDim = 纹理最长边上限(0 = 原尺寸)。解码阶段直接缩放，全尺寸位图不落地。
+    bool decodeTextures(int maxDim, QString *outError);
     // 仅返回预载成功的动作序号，界面据此判断是否可播。
     QVector<int> preloadMotionGroup(const QString &group);
     void fitProjection(const QSize &pixelSize, CubismMatrix44 *out);
@@ -140,6 +145,11 @@ private:
     csmVector<CubismIdHandle> m_eyeBlinkIds;
     csmVector<CubismIdHandle> m_lipSyncIds;
     QVector<QImage> m_textureImages;
+    // m_textureImages 是按哪个最长边上限解出来的(0 = 原尺寸)。上限变了就必须重解，
+    // 而 m_textureImages 在上传后会被清掉，所以下一次上传一定重解。
+    int m_textureMaxDim = 0;
+    // 首次解码失败后记住原因：ensureGl 由动画时钟逐帧重试，不缓存就成了每帧读盘解码。
+    QString m_decodeError;
     std::vector<GLuint> m_textureIds;
     QStringList m_motionGroups;
     // 预载成功的非 idle 动作，按配置顺序保存组号与组内序号。

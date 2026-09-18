@@ -62,6 +62,9 @@ void KanbanController::onFrameTick(float deltaSeconds)
         m_clock->stop();
         return;
     }
+    // 纹理上限要跟着绘制面走，而重建必须发生在帧定时器里 —— 见
+    // KanbanRenderer::rebuildTexturesIfNeeded 的说明。
+    m_renderer->rebuildTexturesIfNeeded();
     m_renderer->update(deltaSeconds);
     // 保留后端既有顺序：推进动画后更新光标目标，再请求绘制。
     if (gazeTracking()) {

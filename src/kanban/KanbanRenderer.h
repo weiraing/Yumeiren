@@ -57,6 +57,60 @@ inline constexpr GazeTuning kGazeTuning[4] = {
 // 半径太小，光标轻微抖动就会让模型疯狂偏头 —— 用一个地板值兜住。
 inline constexpr float kGazeMinRadiusPx = 160.0f;
 
+// —— 纹理上限策略(GPU 与软件两个后端共用) ——
+//
+// 素材纹理常见 4096×4096，而角色能被画到多大完全由窗口决定：默认 320×480 的窗口
+// 把原图整张传上 GPU 是十几倍的白付显存(实测一个模型四张 4096² 连同 mipmap 在
+// 320×480 的窗口下常驻 393MB，见 docs/video_performance_optimization_3.md §1，
+// 而它显示出来只占那么一小块)。本函数把「绘制面尺寸」换算成「纹理最长边
+// 够用值」，两个后端据此在解码阶段就把尺寸定下来。
+//
+// 返回 0 = 不降采样(策略关掉，或绘制面还不知道)。结果恒为 2 的幂：素材本身就是
+// 2 的幂，等比缩完仍是 2 的幂，mipmap 链才完整；只按最长边等比缩，非方形纹理
+// 不会变形。
+//
+// 注意兑现方式：两个后端都是「先解出原图，再立即 scaled 到上限」，所以原尺寸位图
+// 会在解码那一瞬存在一下(随后即释放)，被长期持有、被传上 GPU 的只有那份限幅结果。
+// 省下的常驻量才是这里的目标，峰值那一跳不在射程内。
+//
+// 放在抽象层而不是 Cubism 后端内部，理由和 kGazeTuning 一样：降级到软件后端时
+// 用户不该发现同一档窗口大小下形象清晰度不一样；而且声明在 CubismModel.h 里会让
+// 不链接 SDK 的构建找不到定义(那份实现不参与编译)。
+inline constexpr int kTextureMaxDimFloor = 1024;
+
+// 由配置 kanban/textureDownscale 在读设置时写入。进程级而非渲染器成员：两个后端
+// 与离屏探针(预览图生成)问的是同一件事，不该各存一份再想办法同步。
+inline bool &textureDownscaleFlag()
+{
+    static bool s_on = true;
+    return s_on;
+}
+
+inline void setTextureDownscaleEnabled(bool on)
+{
+    textureDownscaleFlag() = on;
+}
+
+inline bool textureDownscaleEnabled()
+{
+    return textureDownscaleFlag();
+}
+
+inline int textureMaxDimFor(const QSize &pixelSize)
+{
+    if (!textureDownscaleEnabled() || pixelSize.isEmpty()) {
+        return 0;
+    }
+    const int longest = qMax(pixelSize.width(), pixelSize.height());
+    // 地板值起跳：再往下压省不出多少(一张 1024² 连 mipmap 才 5.6MB)，却会让窗口
+    // 稍微变大就得重解一遍素材。
+    int maxDim = kTextureMaxDimFloor;
+    while (maxDim < longest) {
+        maxDim <<= 1;
+    }
+    return maxDim;
+}
+
 // GL 宿主能力：让渲染器能在「非 paintGL 时机」把 GL 上下文取回来。
 //
 // 为什么需要它：QOpenGLWidget 只在 initializeGL/resizeGL/paintGL 里替我们
@@ -119,6 +173,17 @@ public:
 
     // 尺寸变化(逻辑像素 + DPR)。
     virtual void resize(int width, int height, float devicePixelRatio) = 0;
+
+    // 绘制面变大到「当前纹理已经不够细」时重建纹理，真的重建了返回 true。
+    //
+    // 为什么需要：纹理按窗口尺寸限幅上传省下了十几倍显存，代价是用户把看板娘
+    // 放大之后会糊。所以放大要能把纹理补回去(缩小则不用，白占着的显存不会回来，
+    // 也就不必重解一遍)。
+    //
+    // 为什么由调用方择机而不是 resize() 里直接重建：resize 来自 resizeGL，仍在
+    // 本轮绘制流程内，在那里重建纹理就是在重入 paintGL —— 历史上这条路径
+    // (绘制途中改窗口)的现场是「桌面上一片空白」。交给帧定时器调用。
+    virtual bool rebuildTexturesIfNeeded() { return false; }
 
     // 推进一帧动画：只更新参数，不绘制。deltaSeconds 来自统一动画时钟的真实间隔。
     virtual void update(float deltaSeconds) = 0;

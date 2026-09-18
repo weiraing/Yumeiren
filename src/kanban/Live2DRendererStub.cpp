@@ -64,6 +64,13 @@ void Live2DRenderer::resize(int width, int height, float devicePixelRatio)
     m_dpr = devicePixelRatio;
 }
 
+bool Live2DRenderer::rebuildTexturesIfNeeded()
+{
+    // 本构建没有 SDK、没有纹理，也就没有「按绘制面重建」可言。
+    // 声明成了 override，必须给这一份定义(同 setGazeStrength)。
+    return false;
+}
+
 void Live2DRenderer::update(float) {}
 void Live2DRenderer::render() {}
 void Live2DRenderer::paint(QPainter *, const QSize &) {}

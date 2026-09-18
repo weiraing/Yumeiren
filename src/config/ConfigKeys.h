@@ -95,6 +95,10 @@ inline constexpr auto AllowInteraction = "kanban/allowInteraction"; // 允许点
 // 视线追踪强度：0=无 1=弱 2=中 3=强。默认 2(中) —— 这是「看起来像活物」的核心，
 // 关掉之后模型只会呆立着，所以默认开；而中档是此前实测手感满意的那个值。
 inline constexpr auto GazeStrength = "kanban/gazeStrength";
+// 纹理按窗口尺寸降采样后再上传(默认开)。关掉即恢复原尺寸上传，代价是显存与
+// 装载峰值按素材原始尺寸走(实测一个 4×4096² 的模型在 320×480 窗口下常驻 393MB
+// 显存)。判据见 KanbanRenderer.h 的 textureMaxDimFor。
+inline constexpr auto TextureDownscale = "kanban/textureDownscale";
 // 旧版的布尔开关(有则视为「开=中档」)。只在读配置时作为迁移来源使用，
 // 新写入一律走 GazeStrength —— 见 KanbanController::loadSettings 里的迁移注释。
 inline constexpr auto GazeTrackingLegacy = "kanban/gazeTracking";

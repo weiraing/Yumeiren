@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QImage>
+#include <QImageReader>
 #include <QPainter>
 #include <QPainterPath>
 #include <QtMath>
@@ -96,13 +97,36 @@ bool PlaceholderRenderer::loadModel(const QString &modelJsonPath, QString *outEr
     for (const QString &rel : textureCandidates) {
         const QString path = modelDir.filePath(rel);
         if (QFileInfo::exists(path)) {
-            m_modelTexture = QImage(path);
+            // 上限与 GPU 后端共用一份策略(见 KanbanRenderer.h)：这条路径常驻的是
+            // CPU 位图，4096² 就是 64MB，而它最终只会被画进这个窗口大小。
+            // 软件视图的 resize 来自 QWidget::resizeEvent，宽高是逻辑像素，
+            // 乘 DPR 就是设备像素，单位没有歧义。
+            QImageReader reader(path);
+            const int maxDim = textureMaxDimFor(
+                QSize(qRound(m_width * m_dpr), qRound(m_height * m_dpr)));
+            QSize target;
+            if (maxDim > 0) {
+                const QSize source = reader.size();
+                const int longest = qMax(source.width(), source.height());
+                if (source.isValid() && longest > maxDim) {
+                    target = QSize(qMax(1, source.width() * maxDim / longest),
+                                   qMax(1, source.height() * maxDim / longest));
+                }
+            }
+            m_modelTexture = reader.read();
+            if (!m_modelTexture.isNull() && !target.isEmpty()) {
+                m_modelTexture = m_modelTexture.scaled(target, Qt::IgnoreAspectRatio,
+                                                       Qt::SmoothTransformation);
+            }
             if (!m_modelTexture.isNull()) {
                 // 预乘 alpha，加速后续绘制
                 m_modelTexture = m_modelTexture.convertToFormat(QImage::Format_RGBA8888_Premultiplied);
                 videodiag::log(videodiag::Level::Info,
-                    QStringLiteral("[Kanban] 占位渲染器加载纹理: %1 (%2x%3)")
-                        .arg(path).arg(m_modelTexture.width()).arg(m_modelTexture.height()),
+                    QStringLiteral("[Kanban] 占位渲染器加载纹理: %1 (%2x%3, 上限 %4)")
+                        .arg(path)
+                        .arg(m_modelTexture.width())
+                        .arg(m_modelTexture.height())
+                        .arg(maxDim > 0 ? QString::number(maxDim) : QStringLiteral("原尺寸")),
                     QStringLiteral("Live2D"));
                 break;
             }

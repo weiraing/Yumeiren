@@ -22,6 +22,8 @@ struct Live2DRenderer::Private
     bool glBuilt = false;
     bool glewReady = false;
     QSize pixelSize;
+    // 绘制面变大到当前纹理上限不够用时置位，由控制器在帧 tick 里消费。
+    bool textureRebuildPending = false;
     float gazeX = 0.0f;
     float gazeY = 0.0f;
     // 保留原始坐标，强度切换时按新半径重算目标。
@@ -96,6 +98,8 @@ bool Live2DRenderer::loadModel(const QString &modelJsonPath, QString *outError)
         // setup 失败时还没碰过 GL，直接丢弃是安全的。
         return false;
     }
+    // 本次装载已按当前绘制面的上限上传纹理，待办到此了结。
+    m_d->textureRebuildPending = false;
 
     model->setDeterministicIdle(m_deterministicIdle);
     m_modelPath = modelJsonPath;
@@ -154,6 +158,41 @@ void Live2DRenderer::resize(int width, int height, float devicePixelRatio)
     m_width = width;
     m_height = height;
     m_dpr = devicePixelRatio;
+
+    // 纹理上限跟着绘制面走，但只在「变大到需要更细的一档」时补：缩小不必回退
+    // (省下的显存本来就没占着)，而用户来回拖缩放时不该每一步都重解一遍素材。
+    // 判据取宿主的 glPixelSize —— 那正是下一次 ensureGl 会收到的那个值，不用
+    // 再拿 resize 的宽高去猜单位。真正的重建留给帧 tick
+    // (见 KanbanRenderer::rebuildTexturesIfNeeded 的说明)。
+    const QSize pixels = m_d->host ? m_d->host->glPixelSize() : QSize();
+    if (m_modelLoaded && !pixels.isEmpty() && !m_d->pixelSize.isEmpty()
+        && textureMaxDimFor(pixels) > textureMaxDimFor(m_d->pixelSize)) {
+        m_d->textureRebuildPending = true;
+    }
+}
+
+bool Live2DRenderer::rebuildTexturesIfNeeded()
+{
+    if (!m_d->textureRebuildPending) {
+        return false;
+    }
+    m_d->textureRebuildPending = false;
+    // 路径为空说明模型已经被 shutdown 收掉了，这里绝不能凭空路径把它装回来。
+    if (m_modelPath.isEmpty()) {
+        return false;
+    }
+    QString err;
+    if (loadModel(m_modelPath, &err)) {
+        logInfo(QStringLiteral("绘制面变大到 %1x%2，纹理按新上限 %3 重建")
+                    .arg(m_d->pixelSize.width())
+                    .arg(m_d->pixelSize.height())
+                    .arg(textureMaxDimFor(m_d->pixelSize)));
+        return true;
+    }
+    // 装载第一步就会释放旧资源，所以失败不会退回原画面，只会空着。
+    // 不逐帧重试(那是每帧读盘解码)，等用户或挂起恢复流程再装载。
+    logWarn(QStringLiteral("纹理按新上限重建失败：%1").arg(err));
+    return false;
 }
 
 void Live2DRenderer::update(float deltaSeconds)

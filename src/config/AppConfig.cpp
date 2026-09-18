@@ -72,6 +72,7 @@ const char *kBoolRules[] = {
     ConfigKeys::Kanban::AlwaysOnTop,
     ConfigKeys::Kanban::MouseThrough,
     ConfigKeys::Kanban::AllowInteraction,
+    ConfigKeys::Kanban::TextureDownscale,
     ConfigKeys::Tray::Enabled,
     ConfigKeys::Tray::MinimizeToTrayOnClose,
 };
@@ -88,6 +89,8 @@ const char *kBoolDefaultTrue[] = {
     ConfigKeys::Video::AffinityLimit,
     ConfigKeys::Kanban::AlwaysOnTop,
     ConfigKeys::Kanban::AllowInteraction,
+    // 纹理降采样是「默认就省」的行为，只有要逐像素还原素材细节时才显式关掉。
+    ConfigKeys::Kanban::TextureDownscale,
     ConfigKeys::Tray::Enabled,
     // 任务书 §7.6：有后台任务时点关闭应「隐藏而不是退出」，所以这项默认开，
     // 用户想改回传统行为再取消勾选。读取端(closeEvent / 界面勾选框)默认值同为 true。

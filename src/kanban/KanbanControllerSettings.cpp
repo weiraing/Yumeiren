@@ -51,6 +51,9 @@ void KanbanController::loadSettings()
     }
 
     m_modelPath = config.value(QString::fromLatin1(ConfigKeys::Kanban::ModelPath)).toString();
+    // 纹理上限策略必须在任何模型装载之前定下来，所以跟着配置一起在这里落。
+    setTextureDownscaleEnabled(
+        config.value(QString::fromLatin1(ConfigKeys::Kanban::TextureDownscale), true).toBool());
     m_clock->setTargetFps(m_targetFps);
     emit settingsChanged();
 }

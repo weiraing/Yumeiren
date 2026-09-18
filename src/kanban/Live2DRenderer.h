@@ -33,6 +33,9 @@ public:
     bool usesOpenGL() const override;
 
     void resize(int width, int height, float devicePixelRatio) override;
+    // 绘制面变大后把纹理补回更细的一档。同 setGazeStrength：声明了 override
+    // 就要给两份定义，否则降级构建链接失败。
+    bool rebuildTexturesIfNeeded() override;
     void update(float deltaSeconds) override;
     void render() override;
     void paint(QPainter *painter, const QSize &logicalSize) override;

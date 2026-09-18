@@ -21,11 +21,22 @@ bool CubismModelImpl::ensureGl(const QSize &pixelSize, quint64 contextGeneration
     }
     releaseGl(); // 重建前先彻底清干净，纹理与 VBO 才不会有累积
 
-    // 上传后会释放 CPU 位图；上下文重建时必须重新解码。
-    if (!m_setting || m_textureImages.size() != int(m_setting->GetTextureCount())) {
-        if (!decodeTextures(outError)) {
+    // 解码失败过一次就不再重试：本函数由动画时钟逐帧调用，重试会成每帧读盘解码。
+    if (!m_decodeError.isEmpty()) {
+        if (outError) {
+            *outError = m_decodeError;
+        }
+        return false;
+    }
+
+    // 上传后会释放 CPU 位图；上下文重建时必须按当次上限重新解码。
+    const int maxDim = textureMaxDimFor(pixelSize);
+    if (!m_setting || m_textureMaxDim != maxDim
+        || m_textureImages.size() != int(m_setting->GetTextureCount())) {
+        if (!decodeTextures(maxDim, outError)) {
             return false;
         }
+        m_textureMaxDim = maxDim;
     }
 
     // CreateRenderer 会访问着色器单例，必须先处理上下文换代。
@@ -65,13 +76,19 @@ bool CubismModelImpl::ensureGl(const QSize &pixelSize, quint64 contextGeneration
     // 上传前已在 CPU 侧乘过 alpha，这里必须如实告知，否则二次相乘会让边缘发暗。
     renderer->IsPremultipliedAlpha(true);
     m_glLive = true;
+    // 日志要报实际上传尺寸，必须在释放 CPU 位图之前取。
+    const QSize uploadedSize =
+        m_textureImages.isEmpty() ? QSize() : m_textureImages.first().size();
     // 上传完成后释放 CPU 位图，降低常驻内存。
     m_textureImages.clear();
     m_textureImages.squeeze();
-    logInfo(QStringLiteral("纹理上传完成：%1 张，绘制面 %2x%3")
+    logInfo(QStringLiteral("纹理上传完成：%1 张，绘制面 %2x%3，上限 %4，实际 %5x%6")
                 .arg(static_cast<int>(m_textureIds.size()))
                 .arg(pixelSize.width())
-                .arg(pixelSize.height()));
+                .arg(pixelSize.height())
+                .arg(maxDim > 0 ? QString::number(maxDim) : QStringLiteral("原尺寸"))
+                .arg(uploadedSize.width())
+                .arg(uploadedSize.height()));
     return true;
 }
 
