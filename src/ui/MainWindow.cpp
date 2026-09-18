@@ -226,9 +226,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     videodiag::stage(QStringLiteral("设置回填完成(含图库与显示器枚举)"));
     applyTheme(m_themeCombo->currentIndex());
     refreshStatus();
-    // the legacy import ran before this window existed; report what it carried over
-    if (!appinfo::migrationNotes().isEmpty())
-        setLog(appinfo::migrationNotes().join(QStringLiteral(" ")), false);
     // 装在只读目录(如 C:\Program Files)时 .cache 建不起来：明确提示用户，
     // 不静默回退到 AppData，也不改任何非缓存数据的位置。
     QString cacheError;

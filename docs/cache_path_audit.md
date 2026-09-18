@@ -32,7 +32,7 @@
 | 3 | `mainwindow.cpp: pickWallpaper()` → `img.save(Engine::wallpaperPath())` | `...\bg\current_wallpaper.jpg` | 桌面壁纸转存(可重新获取) | `CachePaths::media()` |
 | 4 | `videodiag.cpp: logPath()`(含 `.old` 滚动与 `.<pid>.log` 变体) | `...\logs\videowallpaper.log` | 诊断日志，可删可再生 | `CachePaths::logs()` |
 | 5 | `main.cpp` 单实例守卫结果日志 | `...\logs\guard_<pid>.log` | 一次性诊断 | `CachePaths::logs()` |
-| 6 | `appinfo.cpp: migrateLegacy()` 旧版背景导入落点 | `...\bg`(FolderBgStudio → Yumeiren) | 缓存落点 | `CachePaths::media()` |
+| 6 | ~~`appinfo.cpp: migrateLegacy()` 旧版背景导入落点~~ **已于 2026-09-18 随迁移代码一并删除** | `...\bg` | 缓存落点 | 无（不再有旧版导入） |
 | 7 | `engine.cpp: extractDlls()` / `ensureDataDirs()` / `writeImageConfig()` / `writeEffectConfig()` | `%LOCALAPPDATA%\Yumeiren\dll\{ExplorerBgTool,ExplorerBlurMica}\*.dll` + `config.ini` | Hook DLL 与其派生配置(**追加迁移**，第二阶段) | `Engine::dllRoot()` = `<程序目录>\dll`(与 `.cache` 同级，不在 `.cache` 内) |
 
 `Engine::bgDir()` 保留名字但改为委派 `CachePaths::media()`；`Engine::ensureDataDirs()`
@@ -56,7 +56,7 @@ Hook DLL 一侧，原 `Engine::dataRoot()` 用法由 `Engine::dllRoot()` 取代�
 | 内容 | 位置 | 状态 |
 | --- | --- | --- |
 | 应用统一配置 | `<程序目录>\config\.ini`(`AppConfig`，构造时拼路径) | **未改动**：路径、加载、保存、校验、迁移逻辑全部原样 |
-| 旧版注册表配置 | `HKCU\Software\Yumeiren\Yumeiren`、`HKCU\Software\FolderBgStudio` | 只读迁移源，未改动 |
+| 旧版注册表配置 | ~~`HKCU\Software\Yumeiren\Yumeiren`、`HKCU\Software\FolderBgStudio`~~ | **已于 2026-09-18 删除**：`AppConfig::migrateFromRegistry()` 与 `appinfo::migrateLegacy()` 一并移除，程序不再读任何旧版残留 |
 | Hook DLL | `<程序目录>\dll\{ExplorerBgTool,ExplorerBlurMica}\*.dll` | **已迁移**(追加)：绝对路径登记在 HKLM，改路径需重新注册，见第 5 节 |
 | Hook DLL 配置文件 | 同目录 `config.ini`(`writeImageConfig`/`writeEffectConfig` 每次应用整体重写) | 随 DLL 一起迁移。用户设置本身存在 `<程序目录>\config\.ini`，这两个 ini 是派生产物，不需要搬旧值 |
 | 用户媒体与图库目录 | `<程序目录>\media\image`、`media\video`、用户自选的 `image/galleryDir` | 不迁移(本来已在程序目录内) |
@@ -113,9 +113,9 @@ Hook DLL 一侧，原 `Engine::dataRoot()` 用法由 `Engine::dllRoot()` 取代�
 - **`config` 中 `image/customPath` 可能指向旧 AppData 的 `bg/current_wallpaper.jpg`**：
   旧文件按要求仍保留在原处不删除，但软件不再认它是缓存；用户重新点"获取桌面壁纸"即可。
   本机该项为空，无实际影响。
-- **旧版(FolderBgStudio)一次性导入**保留原功能，只是落点随缓存改为 `.cache/media`；
-  它读的是旧版目录，不是 `AppData\Local\Yumeiren`，不属于任务书 §12 禁止的旧缓存迁移。
-  若希望彻底不做任何历史缓存导入，可删掉 `appinfo.cpp` 第 2 段(约 20 行)。
+- **旧版一次性导入已删除**(2026-09-18)：`appinfo::migrateLegacy()` / `migrateFromRegistry()` 与
+  启动提示全部移除。本项目视为全新项目，不迁移任何旧版残留（注册表配置、背景缓存、旧自启项）；
+  首次运行只生成自己的 `<程序目录>\config\.ini` 与 `.cache`。
 - **Hook DLL 换路径后必须重新注册**(第二阶段)：老用户升级后 HKLM 仍指旧 AppData 路径，
   在点下一次「应用」之前，壁纸/特效继续由旧 DLL 提供(功能不中断，但 DLL 有两份并存)；
   重新注册需要 UAC，且 Explorer 需重启才会换加载新 DLL。`unregisterDllInternal()` 对

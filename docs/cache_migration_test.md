@@ -169,6 +169,9 @@ effectDllPath  =.../new-build/dll/ExplorerBlurMica/ExplorerBlurMica.dll
    未实测项 2。老用户(已注册)升级后首次启动会看到"旧目录注册(需重新应用)"提示，
    点一次「应用」即可；期间旧 DLL 仍在工作，功能不会中断。
 4. **正式 Release 包未实机运行**(见 §1)，发布前建议手工跑一遍 §8 未覆盖项。
-5. `new-build\.cache\media` 里两个文件来自旧版 `FolderBgStudio` 的一次性导入(`QFile::copy`
+5. ~~`new-build\.cache\media` 里两个文件来自旧版 `FolderBgStudio` 的一次性导入(`QFile::copy`
    保留了源文件时间戳)，不是从 `AppData\Local\Yumeiren` 搬来的；若不希望保留这段历史导入行为，
-   删 `appinfo.cpp` 的第 2 段(约 20 行)即可。
+   删 `appinfo.cpp` 的第 2 段(约 20 行)即可。~~
+   **已处理(2026-09-18)**：`appinfo::migrateLegacy()` 连同 `AppConfig::migrateFromRegistry()`
+   一并删除，程序不再导入任何旧版残留。存量 `.cache\media` 里那两个文件属于历史文件，
+   确认无用后可手工删除。

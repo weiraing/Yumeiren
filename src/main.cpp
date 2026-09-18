@@ -72,8 +72,8 @@ int main(int argc, char *argv[])
         return jobExit;
     }
 
-    AppConfig::instance().load(); // 统一配置: 主窗口创建前加载(目录创建/迁移/校验)
-    videodiag::stage(QStringLiteral("配置加载(含注册表迁移与校验)"));
+    AppConfig::instance().load(); // 统一配置: 主窗口创建前加载(目录创建/校验/修复)
+    videodiag::stage(QStringLiteral("配置加载(创建/校验/修复)"));
 
     // 资源友好模式(默认开)：限制进程到 4 个逻辑核，且优先分属 4 个不同物理核。
     // 解码线程数跟随 QThread::idealThreadCount(受亲和性掩码影响)，实测
@@ -132,9 +132,7 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    // one-shot import of the settings left behind by the FolderBgStudio builds
-    appinfo::migrateLegacy();
-    videodiag::stage(QStringLiteral("单实例守卫与旧配置导入"));
+    videodiag::stage(QStringLiteral("单实例守卫"));
 
     // 阶段7 诊断日志尽早初始化(幂等)：默认 Info+，诊断模式经 YUMEIREN_DIAG=1 开启
     videodiag::init();

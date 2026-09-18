@@ -6,17 +6,11 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDir>
-#include <QFile>
+#include <QFileInfo>
 #include <QRegularExpression>
 #include <QTimer>
-#include <windows.h>
 
 namespace {
-
-// 迁移源: 旧版配置(HKCU 注册表)。迁移后保留原键不删除——回滚旧版仍可读，
-// 任务书只要求"不再写入"。
-constexpr wchar_t kLegacyRegistryKey[] =
-    L"HKEY_CURRENT_USER\\Software\\Yumeiren\\Yumeiren";
 
 constexpr int kCurrentConfigVersion = 1;
 constexpr int kSaveDebounceMs = 500;
@@ -189,43 +183,16 @@ bool AppConfig::load()
             QStringLiteral("Config"));
     }
 
-    // 2) 旧注册表配置一次性迁入(仅当 INI 尚无用户键)
-    migrateFromRegistry();
-
-    // 3) 补齐缺失配置 + 修复非法值 + 写入版本号
+    // 2) 补齐缺失配置 + 修复非法值 + 写入版本号
     ensureDefaultsAndFix();
     if (!m_settings->contains(ConfigKeys::Meta::ConfigVersion))
         m_settings->setValue(ConfigKeys::Meta::ConfigVersion, kCurrentConfigVersion);
 
     save();
     videodiag::log(videodiag::Level::Info,
-        QStringLiteral("配置已加载: %1%2")
-            .arg(configFilePath(),
-                 m_migrated ? QStringLiteral(" (已从注册表迁移旧配置)")
-                            : QString()),
+        QStringLiteral("配置已加载: %1").arg(configFilePath()),
         QStringLiteral("Config"));
     return true;
-}
-
-void AppConfig::migrateFromRegistry()
-{
-    QSettings legacy(QString::fromWCharArray(kLegacyRegistryKey), QSettings::NativeFormat);
-    const QStringList keys = legacy.allKeys();
-    if (keys.isEmpty())
-        return;
-    int copied = 0;
-    for (const QString &k : keys) {
-        if (m_settings->contains(k))
-            continue; // INI 已有的键不覆盖
-        m_settings->setValue(k, legacy.value(k));
-        ++copied;
-    }
-    if (copied > 0) {
-        m_migrated = true;
-        videodiag::log(videodiag::Level::Info,
-            QStringLiteral("已从旧注册表配置迁移 %1 项设置(原键保留未删除)").arg(copied),
-            QStringLiteral("Config"));
-    }
 }
 
 void AppConfig::ensureDefaultsAndFix()

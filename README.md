@@ -37,9 +37,7 @@ Live2D Cubism 驱动的无边框透明桌面宠物，常驻桌面、可拖动、
 </tr>
 </table>
 
-> **关于名字**：程序在任务栏与窗口标题中显示为 `Yumeiren`（进程描述为「虞美人」），
-> 这是从早期原型 **FolderBgStudio** 改名而来。首次运行会自动迁移旧版残留的
-> 注册表配置、背景缓存与开机自启项，无需手工清理。
+> **关于名字**：程序在任务栏与窗口标题中显示为 `Yumeiren`，进程描述为「虞美人」。
 
 ---
 
@@ -152,7 +150,7 @@ Live2D Cubism 驱动的无边框透明桌面宠物，常驻桌面、可拖动、
 | Windows 大版本更新后背景消失 | 重新点击「应用」即可 |
 | 资源管理器窗口无法打开 | 按住 **ESC** 键点击资源管理器可跳过背景加载，然后在本工具点击「恢复」 |
 | 「主页 / 图库」页看不到背景 | 属正常现象，进入任意文件夹查看 |
-| 提示「旧目录注册（需重新应用）」 | 从旧版升级后 Hook DLL 的注册表路径仍指向旧目录，点一次「应用图片背景」或「应用特效」（需同意 UAC）即可完成迁移；旧的 `%LOCALAPPDATA%\Yumeiren\dll` 不会自动删除，确认正常后可手工清理 |
+| 提示「旧目录注册（需重新应用）」 | Hook DLL 的绝对路径登记在 `HKLM` 的 CLSID 里，程序换过目录后注册表仍指向旧路径，点一次「应用图片背景」或「应用特效」（需同意 UAC）即可重新注册；旧的 `%LOCALAPPDATA%\Yumeiren\dll` 不会自动删除，确认正常后可手工清理 |
 | 看板娘不显示模型 | 检查 `<程序目录>/data/models/<模型名>/` 下是否有 `*.model3.json` 与贴图；再看 `.cache/logs/videowallpaper.log` |
 
 ---
@@ -468,7 +466,7 @@ graph TD
     main["main.cpp"] --> AppConfig["AppConfig / ConfigKeys<br/>统一配置中心"]
     main --> MainWindow
     main --> CachePaths["CachePaths<br/>缓存目录"]
-    main --> AppInfo["AppInfo<br/>产品信息 / 迁移"]
+    main --> AppInfo["AppInfo<br/>产品信息 / 自启项"]
 
     MainWindow["MainWindow<br/>主窗口 + 4 个功能页"] --> Engine["Engine<br/>系统后端"]
     MainWindow --> ImageProcess["ImageProcess"]
@@ -514,8 +512,8 @@ graph TD
 Yumeiren/
 ├── src/
 │   ├── main.cpp                    # 入口：着色器缓存开关、单实例、配置加载、亲和性
-│   ├── app/                        # 产品信息、运行状态、退出收口、旧版迁移
-│   ├── config/                     # AppConfig（INI 读写/校验/迁移/延迟保存）+ ConfigKeys
+│   ├── app/                        # 产品信息、运行状态、退出收口
+│   ├── config/                     # AppConfig（INI 读写/校验/延迟保存）+ ConfigKeys
 │   ├── core/                       # CachePaths / Diagnostics / ImageProcess
 │   ├── engine/                     # 系统后端（DLL 释放、注册、Explorer 重启）
 │   ├── kanban/                     # 看板娘：控制器 / 状态机 / 窗口 / 渲染器 / 模型管理
@@ -561,14 +559,14 @@ Yumeiren/
 | 模型预览图缓存 | `<程序目录>/.cache/model-thumbs/<模型文件夹名>.png` |
 | 开机自启 | 注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 值 `Yumeiren` |
 
-配置中心带**启动校验修复**与 **500ms 延迟批量保存**；旧版（`FolderBgStudio` / `YuMeiren`）
-的注册表配置、背景缓存与自启项会在**首次运行时一次性迁移**。相关文档见
+配置中心带**启动校验修复**与 **500ms 延迟批量保存**：首次运行会在 `<程序目录>/config/.ini`
+生成配置并补齐默认值。相关文档见
 [docs/cache_directory.md](docs/cache_directory.md)、[docs/cache_path_audit.md](docs/cache_path_audit.md)
 与 [docs/dev/REFACTORING_GUIDE.md](docs/dev/REFACTORING_GUIDE.md)。
 
-Hook DLL 的绝对路径登记在 `HKLM` 的 CLSID 里。从旧版（`%LOCALAPPDATA%\Yumeiren\dll`）升级后
-注册表仍指向旧路径，软件会在日志区提示「旧目录注册（需重新应用）」，点一次
-「应用图片背景」或「应用特效」（需同意 UAC）即可完成迁移注册。
+Hook DLL 的绝对路径登记在 `HKLM` 的 CLSID 里。程序换过目录后注册表仍指向旧路径，软件会在
+日志区提示「旧目录注册（需重新应用）」，点一次「应用图片背景」或「应用特效」（需同意 UAC）
+即可重新注册。
 
 ### 诊断
 

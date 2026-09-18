@@ -1,19 +1,14 @@
 #ifndef APPINFO_H
 #define APPINFO_H
 
-#include <QSettings>
 #include <QString>
-#include <QStringList>
 
 // Product identity in one place: the executable name, the settings keys, the
 // data folder and the autostart entry all come from these constants so they
 // cannot drift apart again.
-//
-//   Yumeiren / 虞美人   (renamed from the FolderBgStudio prototype)
 namespace appinfo {
 
 inline constexpr const char kId[] = "Yumeiren";
-inline constexpr const char kLegacyId[] = "FolderBgStudio";
 
 QString id();          // "Yumeiren"
 QString displayName(); // 品牌名(侧边栏/自绘标题栏): "虞美人"
@@ -25,19 +20,14 @@ QString windowTitle(); // 原生窗口标题(任务管理器窗口行/单实例�
 QString version();
 
 QString localAppDataDir();
-QString dataRoot();        // %LOCALAPPDATA%\Yumeiren
-QString legacyDataRoot();  // %LOCALAPPDATA%\FolderBgStudio (migration only)
-
+// %LOCALAPPDATA%\Yumeiren —— 只用来指认**本程序曾经使用过的**数据目录位置：Engine 拿它
+// 拼出旧的 DLL 目录，好在界面上说清「旧目录里那份不会自动删，确认正常后可手工清理」。
+// 程序自己的配置与缓存都在 <程序目录>/.cache 下（见 CachePaths）。
+QString dataRoot();
 
 // "Run at logon" entry in HKCU\...\CurrentVersion\Run.
 void setAutostart(bool on);
 bool autostartEnabled();
-
-// Import what the pre-rename build left behind: settings keys, cached images
-// and the autostart entry. Safe to call on every start; it only acts once.
-// Returns human readable notes for the log line.
-QStringList migrateLegacy();
-const QStringList &migrationNotes();
 
 } // namespace appinfo
 
