@@ -257,6 +257,11 @@ void VideoWallpaper::playIndex(int index, qint64 resumePos)
         }
     }
     if (!sameSource) {
+        // 换素材：自动限帧值先清零，等新素材的元数据到达再重新判定，否则 1080p
+        // 素材会继承上一条 4K 的 24 帧上限。同一素材重播(单循环/错误重试)必须
+        // 保留该值——那条路径不会再发一次 metaDataChanged，清了就永久丢失自动限帧。
+        m_autoFps = 0;
+        resetFramePacing();
         // 媒体打开+解码器初始化需要 1-2s，立刻给出状态反馈避免“点了没反应”
         emit playbackStateChanged(
             QStringLiteral("第 %1 个 打开中…").arg(m_index + 1));
@@ -297,6 +302,7 @@ void VideoWallpaper::restartSingleLoop()
             .arg(quintptr(m_outputs.first().player), 0, 16));
     m_watchPosMs = -1;
     m_watchStalls = 0;
+    resetFramePacing(); // 回绕后第一帧必须立即呈现，不沿用旧节拍
     for (const VideoOutput &out : std::as_const(m_outputs)) {
         if (!isLiveOutput(out))
             continue;

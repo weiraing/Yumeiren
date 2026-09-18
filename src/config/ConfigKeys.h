@@ -58,6 +58,10 @@ inline constexpr auto RandomLegacy = "video/random";
 inline constexpr auto PauseFullscreen = "video/pauseFullscreen";
 inline constexpr auto PauseBattery = "video/pauseBattery";
 inline constexpr auto TargetFps = "video/targetFps";
+// 限帧方式：true=保速丢帧(画面速度不变，3D 引擎占用按比例下降，解码开销不变)，
+// false=慢动作(setPlaybackRate 放慢，解码与 GPU 同时下降，最省资源但画面变慢)。
+// 见 VideoWallpaper::setKeepSpeed。
+inline constexpr auto FpsKeepSpeed = "video/fpsKeepSpeed";
 inline constexpr auto Reclaim = "video/reclaim";
 inline constexpr auto ScreenMode = "video/screenMode";
 inline constexpr auto AffinityLimit = "video/affinityLimit";

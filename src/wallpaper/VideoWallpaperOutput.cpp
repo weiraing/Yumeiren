@@ -18,6 +18,8 @@
 #include <QScreen>
 #include <QThread>
 #include <QTimer>
+#include <QVideoFrame>
+#include <QVideoSink>
 #include <QVideoWidget>
 
 #ifdef Q_OS_WIN
@@ -100,6 +102,11 @@ void VideoWallpaper::layoutOutputs()
                                    | Qt::WindowTransparentForInput);
         out.player = new QMediaPlayer(this);
         out.audio = new QAudioOutput(this);
+        // 限帧中转 sink：挂在播放器下(而不是本单例下)，播放器析构时会一并销毁，
+        // 既不会跨代累积，也不会出现「播放器还活着而 sink 先死」的悬空指针。
+        // 不直接用 setVideoOutput(widget)：那样播放器把帧直接喂给窗口的 sink，
+        // 应用层没有任何插入点，「保速丢帧」就无从实现。
+        out.tap = new QVideoSink(out.player);
         ++m_playersCreated;
         ++m_widgetsCreated;
         ++m_audiosCreated;
@@ -110,11 +117,16 @@ void VideoWallpaper::layoutOutputs()
                 .arg(m_audiosCreated).arg(m_audiosDestroyed));
         out.audio->setMuted(true);
         out.player->setAudioOutput(out.audio);
-        out.player->setVideoOutput(out.widget);
+        out.player->setVideoSink(out.tap);
+        connect(out.tap, &QVideoSink::videoFrameChanged, this,
+                [this, player = out.player](const QVideoFrame &frame) {
+            forwardFrame(frame, player);
+        });
         videodiag::logObjectEvent("create", out.player,
-            QStringLiteral("player widget=%1 audio=%2")
+            QStringLiteral("player widget=%1 audio=%2 sink=%3")
                 .arg(quintptr(out.widget), 0, 16)
-                .arg(quintptr(out.audio), 0, 16));
+                .arg(quintptr(out.audio), 0, 16)
+                .arg(quintptr(out.tap), 0, 16));
         videodiag::logObjectEvent("bind", out.widget, QStringLiteral("player=0x%1")
             .arg(quintptr(out.player), 0, 16));
 
@@ -206,24 +218,46 @@ void VideoWallpaper::layoutOutputs()
             applyPlaybackRate(out.player);
             const QSize res = out.player->metaData()
                                   .value(QMediaMetaData::Resolution).toSize();
-            if (!res.isValid() || res == m_lastHintRes)
-                return;
-            m_lastHintRes = res;
+            if (!res.isValid())
+                return; // 元数据还没到齐：分辨率未知时不动自动限帧，等下一次回调
             QSize screen;
             if (const QScreen *s = QGuiApplication::primaryScreen()) {
                 const qreal dpr = s->devicePixelRatio();
                 screen = QSize(qRound(s->geometry().width() * dpr),
                                qRound(s->geometry().height() * dpr));
             }
-            if (screen.isEmpty()
-                || res.width() * res.height() <= screen.width() * screen.height())
+            // 素材像素数高于屏幕物理像素 → 本次会话自动限帧。
+            // 只影响运行时，绝不写进用户配置：用户把「帧率上限」手动改成别的值
+            // (m_targetFps>0)时以手动值为准，自动值自动让位；改回「跟随视频」即恢复。
+            // 依据：3D 引擎单位帧成本与源像素成正比(1080p 0.51%/帧 vs 4K 1.92%/帧)，
+            // 4K 素材在 2560×1600 屏上等于先按 4K 做完色彩转换再丢掉一半像素。
+            const bool oversized =
+                !screen.isEmpty()
+                && res.width() * res.height() > screen.width() * screen.height();
+            const int autoFps = oversized ? kAutoFpsOversized : 0;
+            if (autoFps != m_autoFps) {
+                m_autoFps = autoFps;
+                resetFramePacing();
+                applyPlaybackRate(out.player);
+                videodiag::log(videodiag::Level::Info,
+                    QStringLiteral("自动限帧: %1x%2 对屏幕 %3x%4 → 上限=%5")
+                        .arg(res.width()).arg(res.height())
+                        .arg(screen.width()).arg(screen.height())
+                        .arg(autoFps > 0 ? QString::number(autoFps)
+                                         : QStringLiteral("跟随视频")));
+            }
+            if (res == m_lastHintRes)
+                return;
+            m_lastHintRes = res;
+            if (!oversized)
                 return;
             // 内存估算来自归因实验阶梯：固定 ~210MB + ~88MB/百万像素(±15%)
             const int est = qRound((210.0 + 88.0 * (double(res.width()) * res.height() / 1e6)) / 10) * 10;
             emit playbackStateChanged(QStringLiteral(
                 "提示：视频分辨率 %1×%2 高于主屏物理分辨率，播放内存/显存占用较高"
-                "（实测约 %3MB），可继续使用或更换适配素材")
-                .arg(res.width()).arg(res.height()).arg(est));
+                "（实测约 %3MB）；已自动把帧率上限设为 %4（保速丢帧，画面速度不变），"
+                "可在左侧「帧率上限」改回跟随视频")
+                .arg(res.width()).arg(res.height()).arg(est).arg(kAutoFpsOversized));
         });
         // 解码/打开失败 → 有限重试 → 提示并自动跳过；连续失败铺满列表即整体
         // 停播。只有首个输出参与推进(MirrorAll 的副本播放器会对同一文件重复报错)。
@@ -284,6 +318,59 @@ void VideoWallpaper::layoutOutputs()
             makeOutput(screens[i]->geometry(), i == 0);
     }
 }
+VideoWallpaper::VideoOutput *VideoWallpaper::liveOutputFor(const QMediaPlayer *player)
+{
+    // lambda 里按值捕获的 VideoOutput 副本会随重挂载/重建过期(widget 指针变了)，
+    // 所以每次回调都按播放器指针回到现役表里取当前那一项。
+    if (m_shuttingDown || !player)
+        return nullptr;
+    for (VideoOutput &out : m_outputs)
+        if (out.player == player)
+            return &out;
+    return nullptr;
+}
+void VideoWallpaper::forwardFrame(const QVideoFrame &frame, const QMediaPlayer *player)
+{
+    VideoOutput *out = liveOutputFor(player);
+    if (!out || !out->widget)
+        return; // 输出已卸载/正在退出：丢弃这一帧，不再触碰窗口
+    QVideoSink *dst = out->widget->videoSink();
+    if (!dst)
+        return;
+    const int fps = effectiveTargetFps();
+    // 不限帧(跟随视频且素材没触发自动限帧)与慢动作档都是整帧直通：
+    // 慢动作档的限帧已经由 setPlaybackRate 在上游完成，到达这里的帧本来就少。
+    if (fps <= 0 || !m_keepSpeed) {
+        dst->setVideoFrame(frame);
+        return;
+    }
+    // 保速丢帧：按节拍器决定这一帧转不转发。
+    // 周期用整数纳秒，容差取周期的 1/8 —— 容差太小会在「源帧率≈目标帧率」时因
+    // 取整抖动误丢帧(24fps 素材限 24 会掉到 16)，太大则会把目标抬高一档
+    // (60fps 素材限 24 会变成 30)。1/8 周期在 24 与 30 两个常见目标上都收敛。
+    // 节拍用单调时钟而不是帧 PTS：不依赖后端是否填了 startTime，且对暂停/回绕
+    // 天然免疫(重同步分支会把欠账一笔勾销)。
+    if (!out->frameClock.isValid()) {
+        out->frameClock.start();
+        out->nextFrameNs = 0;
+    }
+    const qint64 periodNs = 1000000000LL / fps;
+    const qint64 now = out->frameClock.nsecsElapsed();
+    if (now + periodNs / 8 < out->nextFrameNs)
+        return; // 还没到下一个呈现时刻：这一帧到此为止(不拷贝、不上传、不合成)
+    // 落后超过一个周期(暂停/回绕/seek 之后)就重新对齐，绝不补帧补出连发
+    out->nextFrameNs = (now > out->nextFrameNs + periodNs) ? now + periodNs
+                                                          : out->nextFrameNs + periodNs;
+    dst->setVideoFrame(frame);
+}
+void VideoWallpaper::resetFramePacing()
+{
+    // 只失效节拍器，不碰播放器/窗口：下一帧到达时 forwardFrame 会重新起表并放行。
+    for (VideoOutput &out : m_outputs) {
+        out.frameClock.invalidate();
+        out.nextFrameNs = 0;
+    }
+}
 void VideoWallpaper::remountOutputs()
 {
     if (m_shuttingDown)
@@ -295,17 +382,19 @@ void VideoWallpaper::remountOutputs()
         // explorer 重启会销毁其 WorkerW 及挂在下面的我们的原生窗口，而 Qt 并不
         // 知道原生句柄已死(winId() 返回陈旧句柄)。仅重建原生窗口不够：实测
         // QVideoWidget 的呈现面(D3D 交换链)随旧窗口一起失效，播放器继续向旧
-        // 表面送帧，新窗口永远收不到画面(壁纸"消失")。必须换全新 QVideoWidget
-        // 并重新绑定视频输出，让呈现面从零建立。
+        // 表面送帧，新窗口永远收不到画面(壁纸"消失")。必须换全新 QVideoWidget，
+        // 让呈现面从零建立。
+        // 注意：这里**不能**再调 player->setVideoOutput(nw) —— 那会把播放器的
+        // sink 从限帧中转换回窗口自带 sink，丢帧逻辑当场失效。中转链不变，
+        // 下一帧转发时自然落到新窗口的 sink 上。
         if (!IsWindow(reinterpret_cast<HWND>(out.widget->winId()))) {
             videodiag::log(videodiag::Level::Info,
-                QStringLiteral("壁纸窗口原生句柄已失效(explorer 重启)，更换视频窗口并重绑输出"));
+                QStringLiteral("壁纸窗口原生句柄已失效(explorer 重启)，更换视频窗口(限帧中转保持不变)"));
             QVideoWidget *old = out.widget;
             QVideoWidget *nw = new QVideoWidget;
             nw->setAspectRatioMode(old->aspectRatioMode());
             nw->setWindowFlags(old->windowFlags());
             nw->setGeometry(old->geometry());
-            out.player->setVideoOutput(nw); // 视频输出重绑到新窗口(旧 sink 随之释放)
             out.widget = nw;
             nw->show();
             old->deleteLater();

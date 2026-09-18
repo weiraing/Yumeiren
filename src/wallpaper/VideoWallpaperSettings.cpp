@@ -71,9 +71,28 @@ void VideoWallpaper::setMonitorOn(bool on)
     m_monitorOn = on;
     evaluateSuspend();
 }
+int VideoWallpaper::effectiveTargetFps() const
+{
+    // 手动设置优先；用户没设过(跟随视频)时才用「素材像素高于屏幕」触发的自动值。
+    return m_targetFps > 0 ? m_targetFps : m_autoFps;
+}
 void VideoWallpaper::setTargetFps(int fps)
 {
-    m_targetFps = qBound(0, fps, 240);
+    const int bounded = qBound(0, fps, 240);
+    if (bounded == m_targetFps)
+        return; // 值未变时不重算：启动时 loadSettings 会重复回填一次
+    m_targetFps = bounded;
+    resetFramePacing(); // 换目标帧率要立刻生效，不能沿用旧节拍的下一个截止时刻
+    for (const VideoOutput &out : std::as_const(m_outputs))
+        if (isLiveOutput(out))
+            applyPlaybackRate(out.player);
+}
+void VideoWallpaper::setKeepSpeed(bool on)
+{
+    if (m_keepSpeed == on)
+        return;
+    m_keepSpeed = on;
+    resetFramePacing();
     for (const VideoOutput &out : std::as_const(m_outputs))
         if (isLiveOutput(out))
             applyPlaybackRate(out.player);
@@ -83,15 +102,19 @@ void VideoWallpaper::applyPlaybackRate(QMediaPlayer *player)
     if (!player)
         return;
     double rate = 1.0;
-    if (m_targetFps > 0) {
+    const int fps = effectiveTargetFps();
+    // 保速档必须恒为 1.0：限帧由 forwardFrame 丢帧完成，这里再放慢就成了两头都限，
+    // 画面既丢帧又变慢。只有慢动作档才把播放速率本身当作限帧手段。
+    if (!m_keepSpeed && fps > 0) {
         const double src = player->metaData()
                                .value(QMediaMetaData::VideoFrameRate)
                                .toDouble();
-        if (src > m_targetFps + 0.5)
-            rate = m_targetFps / src;
+        if (src > fps + 0.5)
+            rate = fps / src;
     }
     videodiag::log(videodiag::Level::Debug,
-        QStringLiteral("setPlaybackRate(%1)").arg(rate));
+        QStringLiteral("setPlaybackRate(%1) keepSpeed=%2 fps=%3")
+            .arg(rate).arg(m_keepSpeed ? 1 : 0).arg(fps));
     player->setPlaybackRate(rate);
 }
 void VideoWallpaper::setVolume(int percent)

@@ -1149,6 +1149,8 @@ void MainWindow::loadSettings()
             }
         VideoWallpaper::instance().setTargetFps(targetFps);
     }
+    m_fpsKeepSpeedBox->setChecked(s.value(ConfigKeys::Video::FpsKeepSpeed, true).toBool());
+    VideoWallpaper::instance().setKeepSpeed(m_fpsKeepSpeedBox->isChecked());
     m_reclaimBox->setChecked(s.value(ConfigKeys::Video::Reclaim, true).toBool());
     m_affinityBox->setChecked(s.value(ConfigKeys::Video::AffinityLimit, true).toBool());
     m_screenModeCombo->setCurrentIndex(s.value(ConfigKeys::Video::ScreenMode, 0).toInt());

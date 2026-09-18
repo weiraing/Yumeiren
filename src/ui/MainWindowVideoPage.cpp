@@ -211,18 +211,20 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     modeRow->addWidget(m_screenModeCombo, 1);
     leftLay->addLayout(modeRow);
 
-    // 帧率上限：默认 30 FPS；仅当视频帧率高于上限时生效(适当放慢呈现节奏)
+    // 帧率上限：默认 24 FPS；仅当视频帧率高于上限时生效
     auto *fpsRow = new QHBoxLayout();
     fpsRow->addWidget(new QLabel(QStringLiteral("帧率上限"), leftCard));
     m_fpsBox = new QComboBox(leftCard);
     m_fpsBox->addItems({QStringLiteral("跟随视频"), QStringLiteral("15 FPS"),
                         QStringLiteral("24 FPS"), QStringLiteral("30 FPS"),
                         QStringLiteral("60 FPS")});
-    m_fpsBox->setCurrentIndex(2); // 默认 24 FPS(省内存/显存/CPU；高于24fps的素材为慢动作)
+    m_fpsBox->setCurrentIndex(2); // 默认 24 FPS
     styleCombo(m_fpsBox);
     m_fpsBox->setToolTip(tooltipstyle::format(QStringLiteral(
-            "限制壁纸呈现帧率：视频帧率高于上限时按上限放慢呈现节奏(画面为慢动作效果)；"
-            "“跟随视频”保持原生帧率")));
+            "限制壁纸呈现帧率：视频帧率高于上限时，多出来的帧不再提交呈现。\n"
+            "GPU 的 3D 引擎（色彩转换+缩放）占用按呈现帧数线性下降。\n"
+            "「跟随视频」保持原生帧率（最费资源）。\n"
+            "分辨率高于屏幕的素材会被自动限到 24 FPS，改回「跟随视频」即可取消。")));
     connect(m_fpsBox, &QComboBox::currentIndexChanged, this, [this](int index) {
         static const int fpsValues[] = {0, 15, 24, 30, 60};
         VideoWallpaper::instance().setTargetFps(fpsValues[qBound(0, index, 4)]);
@@ -231,6 +233,22 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     });
     fpsRow->addWidget(m_fpsBox, 1);
     leftLay->addLayout(fpsRow);
+
+    // 限帧方式(二选一，默认保速丢帧)。两档的省法完全不同，用词必须写清楚，
+    // 否则用户只会看到"帧率上限"却不知道自己付了什么代价。
+    m_fpsKeepSpeedBox = new QCheckBox(QStringLiteral("限帧时保持播放速度"), leftCard);
+    m_fpsKeepSpeedBox->setChecked(true);
+    m_fpsKeepSpeedBox->setToolTip(tooltipstyle::format(QStringLiteral(
+            "勾选（默认）：丢掉多余的帧，画面速度与素材一致。解码器照常满速跑，"
+            "省不到解码那一段开销 —— 4K60 限 24 时 3D 引擎约降 20%。\n"
+            "取消勾选：按上限放慢播放（慢动作），解码器一起减速 —— 同样条件下 "
+            "3D 引擎约降 50%，内存/显存同步下降。资源最省的档位，代价是画面明显变慢。")));
+    connect(m_fpsKeepSpeedBox, &QCheckBox::toggled, this, [this](bool on) {
+        VideoWallpaper::instance().setKeepSpeed(on);
+        AppConfig &st = AppConfig::instance();
+        st.setValue(ConfigKeys::Video::FpsKeepSpeed, on);
+    });
+    leftLay->addWidget(m_fpsKeepSpeedBox);
 
     // 左列一张卡片：视频壁纸参数。卡片高度随内容收缩(去掉卡内 addStretch)，
     // 空白集中到列尾。

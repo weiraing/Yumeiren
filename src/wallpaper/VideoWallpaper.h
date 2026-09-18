@@ -9,6 +9,7 @@
 #ifndef VIDEOWALLPAPER_H
 #define VIDEOWALLPAPER_H
 
+#include <QElapsedTimer>
 #include <QObject>
 #include <QRect>
 #include <QSet>
@@ -17,7 +18,8 @@
 class QMediaPlayer;
 class QAudioOutput;
 class QVideoWidget;
-class QElapsedTimer;
+class QVideoSink;
+class QVideoFrame;
 class QTimer;
 
 /**
@@ -46,6 +48,11 @@ public:
     //   Random     随机     —— 每次从列表随机挑一条，播完再随机挑下一条
     enum PlayMode { SingleLoop = 0, ListLoop = 1, Random = 2 };
 
+    // 素材像素数高于屏幕物理像素时，本次会话自动采用的帧率上限。4K(3840×2160)
+    // 在 2560×1600 屏上是 2.0 倍像素，实测 3D 引擎每帧成本也是 1080p 的 3.8 倍，
+    // 限到 24 帧即可让 3D 占用按呈现帧数比例下降，而画面速度不受影响。
+    static constexpr int kAutoFpsOversized = 24;
+
     static VideoWallpaper &instance();
 
     const QStringList &playlist() const { return m_playlist; }
@@ -70,6 +77,19 @@ public:
     void setVolume(int percent);
     void setMonitorOn(bool on);
     void setTargetFps(int fps);
+    // 限帧方式(见 ConfigKeys::Video::FpsKeepSpeed)：
+    //   true  保速丢帧 —— 播放速率恒为 1.0，多出来的帧在 QVideoSink 中转处丢弃。
+    //         画面速度与素材一致；GPU 的 3D 引擎(色彩转换+缩放)占用按呈现帧数
+    //         线性下降，但解码引擎与帧池不变(解码器仍按源帧率出帧)。
+    //   false 慢动作   —— setPlaybackRate 放慢，呈现帧数同样下降，且因消费端变慢
+    //         把解码器一起拖住，解码、GPU、帧池三项同时下降，是资源最省的档位，
+    //         代价是画面明显变慢。
+    void setKeepSpeed(bool on);
+    bool keepSpeed() const { return m_keepSpeed; }
+    // 本次会话的有效帧率上限：手动设置优先，其次是对高分辨率素材的自动限帧。
+    int effectiveTargetFps() const;
+    // 当前是否处于「素材分辨率高于屏幕」的自动限帧状态(UI 提示用)。
+    bool autoFpsActive() const { return m_targetFps <= 0 && m_autoFps > 0; }
     bool isStarted() const { return m_started; }
     void evaluateSuspend();
     // 退出收口(崩溃修复)：必须在 main() 里、QApplication 仍存活时调用。
@@ -119,10 +139,24 @@ private:
         QVideoWidget *widget = nullptr;
         QMediaPlayer *player = nullptr;
         QAudioOutput *audio = nullptr;
+        // 限帧中转(保速丢帧)：播放器把帧交给 tap，tap 的 videoFrameChanged 里
+        // 按目标帧率决定是否转发给 widget->videoSink()。帧是隐式共享的
+        // QVideoFrame，转发只是一次引用计数，不产生拷贝；被丢掉的帧到此为止。
+        QVideoSink *tap = nullptr;
+        // 丢帧节拍器：只在 tap 的回调里读写。用单调时钟而不是帧 PTS，是为了
+        // 不依赖后端是否填了 startTime，且对「暂停后恢复/回绕」天然免疫。
+        QElapsedTimer frameClock;
+        qint64 nextFrameNs = 0; // 下一个允许转发的时刻(ns，相对 frameClock)
         QRect logicalRect; // 期望的逻辑几何(所在屏幕/覆盖区域)，重挂载时换算物理坐标比对
     };
     // 捕获型 lambda 的存活校验(任务书 6.3)：只比对指针值，绝不解引用可能已释放的对象
     bool isLiveOutput(const VideoOutput &out) const;
+    // 按播放器指针取当前有效的输出项(输出可能已被卸载/重建，lambda 里的副本会过期)
+    VideoOutput *liveOutputFor(const QMediaPlayer *player);
+    // tap 回调的落点：按目标帧率决定这一帧转不转发
+    void forwardFrame(const QVideoFrame &frame, const QMediaPlayer *player);
+    // 让下一次转发立即放行(改帧率上限/切限帧方式/换素材后调用)，避免沿用旧节拍
+    void resetFramePacing();
     // 持续挂起多久后卸载解码管线。按挂起原因分级：看不见且恢复必然伴随人工
     // 动作的场景(锁屏/熄屏)尽快释放，可能随时切回桌面的场景(全屏/遮挡)留短驻留。
     qint64 suspendReleaseThresholdMs(int reasons) const;
@@ -182,10 +216,16 @@ private:
     // 就地回绕重播。仅在心跳里读写，不参与其他逻辑。
     qint64 m_watchPosMs = -1;
     int m_watchStalls = 0;
-    // 帧率上限(0=跟随视频原生帧率)。默认 24：高于 24fps 的素材按比例放慢播放，
+    // 帧率上限(0=跟随视频原生帧率)。默认 24：高于 24fps 的素材按比例限帧，
     // 实测可显著降低内存/显存/CPU(4K60 约 -40%，见 VIDEO_MEDIA_COMPATIBILITY_POLICY.md)。
-    // 注意语义是"慢动作"而非丢帧渲染。
+    // 限帧方式由 m_keepSpeed 决定：保速丢帧(默认，画面速度不变)或慢动作(更省)。
     int m_targetFps = 24;
+    // true=保速丢帧(默认) / false=慢动作。见 setKeepSpeed。
+    bool m_keepSpeed = true;
+    // 本次会话的自动限帧值(0=不自动限帧)。素材像素数高于屏幕物理像素时置为
+    // kAutoFpsOversized，只影响本次播放，绝不写进用户配置；手动设过帧率上限
+    // (m_targetFps>0)时以手动值为准，自动值让位。
+    int m_autoFps = 0;
 
     // 错误恢复(阶段3)：每曲目独立失败计数；跳过一次即入失败名单(原地重试
     // 已在跳过前完成)，不再参与后续轮换——避免坏曲目每圈解码器重建的乒乓

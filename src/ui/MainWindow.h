@@ -254,6 +254,7 @@ private:
     QPushButton *m_playBtn = nullptr;
     QPushButton *m_pauseBtn = nullptr;
     QComboBox *m_fpsBox = nullptr;
+    QCheckBox *m_fpsKeepSpeedBox = nullptr; // 限帧方式：保速丢帧 / 慢动作
     QLabel *m_videoStatus = nullptr;
 
     // 显示器电源通知的订阅句柄(Windows 的 HPOWERNOTIFY)。用 void* 是为了不在头文件
