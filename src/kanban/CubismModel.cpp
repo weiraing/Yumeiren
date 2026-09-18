@@ -1,4 +1,5 @@
 #include "kanban/CubismModel_p.h"
+#include "kanban/ImageDecode.h"
 
 #include <QByteArray>
 #include <QDir>
@@ -313,7 +314,7 @@ bool CubismModelImpl::validateTextures(QString *outError)
     return true;
 }
 
-bool CubismModelImpl::decodeTextures(int maxDim, QString *outError)
+bool CubismModelImpl::decodeTextures(int windowMaxDim, QString *outError)
 {
     const csmInt32 count = m_setting->GetTextureCount();
     if (count <= 0) {
@@ -331,28 +332,26 @@ bool CubismModelImpl::decodeTextures(int maxDim, QString *outError)
             continue;
         }
         QImageReader reader(path);
+        // 最终上限要同时看「窗口够用值」和「素材自身尺寸」—— 后者才是关键：
+        // 一张 16384×8192 的打包图集压到窗口够用值(1024)就是 1/16，整只角色糊掉。
+        // 判定只用 reader.size()(读文件头)，不必先解码。
+        const int maxDim = textureMaxDimFor(windowMaxDim, reader.size());
         // 解码缩放比例在这里定下：全尺寸位图只在 scaled 之前短暂存在，留下的
         // 和上传的都是限幅后的那一份。0 = 原尺寸(策略关掉或绘制面未知)。
-        QSize target;
-        if (maxDim > 0) {
-            const QSize source = reader.size();
-            const int longest = qMax(source.width(), source.height());
-            if (source.isValid() && longest > maxDim) {
-                target = QSize(qMax(1, source.width() * maxDim / longest),
-                               qMax(1, source.height() * maxDim / longest));
-            }
-        }
-        QImage image = reader.read();
-        if (!image.isNull() && !target.isEmpty()) {
-            // 显式缩放而不是 setScaledSize：Qt 6 不允许指定自动缩放的重采样模式,
-            // 而默认那条路径在大比例缩减下会采出锯齿。
-            image = image.scaled(target, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-        }
+        //
+        // 顺带处理「图太大、撞上 Qt 全局分配上限」的情况 —— 见 kanban/ImageDecode.h，
+        // 那里记着 16384x8192 图集被静默拒绝的教训。
+        QImage image = readImageDownscaled(reader, maxDim);
         if (image.isNull()) {
             // 记住失败原因：ensureGl 由 30fps 的时钟驱动，逐帧重试会变成每帧
             // 读盘 + 解码一次的风暴。
-            m_decodeError = QStringLiteral("%1 解码失败(不是 PNG 或已损坏)")
-                                .arg(QFileInfo(path).fileName());
+            //
+            // 带上 Qt 自己的错误串：只说「不是 PNG 或已损坏」会把「超过分配上限」
+            // 也归到「文件坏了」里去，方向就查歪了。
+            const QString why = reader.errorString();
+            m_decodeError = QStringLiteral("%1 解码失败：%2")
+                                .arg(QFileInfo(path).fileName(),
+                                     why.isEmpty() ? QStringLiteral("原因未知") : why);
             if (outError) {
                 *outError = m_decodeError;
             }

@@ -1,4 +1,5 @@
 #include "kanban/PlaceholderRenderer.h"
+#include "kanban/ImageDecode.h"
 
 #include "core/Diagnostics.h"
 
@@ -102,22 +103,15 @@ bool PlaceholderRenderer::loadModel(const QString &modelJsonPath, QString *outEr
             // 软件视图的 resize 来自 QWidget::resizeEvent，宽高是逻辑像素，
             // 乘 DPR 就是设备像素，单位没有歧义。
             QImageReader reader(path);
-            const int maxDim = textureMaxDimFor(
+            const int windowMaxDim = textureMaxDimFor(
                 QSize(qRound(m_width * m_dpr), qRound(m_height * m_dpr)));
-            QSize target;
-            if (maxDim > 0) {
-                const QSize source = reader.size();
-                const int longest = qMax(source.width(), source.height());
-                if (source.isValid() && longest > maxDim) {
-                    target = QSize(qMax(1, source.width() * maxDim / longest),
-                                   qMax(1, source.height() * maxDim / longest));
-                }
-            }
-            m_modelTexture = reader.read();
-            if (!m_modelTexture.isNull() && !target.isEmpty()) {
-                m_modelTexture = m_modelTexture.scaled(target, Qt::IgnoreAspectRatio,
-                                                       Qt::SmoothTransformation);
-            }
+            // 再叠素材尺寸那条质量底线，与 GPU 后端同一口径 —— 否则同一个模型在
+            // 两个后端下的清晰度会不一样，降级时用户能直接看出来。
+            const int maxDim = textureMaxDimFor(windowMaxDim, reader.size());
+            // 走同一个包装，理由见 kanban/ImageDecode.h：这条路径读的是和 GPU 后端
+            // 一模一样的素材，16384x8192 的图集同样会撞 Qt 的全局分配上限，
+            // 而且这里的失败是静默的 —— 只会退回默认花朵，日志里看不出原因。
+            m_modelTexture = readImageDownscaled(reader, maxDim);
             if (!m_modelTexture.isNull()) {
                 // 预乘 alpha，加速后续绘制
                 m_modelTexture = m_modelTexture.convertToFormat(QImage::Format_RGBA8888_Premultiplied);

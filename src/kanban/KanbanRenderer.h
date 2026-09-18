@@ -62,12 +62,16 @@ inline constexpr float kGazeMinRadiusPx = 160.0f;
 // 素材纹理常见 4096×4096，而角色能被画到多大完全由窗口决定：默认 320×480 的窗口
 // 把原图整张传上 GPU 是十几倍的白付显存(实测一个模型四张 4096² 连同 mipmap 在
 // 320×480 的窗口下常驻 393MB，见 docs/video_performance_optimization_3.md §1，
-// 而它显示出来只占那么一小块)。本函数把「绘制面尺寸」换算成「纹理最长边
-// 够用值」，两个后端据此在解码阶段就把尺寸定下来。
+// 而它显示出来只占那么一小块)。textureMaxDimFor() 把「绘制面尺寸」换算成「纹理
+// 最长边够用值」，两个后端据此在解码阶段就把尺寸定下来。
 //
-// 返回 0 = 不降采样(策略关掉，或绘制面还不知道)。结果恒为 2 的幂：素材本身就是
-// 2 的幂，等比缩完仍是 2 的幂，mipmap 链才完整；只按最长边等比缩，非方形纹理
-// 不会变形。
+// ⚠ 但「窗口够用值」不是最终上限：图集是零件打包，还得再叠一条与素材尺寸挂钩的
+// 质量底线(kTextureMaxShrink)。两个重载的分工见各自的注释，别只调一个。
+//
+// 返回 0 = 不降采样(策略关掉，或绘制面还不知道)。窗口够用值恒为 2 的幂：素材本身
+// 是 2 的幂时等比缩完仍是 2 的幂，mipmap 链才完整；只按最长边等比缩，非方形纹理
+// 不会变形。叠了质量底线之后结果不保证是 2 的幂 —— 非 2 的幂纹理在桌面 GL 上没问题
+// (现有代码本来就会算出 1024×614 这种尺寸)，不值得为它牺牲清晰度。
 //
 // 注意兑现方式：两个后端都是「先解出原图，再立即 scaled 到上限」，所以原尺寸位图
 // 会在解码那一瞬存在一下(随后即释放)，被长期持有、被传上 GPU 的只有那份限幅结果。
@@ -77,6 +81,19 @@ inline constexpr float kGazeMinRadiusPx = 160.0f;
 // 用户不该发现同一档窗口大小下形象清晰度不一样；而且声明在 CubismModel.h 里会让
 // 不链接 SDK 的构建找不到定义(那份实现不参与编译)。
 inline constexpr int kTextureMaxDimFloor = 1024;
+
+// 单边最多缩这么多倍 —— 与素材尺寸挂钩的质量底线。
+//
+// 为什么需要它：「按窗口大小定上限」这条推理只对「一张图就是一个整体」的素材成立。
+// Live2D 的图集是**零件打包**：一张 16384×8192 里塞的是角色的脸、头发、衣服、
+// 配饰，按最长边等比缩到窗口够用值(1024)就是 1/16 —— 整只角色一起糊掉，实测毛领
+// 和五官全糊成一团。真正决定清晰度的是「被用到的那些零件还剩多少像素」，而零件
+// 在整张图里占多大，光看图集尺寸是不知道的。
+//
+// 所以这里不去猜零件占比，只钉一条底线：任何一张纹理，单边最多被缩 4 倍。
+// 效果：4096 及以下（素材常见尺寸，原策略认定够用）行为完全不变；8192 最多缩到
+// 2048、16384 最多缩到 4096，大图集不再被压穿。
+inline constexpr int kTextureMaxShrink = 4;
 
 // 由配置 kanban/textureDownscale 在读设置时写入。进程级而非渲染器成员：两个后端
 // 与离屏探针(预览图生成)问的是同一件事，不该各存一份再想办法同步。
@@ -96,6 +113,10 @@ inline bool textureDownscaleEnabled()
     return textureDownscaleFlag();
 }
 
+// 窗口尺寸推出的「够用值」。结果恒为 2 的幂。
+//
+// 只回答「窗口能显示多少」，**不回答「这张图里被用到的部分还剩多少」** ——
+// 后者要靠下面那个重载，别拿这个返回值直接当最终上限用。
 inline int textureMaxDimFor(const QSize &pixelSize)
 {
     if (!textureDownscaleEnabled() || pixelSize.isEmpty()) {
@@ -107,6 +128,31 @@ inline int textureMaxDimFor(const QSize &pixelSize)
     int maxDim = kTextureMaxDimFloor;
     while (maxDim < longest) {
         maxDim <<= 1;
+    }
+    return maxDim;
+}
+
+// 把「窗口够用值」与「素材自身尺寸」合起来，得到这张纹理实际该缩到多长边。
+// 返回 0 = 原尺寸上传。
+//
+// windowMaxDim 传上面那个函数的返回值；source 是纹理的原始尺寸(读文件头即可，
+// 不必解码)。加质量底线 kTextureMaxShrink 的理由见那个常量的注释。
+inline int textureMaxDimFor(int windowMaxDim, const QSize &source)
+{
+    if (windowMaxDim <= 0) {
+        return 0; // 策略关掉 → 原尺寸
+    }
+    if (!source.isValid() || source.isEmpty()) {
+        return windowMaxDim;
+    }
+    const int longest = qMax(source.width(), source.height());
+    int maxDim = windowMaxDim;
+    const int floorFromSource = longest / kTextureMaxShrink;
+    if (floorFromSource > maxDim) {
+        maxDim = floorFromSource;
+    }
+    if (maxDim > longest) {
+        maxDim = longest; // 不放大
     }
     return maxDim;
 }

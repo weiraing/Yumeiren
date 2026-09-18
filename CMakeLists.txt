@@ -124,6 +124,9 @@ set(YUMEIREN_SOURCES
     src/kanban/ModelThumbCache.cpp
     src/kanban/ModelThumbJob.cpp
     src/kanban/PlaceholderRenderer.cpp
+    # 解码包装：临时抬高 Qt 的全局分配上限，好让 16384x8192 这类图集读得进来。
+    # 放在共用清单里 —— 两个后端(真 Live2D / 占位渲染器)都要用它。
+    src/kanban/ImageDecode.cpp
 )
 
 # 两个产品目标共用的依赖清单；Live2D 开启时在下面追加。

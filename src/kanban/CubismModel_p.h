@@ -127,8 +127,9 @@ private:
     // 只判断每张纹理能否解码，不产出位图：坏图要在装载阶段就报出来，
     // 但全尺寸位图一旦为「校验」而常驻就白白占掉几百 MB。
     bool validateTextures(QString *outError);
-    // maxDim = 纹理最长边上限(0 = 原尺寸)。解码阶段直接缩放，全尺寸位图不落地。
-    bool decodeTextures(int maxDim, QString *outError);
+    // windowMaxDim = 窗口尺寸推出的纹理最长边上限(0 = 原尺寸)。实际用的上限还会
+    // 叠一条与素材尺寸挂钩的质量底线(textureMaxDimFor 的重载)，见 KanbanRenderer.h。
+    bool decodeTextures(int windowMaxDim, QString *outError);
     // 仅返回预载成功的动作序号，界面据此判断是否可播。
     QVector<int> preloadMotionGroup(const QString &group);
     void fitProjection(const QSize &pixelSize, CubismMatrix44 *out);
