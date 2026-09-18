@@ -572,6 +572,13 @@ void MainWindow::setupKanbanAndTray()
 
     connect(&kan, &kanban::KanbanController::measuredFpsChanged,
             this, &MainWindow::updateKanbanStatus);
+    // 设置项的实时回填。这条连接**必须存在**：右键菜单（鼠标穿透/窗口置顶）与
+    // 托盘改的都是控制器，控制器改了状态只发这一个信号 —— 不接的话设置页的
+    // 复选框就停在旧状态上（用户实测报的正是「右键勾了穿透、设置页没跟着勾」）。
+    // updateKanbanControls() 用 m_kanbanSyncing 把回填期间的程序性 setChecked
+    // 屏蔽掉，所以不会反过来再触发一次控制器，不会成环。
+    connect(&kan, &kanban::KanbanController::settingsChanged,
+            this, &MainWindow::updateKanbanControls);
     connect(&kan, &kanban::KanbanController::runningChanged, this,
             [this](bool running) {
                 if (running)

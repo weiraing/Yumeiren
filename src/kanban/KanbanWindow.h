@@ -80,6 +80,13 @@ signals:
     void hideRequested();
     void settingsRequested();
     void quitRequested();         // 「取消看板娘」
+    // 右键菜单里的两个窗口行为开关。**必须走控制器，不能直接连到本类的
+    // setMouseThrough / setAlwaysOnTop** —— 那样会绕过控制器，于是
+    //   · 控制器的 m_mouseThrough 停留在旧值；
+    //   · kanban/mouseThrough 配置键不落盘，重启后设置丢失；
+    //   · 设置页的复选框不同步（用户实测报的就是这一条）。
+    void mouseThroughRequested(bool through);
+    void alwaysOnTopRequested(bool onTop);
     // GL 后端：上下文已在渲染线程就绪，控制器此时才能 initialize()+loadModel()。
     void glContextReady();
 

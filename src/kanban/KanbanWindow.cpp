@@ -417,11 +417,15 @@ bool KanbanWindow::eventFilter(QObject *watched, QEvent *event)
         QAction *throughAct = menu.addAction(QStringLiteral("鼠标穿透"));
         throughAct->setCheckable(true);
         throughAct->setChecked(m_mouseThrough);
-        connect(throughAct, &QAction::toggled, this, &KanbanWindow::setMouseThrough);
+        // 发「请求」而不是直接调自己的 setMouseThrough：只有控制器那条路会同时
+        // 更新它的成员、落盘配置、并回写设置页的复选框。直接连本类 setter 的话
+        // 这三件事一件都不做（用户实测：设置页勾选状态不跟着变，重启还会丢设置）。
+        connect(throughAct, &QAction::toggled, this, &KanbanWindow::mouseThroughRequested);
         QAction *topAct = menu.addAction(QStringLiteral("窗口置顶"));
         topAct->setCheckable(true);
         topAct->setChecked(m_alwaysOnTop);
-        connect(topAct, &QAction::toggled, this, &KanbanWindow::setAlwaysOnTop);
+        // 同上：置顶也是配置键 + 设置页复选框两处要同步。
+        connect(topAct, &QAction::toggled, this, &KanbanWindow::alwaysOnTopRequested);
         menu.addSeparator();
 
         // 视线追踪**刻意不放进这个菜单**：档位是「一次定好、长期不动」的偏好，

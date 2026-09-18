@@ -137,6 +137,7 @@ void KanbanController::setAlwaysOnTop(bool onTop)
     if (m_window) {
         m_window->setAlwaysOnTop(onTop);
     }
+    emit settingsChanged();
 }
 
 void KanbanController::setMouseThrough(bool through)
@@ -146,6 +147,7 @@ void KanbanController::setMouseThrough(bool through)
     if (m_window) {
         m_window->setMouseThrough(through);
     }
+    emit settingsChanged();
 }
 
 void KanbanController::setInteractionEnabled(bool enabled)
@@ -155,6 +157,7 @@ void KanbanController::setInteractionEnabled(bool enabled)
     if (m_window) {
         m_window->setInteractionEnabled(enabled);
     }
+    emit settingsChanged();
 }
 
 void KanbanController::setGazeStrength(int strength)

@@ -177,6 +177,12 @@ bool KanbanController::ensureWindow()
         saveGeometry();
     });
     connect(m_window, &KanbanWindow::scaleStepped, this, &KanbanController::handleScaleStepped);
+    // 右键菜单的两个窗口行为开关走控制器，不走窗口自己的 setter —— 只有这条路上
+    // 会同时更新控制器成员、落盘配置键、并 emit settingsChanged() 让设置页回填。
+    connect(m_window, &KanbanWindow::mouseThroughRequested, this,
+            &KanbanController::setMouseThrough);
+    connect(m_window, &KanbanWindow::alwaysOnTopRequested, this,
+            &KanbanController::setAlwaysOnTop);
     connect(m_window, &KanbanWindow::pauseResumeRequested, this, &KanbanController::pauseResume);
     connect(m_window, &KanbanWindow::playNextRequested, this, &KanbanController::playNext);
     connect(m_window, &KanbanWindow::nextExpressionRequested, this,
