@@ -3,6 +3,10 @@
 #include "config/AppConfig.h"
 #include "core/CachePaths.h"
 
+// 构建期生成的版本号宏（<build>/generated/YumeirenVersion.h）。
+// 由 yumeiren_apply_version() 把这个目录加进 include path。
+#include "YumeirenVersion.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -60,6 +64,14 @@ QString displayName()
 QString windowTitle()
 {
     return QStringLiteral("Yumeiren");
+}
+
+QString version()
+{
+    // YumeirenVersion.h 由 cmake/Version.cmake 生成，值来自仓库根目录的 VERSION
+    // 文件 / git 标签 / -DYUMEIREN_VERSION。这里只做转发，不参与任何拼装 ——
+    // 版本号的构造逻辑只允许有一处。
+    return QStringLiteral(YUMEIREN_VERSION_FULL);
 }
 
 QString localAppDataDir()

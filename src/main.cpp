@@ -32,7 +32,7 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     QApplication::setOrganizationName(appinfo::id());
     QApplication::setApplicationName(appinfo::id());
-    QApplication::setApplicationVersion(QStringLiteral("1.0.0"));
+    QApplication::setApplicationVersion(appinfo::version());
 
     // 缓存目录迁移：软件自身产生的缓存(缩略图/渲染背景图/诊断日志)统一写入
     // <程序目录>/.cache，位置只取决于 exe 所在目录，与当前工作目录无关。

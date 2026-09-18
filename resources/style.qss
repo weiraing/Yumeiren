@@ -90,6 +90,11 @@ QLabel#EnvOsLabel {
     font-size: 11px;
 }
 
+QLabel#EnvVersionLabel {
+    color: #7c7f8a;
+    font-size: 11px;
+}
+
 QLabel#ThemeLabel {
     color: #9a9daa;
     font-size: 13px;

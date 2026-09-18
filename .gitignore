@@ -17,7 +17,12 @@ CMakeCache.txt
 cmake-build-debug
 
 dist/
-tools/
+# tools/ 下基本是本地验证探针，不入库。但版本号脚本属于发布流程的一环，
+# 必须跟着仓库走，所以这里先整体忽略再单独放行它一个。
+# 注意必须写 tools/*（不能写 tools/）：带斜杠的写法会把整个目录排除掉，
+# git 不再往里看，后面的 ! 放行就完全无效。
+tools/*
+!tools/bump_version.py
 new-build/
 live2d-build/
 data/

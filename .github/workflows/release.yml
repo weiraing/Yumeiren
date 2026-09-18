@@ -5,6 +5,12 @@ on:
     tags:
       - 'v*'            # 推送 v 开头的标签(如 v1.0.0)时：编译并创建 Release
   workflow_dispatch:    # 也允许在 Actions 页面手动触发(仅构建并上传 Artifact)
+    inputs:
+      version:
+        description: '版本号(如 1.2.0)。留空则用仓库里的 VERSION 文件'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write       # 创建 Release 需要写权限
@@ -15,6 +21,49 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          # 版本号解析要读标签与提交历史(见 cmake/Version.cmake)，浅克隆会让
+          # `git describe --tags` 拿不到标签，所以必须完整检出。
+          fetch-depth: 0
+
+      # —— 版本号的唯一决策点 ——
+      # 规则与 cmake/Version.cmake 的优先级一致：git 标签 > 手动输入 > VERSION 文件。
+      # 定下来之后写进环境变量，后续所有步骤(CMake、校验、zip 名、Release 标题)
+      # 都从这里取，保证「标签号 == exe 里的版本号 == 包名」三者不可能不一致。
+      - name: 解析本次构建的版本号
+        id: ver
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $v   = $env:GITHUB_REF_NAME -replace '^v', ''
+            $src = "git 标签 $env:GITHUB_REF_NAME"
+          } elseif ('${{ inputs.version }}' -ne '') {
+            $v   = '${{ inputs.version }}'
+            $src = "手动输入"
+          } else {
+            $v   = (Get-Content VERSION -Raw).Trim()
+            $src = "VERSION 文件"
+          }
+          if ($v -notmatch '^\d+\.\d+\.\d+') {
+            throw "版本号 '$v' 不是 X.Y.Z 形式(来源：$src)"
+          }
+          "YUMEIREN_VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "version=$v"         | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "本次构建版本：$v(来源：$src)"
+          "### 本次构建版本：``$v``(来源：$src)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
+      # 标签是权威版本，VERSION 文件只是开发期默认值。两者不一致不阻断发布
+      # (打个小补丁标签就发版是合理需求)，但必须显式提醒，否则版本号会悄悄漂开。
+      - name: 检查标签与 VERSION 文件是否一致
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: |
+          $file = (Get-Content VERSION -Raw).Trim()
+          if ($file -ne $env:YUMEIREN_VERSION) {
+            Write-Host "::warning::标签是 $env:YUMEIREN_VERSION，但 VERSION 文件里写着 $file。本次以标签为准。建议执行：python tools/bump_version.py --set $env:YUMEIREN_VERSION --commit --tag"
+          } else {
+            Write-Host "标签与 VERSION 文件一致：$file"
+          }
 
       - name: 安装 Qt 6.10 (MSVC 64 位)
         uses: jurplel/install-qt-action@v4
@@ -24,10 +73,27 @@ jobs:
           cache: true
 
       - name: 配置 CMake (MSVC, Release)
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DYUMEIREN_VERSION=${{ steps.ver.outputs.version }}
 
       - name: 编译 Yumeiren
         run: cmake --build build --config Release --target Yumeiren
+
+      # 这一步是「版本号真的贯通了」的证明：读的是 exe 里的 VERSIONINFO 资源，
+      # 也就是 resources/app.rc.in 生成出来的东西。版本号若只在 CMake 变量里对、
+      # 没写进资源，这里就会红。
+      - name: 校验 exe 的版本资源与预期一致
+        shell: pwsh
+        run: |
+          $vi = (Get-Item "build/Release/Yumeiren.exe").VersionInfo
+          Write-Host "ProductVersion  = $($vi.ProductVersion)"
+          Write-Host "FileVersion     = $($vi.FileVersion)"
+          Write-Host "FileDescription = $($vi.FileDescription)"
+          if ($vi.ProductVersion -ne $env:YUMEIREN_VERSION) {
+            throw "版本不一致：exe 里是 '$($vi.ProductVersion)'，期望 '$env:YUMEIREN_VERSION'。说明 app.rc 没有跟着版本号走。"
+          }
+          if ($vi.FileVersion -notmatch '^\d+\.\d+\.\d+\.0$') {
+            throw "FileVersion '$($vi.FileVersion)' 不是 4 段数字形式(数字型版本装不下 +提交数.g短sha 后缀，这是预期行为)。"
+          }
 
       - name: 部署 Qt 运行时并压缩为便携版
         shell: pwsh
@@ -35,13 +101,10 @@ jobs:
           $out = "build/Release"
           # 拷贝 Qt DLL/插件与 VC 运行时到 exe 旁，做成免安装目录
           windeployqt --release --no-translations --compiler-runtime "$out/Yumeiren.exe"
-          if ($env:GITHUB_REF_TYPE -eq 'tag') {
-            $zip = "Yumeiren-portable-${{ github.ref_name }}-win64.zip"
-          } else {
-            $zip = "Yumeiren-portable-win64.zip"
-          }
+          $zip = "Yumeiren-portable-v$env:YUMEIREN_VERSION-win64.zip"
           Compress-Archive -Path "$out/*" -DestinationPath $zip -Force
           "ZIP_NAME=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "已打包：$zip"
 
       - name: 上传构建产物(Artifact,保留 7 天)
         uses: actions/upload-artifact@v4
@@ -54,5 +117,6 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          name: Yumeiren v${{ steps.ver.outputs.version }}
           files: ${{ env.ZIP_NAME }}
           generate_release_notes: true

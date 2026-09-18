@@ -1,6 +1,22 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(Yumeiren VERSION 1.0.0 LANGUAGES CXX)
+# 版本号：单一来源 + 构建期解析。规则见 cmake/Version.cmake 顶部注释。
+# 必须放在 project() 之前 —— project() 的 VERSION 参数要用解析结果。
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Version.cmake")
+yumeiren_resolve_version()
+
+project(Yumeiren VERSION ${YUMEIREN_VERSION_BASE} LANGUAGES CXX)
+
+# 版本来自 VERSION 文件时会带上「提交数 + 短 sha」后缀，而 configure_file 只在
+# configure 阶段求值一次。不盯着 .git/HEAD 的话，本地又提交了几次再构建，版本号
+# 还是旧的 —— 而且不会有任何提示。让它一变化就自动重新 configure。
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git/HEAD")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/.git/HEAD")
+endif()
+
+# 把版本号灌进 app.rc / app.manifest / YumeirenVersion.h（都落在构建目录）。
+yumeiren_generate_version_files()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -139,10 +155,13 @@ endif()
 
 qt_add_executable(Yumeiren WIN32
     ${YUMEIREN_SOURCES}
-    resources/app.rc
+    # 版本资源由 cmake/Version.cmake 从 resources/app.rc.in 生成到构建目录，
+    # 所以这里的路径是生成物而不是源码 —— 版本号只有一个来源（VERSION 文件）。
+    ${YUMEIREN_GENERATED_RC}
 )
 
 target_include_directories(Yumeiren PRIVATE src)
+yumeiren_apply_version(Yumeiren)
 
 target_link_libraries(Yumeiren PRIVATE ${YUMEIREN_LIBS})
 if(YUMEIREN_WITH_LIVE2D)
@@ -162,6 +181,7 @@ qt_add_executable(YumeirenTest WIN32
     ${YUMEIREN_SOURCES}
 )
 target_include_directories(YumeirenTest PRIVATE src)
+yumeiren_apply_version(YumeirenTest)
 target_link_libraries(YumeirenTest PRIVATE ${YUMEIREN_LIBS})
 if(YUMEIREN_WITH_LIVE2D)
     target_compile_definitions(YumeirenTest PRIVATE YUMEIREN_WITH_LIVE2D=1)
@@ -217,6 +237,7 @@ if(YUMEIREN_WITH_LIVE2D AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/kanbanprob
     list(REMOVE_ITEM YUMEIREN_PROBE_SOURCES src/main.cpp)
     add_executable(KanbanProbe ${YUMEIREN_PROBE_SOURCES} tools/kanbanprobe/main.cpp)
     target_include_directories(KanbanProbe PRIVATE src)
+    yumeiren_apply_version(KanbanProbe)
     target_link_libraries(KanbanProbe PRIVATE ${YUMEIREN_LIBS})
     target_compile_definitions(KanbanProbe PRIVATE YUMEIREN_WITH_LIVE2D=1)
     yumeiren_deploy_cubism(KanbanProbe)

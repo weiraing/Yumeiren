@@ -20,6 +20,9 @@ add_executable(CubismLifecycleTest
     src/config/AppConfig.cpp
 )
 target_include_directories(CubismLifecycleTest PRIVATE src)
+# 这个目标目前不读版本号，但接上生成头文件是一行的事 —— 免得将来往里面加
+# AppInfo.cpp 时，撞上「YumeirenVersion.h: No such file」这种莫名其妙的报错。
+yumeiren_apply_version(CubismLifecycleTest)
 target_link_libraries(CubismLifecycleTest PRIVATE ${YUMEIREN_LIBS})
 yumeiren_deploy_cubism(CubismLifecycleTest)
 yumeiren_deploy_qt_runtime(CubismLifecycleTest)

@@ -1,0 +1,32 @@
+// 由 cmake/Version.cmake 生成到构建目录（<build>/generated/YumeirenVersion.h）。
+// 不要手工编辑这个模板里的版本号，也不要提交生成物 —— 改版本请改仓库根目录的
+// VERSION 文件，或用 -DYUMEIREN_VERSION=X.Y.Z 覆盖。
+#ifndef YUMEIREN_VERSION_H
+#define YUMEIREN_VERSION_H
+
+// 基础版本：SemVer 的 MAJOR.MINOR.PATCH，不含任何后缀。发布号用这个。
+#define YUMEIREN_VERSION_BASE   "@YUMEIREN_VERSION_BASE@"
+
+// 完整版本：可能带 -预发布 与 +提交数.g短sha[.dirty]。写日志、界面显示用这个 ——
+// 它能区分「发布版」与「本地开发版」。
+#define YUMEIREN_VERSION_FULL   "@YUMEIREN_VERSION_FULL@"
+
+// Windows 版本资源要求的 4 段数字形式（点分隔）。
+#define YUMEIREN_VERSION_NUMERIC "@YUMEIREN_VERSION_NUMERIC_STRING@"
+
+#define YUMEIREN_VERSION_MAJOR  @YUMEIREN_VERSION_MAJOR@
+#define YUMEIREN_VERSION_MINOR  @YUMEIREN_VERSION_MINOR@
+#define YUMEIREN_VERSION_PATCH  @YUMEIREN_VERSION_PATCH@
+
+// 版本号从哪来的：tag / file / explicit / env。
+// 排查「为什么编出来的版本不对」时先看这个 —— file 表示用的是 VERSION 文件。
+#define YUMEIREN_VERSION_SOURCE "@YUMEIREN_VERSION_SOURCE@"
+
+// 构建时 HEAD 的提交数与短 sha；非 git 环境或来自标签时为 0 / 空串。
+#define YUMEIREN_VERSION_COMMIT @YUMEIREN_VERSION_COMMIT@
+#define YUMEIREN_VERSION_SHA    "@YUMEIREN_VERSION_SHA@"
+
+// 构建时工作区有未提交改动则为 1。
+#define YUMEIREN_VERSION_DIRTY  @YUMEIREN_VERSION_DIRTY@
+
+#endif // YUMEIREN_VERSION_H

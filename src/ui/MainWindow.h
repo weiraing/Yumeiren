@@ -296,6 +296,7 @@ private:
     QLabel *m_logLabel = nullptr;
     QLabel *m_adminLabel = nullptr;
     QLabel *m_osLabel = nullptr;
+    QLabel *m_versionLabel = nullptr;
     QComboBox *m_themeCombo = nullptr;
     int m_themeMode = 0;      // 0 = follow system, 1 = light, 2 = dark
     bool m_darkTheme = true;  // currently applied scheme

@@ -19,6 +19,11 @@ QString id();          // "Yumeiren"
 QString displayName(); // 品牌名(侧边栏/自绘标题栏): "虞美人"
 QString windowTitle(); // 原生窗口标题(任务管理器窗口行/单实例唤起匹配): "Yumeiren"
 
+// 完整版本号，如 "1.0.0"（发布版）或 "1.0.0+67.g3f9a1c2.dirty"（本地开发版）。
+// 数值由构建期生成（cmake/Version.cmake → <build>/generated/YumeirenVersion.h），
+// 源头是仓库根目录的 VERSION 文件或 git 标签 —— 代码里不要硬写版本号。
+QString version();
+
 QString localAppDataDir();
 QString dataRoot();        // %LOCALAPPDATA%\Yumeiren
 QString legacyDataRoot();  // %LOCALAPPDATA%\FolderBgStudio (migration only)

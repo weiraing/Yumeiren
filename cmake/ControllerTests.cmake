@@ -25,6 +25,8 @@ add_executable(KanbanControllerTest
 set_target_properties(KanbanControllerTest PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests/$<CONFIG>/controller-test")
 target_include_directories(KanbanControllerTest PRIVATE src)
+# 同上：现在用不到版本号，接上生成头文件是为了将来加 AppInfo.cpp 时不踩坑。
+yumeiren_apply_version(KanbanControllerTest)
 target_link_libraries(KanbanControllerTest PRIVATE Qt6::Widgets dwmapi psapi)
 yumeiren_deploy_qt_runtime(KanbanControllerTest)
 add_test(NAME KanbanControllerSettings COMMAND KanbanControllerTest)

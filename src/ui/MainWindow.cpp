@@ -361,8 +361,13 @@ QWidget *MainWindow::buildSidebar()
     m_adminLabel->setObjectName(QStringLiteral("EnvAdminLabel"));
     m_osLabel = new QLabel(sideCard);
     m_osLabel->setObjectName(QStringLiteral("EnvOsLabel"));
+    // 版本号由构建期决定（见 cmake/Version.cmake），这里只是显示出来 ——
+    // 本地开发版会带 "+提交数.g短sha" 后缀，一眼能看出手上这份是不是发布版。
+    m_versionLabel = new QLabel(sideCard);
+    m_versionLabel->setObjectName(QStringLiteral("EnvVersionLabel"));
     cardLay->addWidget(m_adminLabel);
     cardLay->addWidget(m_osLabel);
+    cardLay->addWidget(m_versionLabel);
 
     auto *cardWrap = new QHBoxLayout();
     cardWrap->setContentsMargins(10, 6, 10, 12);
@@ -629,6 +634,7 @@ void MainWindow::setStatusChips()
     m_adminLabel->style()->unpolish(m_adminLabel);
     m_adminLabel->style()->polish(m_adminLabel);
     m_osLabel->setText(Engine::windowsProductName());
+    m_versionLabel->setText(QStringLiteral("版本 ") + appinfo::version());
 }
 
 void MainWindow::reportDllMigration()

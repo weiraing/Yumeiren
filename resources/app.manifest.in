@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  由 cmake/Version.cmake 生成到构建目录（<build>/generated/app.manifest）。
+  assemblyIdentity 的版本跟随仓库根目录的 VERSION 文件，不要手工改这里的数字。
+-->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <assemblyIdentity version="1.0.0.0" processorArchitecture="*" name="Yumeiren" type="win32"/>
+  <assemblyIdentity version="@YUMEIREN_VERSION_NUMERIC_STRING@" processorArchitecture="*" name="Yumeiren" type="win32"/>
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>
