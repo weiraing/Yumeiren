@@ -65,7 +65,6 @@ private:
     kanban::KanbanController *m_kanban = nullptr;
 
     // 稳定 action 指针：只改状态，不重建。
-    QAction *m_actShowWindow = nullptr;
     // 「启动 / 取消」是一个双态开关(与页面上那颗按钮同语义)，不是两个菜单项：
     // 合成一项后子菜单短一行，也不会出现「运行中时启动项灰着、取消项亮着」这种
     // 靠置灰来暗示状态的间接表达。

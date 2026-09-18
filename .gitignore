@@ -36,6 +36,12 @@ tests
 /tests/kanban/*
 !/tests/kanban/CubismLifecycleTest.cpp
 !/tests/kanban/KanbanControllerTest.cpp
+# tests/ui/ 同理：整个目录先忽略，再放行要入库的用例。
+# 漏写这条 ! 的后果是**静默不入库** —— git status 里连 untracked 都不显示，
+# 只有 `git check-ignore -v <path>` 能问出是谁挡的（2026-09-18 踩过）。
+!/tests/ui/
+/tests/ui/*
+!/tests/ui/TooltipStyleTest.cpp
 
 # 软件自身缓存(<程序目录>\.cache)
 .cache/

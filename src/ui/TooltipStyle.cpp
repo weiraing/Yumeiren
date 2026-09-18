@@ -3,6 +3,7 @@
 #include <QApplication>
 #include <QFontMetrics>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 namespace {
@@ -64,16 +65,25 @@ QString format(const QString &text)
 
     const QFontMetrics fm(tipFont());
     const int maxWidth = kMaxTipWidth - kChromeWidth;
+    // 注：QFontMetrics::horizontalAdvance 对含 '\n' 的串返回的是**各行宽度之和**
+    // （2026-09-18 实测：两行 36+108 的串报 144），不是"最宽一行"。所以多行文本
+    // 基本都会走进下面的折行分支 —— 无害，每行各自量一次、放得下就原样成一行，
+    // 结果与不折时逐字相同，只是白算一遍。
     if (maxWidth <= 0 || fm.horizontalAdvance(text) <= maxWidth)
-        return text; // 含已有的 \n 时取最宽一行，整体不超宽就原样返回
+        return text;
 
-    QString result;
+    // 折好的每一行，最后统一 join('\n')。
+    //
+    // 2026-09-18 修：原来是「算好切点 → result += piece」，而换行只在源文本自带的
+    // '\n' 处补过一次 —— 于是**同一源行里折出来的第 2 段起被原样拼回上一段后面**，
+    // 等于没折：830px 的长句进去、830px 一行出来，一个 '\n' 都没有。
+    // 之所以长期没暴露，是因为既有提示每一行都短于 maxWidth，从没走进折行分支。
+    // 改成收集「行」再 join，顺带把「源文本里的空行」也自然保留下来。
+    QStringList outLines;
     int pos = 0;
     while (pos <= text.size()) {
         const int nextNl = text.indexOf(QChar('\n'), pos);
         const int end = nextNl < 0 ? text.size() : nextNl;
-        if (pos > 0)
-            result += QChar('\n');
 
         const QString line = text.mid(pos, end - pos);
         // 逐字累加宽度，省掉反复 mid() 测量
@@ -81,41 +91,45 @@ QString format(const QString &text)
         for (int i = 0; i < line.size(); ++i)
             advance[i + 1] = advance[i] + fm.horizontalAdvance(line.at(i));
 
-        int start = 0;
-        while (start < line.size()) {
-            int i = start;
-            int allowed = -1;   // 最近的可行断行点
-            int preferred = -1; // 最近的标点后断行点
-            while (i < line.size() && advance[i + 1] - advance[start] <= maxWidth) {
-                if (i > start && canBreakBefore(line, i + 1)) {
-                    allowed = i + 1;
-                    if (isPreferredAfter(line.at(i)))
-                        preferred = i + 1;
+        if (line.isEmpty()) {
+            outLines << QString(); // 源文本里的空行：原样占一行
+        } else {
+            int start = 0;
+            while (start < line.size()) {
+                int i = start;
+                int allowed = -1;   // 最近的可行断行点
+                int preferred = -1; // 最近的标点后断行点
+                while (i < line.size() && advance[i + 1] - advance[start] <= maxWidth) {
+                    if (i > start && canBreakBefore(line, i + 1)) {
+                        allowed = i + 1;
+                        if (isPreferredAfter(line.at(i)))
+                            preferred = i + 1;
+                    }
+                    ++i;
                 }
-                ++i;
-            }
 
-            int cut = i; // 默认：整行剩余都能放下，或遇到不可断的长串
-            if (i < line.size()) {
-                // 溢出：优先落在标点后，其次任意可行点；都不存在时硬切，
-                // 硬切只在"一个不可断的 ASCII 长串本身就超宽"时发生。
-                cut = preferred > start ? preferred : (allowed > start ? allowed : i);
-                if (cut <= start)
-                    cut = i + 1;
-            }
+                int cut = i; // 默认：整行剩余都能放下，或遇到不可断的长串
+                if (i < line.size()) {
+                    // 溢出：优先落在标点后，其次任意可行点；都不存在时硬切，
+                    // 硬切只在"一个不可断的 ASCII 长串本身就超宽"时发生。
+                    cut = preferred > start ? preferred : (allowed > start ? allowed : i);
+                    if (cut <= start)
+                        cut = i + 1;
+                }
 
-            QString piece = line.mid(start, cut - start);
-            while (!piece.isEmpty() && piece.at(piece.size() - 1).isSpace())
-                piece.chop(1);
-            result += piece;
-            start = cut;
+                QString piece = line.mid(start, cut - start);
+                while (!piece.isEmpty() && piece.at(piece.size() - 1).isSpace())
+                    piece.chop(1);
+                outLines << piece;
+                start = cut;
+            }
         }
 
         if (nextNl < 0)
             break;
         pos = nextNl + 1;
     }
-    return result;
+    return outLines.join(QChar('\n'));
 }
 
 } // namespace tooltipstyle

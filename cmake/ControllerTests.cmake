@@ -30,4 +30,8 @@ yumeiren_apply_version(KanbanControllerTest)
 target_link_libraries(KanbanControllerTest PRIVATE Qt6::Widgets dwmapi psapi)
 yumeiren_deploy_qt_runtime(KanbanControllerTest)
 add_test(NAME KanbanControllerSettings COMMAND KanbanControllerTest)
-set_tests_properties(KanbanControllerSettings PROPERTIES TIMEOUT 30)
+set_tests_properties(KanbanControllerSettings PROPERTIES TIMEOUT 30
+    # 不加这个变量时 qCritical 会被 Qt 改道去 OutputDebugString（它只在 stderr 是
+    # 真控制台时才写 stderr，而 ctest 用管道收输出），`--output-on-failure` 看不到
+    # 任何失败原因。理由详见 cmake/UiTests.cmake。
+    ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1")

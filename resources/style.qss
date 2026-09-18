@@ -181,6 +181,24 @@ QPushButton#HeaderTab:focus { border: none; }
    入口置灰的同时必须让原因可见 —— 禁用控件未必收得到 tooltip。 */
 #HintLabel[data-err="1"] { color: #e58a92; }
 
+/* 看板娘页「模型」卡片刷新行右端的问号徽标(2026-09-18 起取代原来那段
+   「把 Cubism3/4 模型整个文件夹放进…」的常驻说明文字，内容移进它的 tooltip)。
+   它是 QLabel 不是按钮：尺寸由 setFixedSize(22,22) 定死，圆角取一半即正圆，
+   所以这里**不要写 padding** —— 一写就把问号挤歪、圆也不圆了。
+   悬浮换色是为了让「这里挂着提示」这件事看得出来。 */
+#HelpBadge {
+    color: #8a8d99;
+    border: 1px solid #3a3b45;
+    border-radius: 11px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#HelpBadge:hover {
+    color: #e9eaee;
+    border: 1px solid #4f8cff;
+}
+
 QLabel#FieldLabel {
     color: #b9bcc4;
     font-size: 12px;

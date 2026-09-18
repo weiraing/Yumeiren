@@ -112,9 +112,11 @@ void SystemTrayController::buildContextMenu()
     // 状态在展开瞬间现读，避免「菜单显示的是三秒前的状态」。
     connect(m_contextMenu, &QMenu::aboutToShow, this, &SystemTrayController::updateMenuState);
 
-    m_actShowWindow = addEntry(m_contextMenu, QStringLiteral("显示窗口"),
-                               [this] { showMainWindow(); });
-    m_contextMenu->addSeparator();
+    // 菜单第一项原本是「显示窗口」，2026-09-18 按用户要求撤掉：左键单击托盘图标
+    // 就会把主窗口叫出来（见 onTrayActivated 的 Trigger/DoubleClick），再留一项
+    // 只是重复。**showMainWindow() 与 showMainWindowRequested 必须留着**，
+    // 左键与双击两条路都还在用。
+    // 注意别顺手补一条前导分隔线：菜单首行画一条横线是坏的观感。
 
     QMenu *wallMenu = addSubmenu(m_contextMenu, QStringLiteral("动态壁纸"));
     // 「启动 / 取消」是一项双态开关，与动态壁纸页那颗「▶ 启动 / ■ 取消」按钮
@@ -215,8 +217,6 @@ void SystemTrayController::updateMenuState()
 
     ApplicationRuntimeState &runtime = ApplicationRuntimeState::instance();
     VideoWallpaper &wall = VideoWallpaper::instance();
-
-    m_actShowWindow->setEnabled(!runtime.mainWindowVisible());
 
     const bool wallStarted = wall.isStarted();
     const bool wallHasList = !wall.playlist().isEmpty();

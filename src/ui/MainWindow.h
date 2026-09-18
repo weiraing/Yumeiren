@@ -156,7 +156,7 @@ private:
     void updateKanbanControls();         // 按钮可用性/状态文本(单一出口，别处不直改)
     void updateKanbanStatus();           // 低频统计只更新状态文本
     void setKanbanLog(const QString &text, bool isError);
-    void showFromTray();                 // 托盘「显示窗口」/双击图标
+    void showFromTray();                 // 托盘图标左键单击/双击
     void onTrayQuitRequested();
 
     // —— 模型静态预览图 ——

@@ -1200,7 +1200,9 @@ void MainWindow::hideEvent(QHideEvent *event)
 {
     QMainWindow::hideEvent(event);
     // 主窗口的可见性**不再**联动看板娘（见 KanbanController 里 applyMainWindowVisible
-    // 的删除说明）；这里只记录状态供托盘菜单等处读取。
+    // 的删除说明）。2026-09-18 撤掉托盘「显示窗口」项之后，这个状态位已无人读取 ——
+    // 留着只是因为 ApplicationRuntimeState 本来就是「全局事实的镜像」，
+    // 真要清理请连 setter 与这两个事件重载一起去掉，别只删一半。
     ApplicationRuntimeState::instance().setMainWindowVisible(false);
 }
 

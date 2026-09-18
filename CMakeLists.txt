@@ -220,6 +220,8 @@ qt_add_resources(YumeirenTest app_res
 # 可选的渲染生命周期回归。
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/RenderTests.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ControllerTests.cmake")
+# 可选的界面辅助函数回归（如悬浮提示折行）。
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/UiTests.cmake")
 
 # QVideoSink A/B 实验探针(第二阶段内存归因；非产品组件，可整体删除)。
 # 探针源码不在仓库里时跳过该目标，产品目标 Yumeiren / YumeirenTest 照常构建。

@@ -24,7 +24,8 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
-#include <QDesktopServices>
+// QDir 是给下面的 QDir::toNativeSeparators 用的，**不是**给已删掉的「打开模型目录」
+// 按钮用的 —— 删按钮时别顺手把这个 include 一起删掉。
 #include <QDir>
 #include <QFileInfo>
 #include <QFrame>
@@ -45,7 +46,6 @@
 #include <QStackedWidget>
 #include <QStyledItemDelegate>
 #include <QTimer>
-#include <QUrl>
 
 namespace {
 
@@ -58,6 +58,10 @@ constexpr int kModelCellWidth = 121;
 constexpr int kModelCellHeight = 201;
 constexpr int kModelIconWidth = 105;
 constexpr int kModelIconHeight = 157;
+
+// 「模型」卡片右上角那颗问号徽标的边长(逻辑像素)。QSS 里 #HelpBadge 的
+// border-radius 取它的一半即正圆，改这里要同步改 QSS(两个主题各一处)。
+constexpr int kHelpBadgeSize = 22;
 
 class ModelCardDelegate final : public QStyledItemDelegate
 {
@@ -305,15 +309,28 @@ QWidget *MainWindow::buildKanbanModelCard(QWidget *parent)
     });
     row->addWidget(refreshBtn);
 
-    auto *openBtn = new QPushButton(QStringLiteral("📂 打开模型目录"), card);
-    openBtn->setMinimumHeight(32);
-    connect(openBtn, &QPushButton::clicked, this, [] {
-        const QString dir = kanban::KanbanModelManager::defaultModelsRoot();
-        QDir().mkpath(dir);
-        QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
-    });
-    row->addWidget(openBtn);
+    // 2026-09-18 按用户要求撤掉「📂 打开模型目录」按钮：模型目录是固定的
+    // <程序目录>\data\models，不需要再给一个「跳过去」的入口。
+    // 代价是界面上再没有指出目录在哪的地方，所以这段说明改挂在下面那颗问号上。
     row->addStretch(1);
+
+    // 问号徽标（外圈内问号），鼠标悬停出提示。
+    //
+    // 用 QLabel 而不是 QPushButton：它没有任何点击行为，做成按钮会误导用户去点，
+    // 还要额外去覆盖 QPushButton 那条通用的 padding: 8px 16px / border-radius: 9px
+    // （见 resources/*.qss 的 QPushButton 段），得不偿失。
+    // 尺寸由 setFixedSize 定死，QSS 里 border-radius 取一半即得正圆。
+    auto *helpBadge = new QLabel(QStringLiteral("?"), card);
+    helpBadge->setObjectName(QStringLiteral("HelpBadge"));
+    helpBadge->setFixedSize(kHelpBadgeSize, kHelpBadgeSize);
+    helpBadge->setAlignment(Qt::AlignCenter);
+    helpBadge->setCursor(Qt::WhatsThisCursor);
+    helpBadge->setToolTip(tooltipstyle::format(QStringLiteral(
+        "模型目录：<程序目录>\\data\\models\n"
+        "\n"
+        "每个模型占一个子目录，里面放它的 *.model3.json 与贴图、动作文件。\n"
+        "放好后点「↻ 刷新」重新扫描，封面会自动生成。")));
+    row->addWidget(helpBadge);
     lay->addLayout(row);
 
     // —— 模型网格：一格一个模型，格子里是它的静态效果图 ——
@@ -376,13 +393,9 @@ QWidget *MainWindow::buildKanbanModelCard(QWidget *parent)
     m_kanbanModelInfo->setWordWrap(true);
     lay->addWidget(m_kanbanModelInfo);
 
-    auto *pathHint = new QLabel(
-        QStringLiteral("把 Cubism3/4 模型整个文件夹放进 <程序目录>\\data\\models，"
-                       "每个模型一个子目录，内含 *.model3.json。\n"),
-        card);
-    pathHint->setObjectName(QStringLiteral("HintLabel"));
-    pathHint->setWordWrap(true);
-    lay->addWidget(pathHint);
+    // 「把 Cubism3/4 模型整个文件夹放进 <程序目录>\data\models…」那段常驻说明文字
+    // 已撤掉(2026-09-18)，内容移进刷新行右端那颗 #HelpBadge 的悬浮提示 ——
+    // 这是一次性说明，不该长期占版面；实测它占掉卡片底部整整两行。
     return card;
 }
 
@@ -1291,7 +1304,8 @@ void MainWindow::setKanbanLog(const QString &text, bool isError)
     m_kanbanLog->style()->polish(m_kanbanLog);
 }
 
-// 托盘「显示窗口」/双击图标：窗口可能是 hide() 掉的，先 show 再解最小化。
+// 托盘图标左键单击/双击：窗口可能是 hide() 掉的，先 show 再解最小化。
+// (托盘菜单里原本还有一项「显示窗口」调到这里，2026-09-18 已撤掉，这条路只剩手势。)
 void MainWindow::showFromTray()
 {
     show();
