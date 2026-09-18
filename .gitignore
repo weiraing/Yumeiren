@@ -29,19 +29,12 @@ data/
 third_party/
 .workbuddy-ai/
 scripts
+# 测试代码用完即删、不进版本库（2026-09-18 定案）。
+#
+# 保留这一行是**兜底**：临时写出来的 tests/ 别被误提交。项目里现在已经没有任何
+# 测试目标了 —— tests/ 源码、cmake/{ControllerTests,RenderTests,UiTests}.cmake 与对应的
+# YUMEIREN_BUILD_*_TESTS 选项都已删除，回归验证靠 tools/ 下的探针（那批本就不入库）。
 tests
-!/tests/
-/tests/*
-!/tests/kanban/
-/tests/kanban/*
-!/tests/kanban/CubismLifecycleTest.cpp
-!/tests/kanban/KanbanControllerTest.cpp
-# tests/ui/ 同理：整个目录先忽略，再放行要入库的用例。
-# 漏写这条 ! 的后果是**静默不入库** —— git status 里连 untracked 都不显示，
-# 只有 `git check-ignore -v <path>` 能问出是谁挡的（2026-09-18 踩过）。
-!/tests/ui/
-/tests/ui/*
-!/tests/ui/TooltipStyleTest.cpp
 
 # 软件自身缓存(<程序目录>\.cache)
 .cache/

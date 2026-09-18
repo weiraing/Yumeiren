@@ -437,10 +437,10 @@ python tools/bump_version.py patch --tag --push
 
 | 指标 | 数值 |
 | --- | ---: |
-| C++ 源文件 | **70** 个（32 个头文件 + 38 个实现） |
-| 代码行数 | **15,983** 行 |
+| C++ 源文件 | **72** 个（33 个头文件 + 39 个实现） |
+| 代码行数 | **16,434** 行 |
 | 模块数 | **10** 个 |
-| 入库文件 | 111 个（另有 `.gitignore` 排除的 SDK / 素材 / 测试工具） |
+| 入库文件 | **115** 个（`git ls-files` 计数；另有 `.gitignore` 排除的 SDK / 素材 / 探针） |
 | 设计文档 | **23** 篇（`docs/`） |
 | 构建目标 | 2 个产品目标 + 2 个探针 |
 | 内置 Live2D 模型 | 16 个（本地素材，未入库） |
@@ -528,9 +528,7 @@ Yumeiren/
 ├── cmake/
 │   ├── Version.cmake               # 版本号解析 + 生成 app.rc / manifest / YumeirenVersion.h
 │   ├── YumeirenVersion.h.in        # 版本号头文件模板（生成物落在构建目录）
-│   ├── Live2DCubism.cmake          # Cubism SDK + GLEW 的第三方构建配置
-│   ├── RenderTests.cmake           # 可选：渲染生命周期回归
-│   └── ControllerTests.cmake       # 可选：看板娘控制器回归
+│   └── Live2DCubism.cmake          # Cubism SDK + GLEW 的第三方构建配置
 ├── resources/
 │   ├── app.rc.in                   # 版本资源模板（含 requireAdministrator 清单引用）
 │   ├── app.manifest.in             # 提权 + DPI 感知清单模板
@@ -539,7 +537,6 @@ Yumeiren/
 │   └── icons/                      # 界面图标
 ├── data/                           # 素材（不入库）：models / image / video
 ├── third_party/                    # Cubism SDK + GLEW（不入库，只读，保持上游原样）
-├── tests/kanban/                   # 两个可入库的回归测试
 ├── tools/                          # 验证探针（不入库）+ bump_version.py（入库）
 ├── docs/                           # 设计与审计文档
 ├── VERSION                         # ★ 版本号唯一来源（一行 X.Y.Z）

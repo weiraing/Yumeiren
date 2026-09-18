@@ -217,11 +217,10 @@ qt_add_resources(YumeirenTest app_res
     FILES ${APP_RESOURCES}
 )
 
-# 可选的渲染生命周期回归。
-include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/RenderTests.cmake")
-include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ControllerTests.cmake")
-# 可选的界面辅助函数回归（如悬浮提示折行）。
-include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/UiTests.cmake")
+# 这里原本 include 了 cmake/{RenderTests,ControllerTests,UiTests}.cmake —— 三个可选的回归测试
+# 目标（渲染生命周期 / 看板娘控制器 / 界面辅助函数），由 YUMEIREN_BUILD_*_TESTS 开关控制。
+# 2026-09-18 定案：**测试代码用完即删**，于是测试源码、这三份接线与对应的三个选项一并移除，
+# 仓库里不再有任何测试目标。回归验证改由 tools/ 下的探针承担（那批本就不入库，见 .gitignore）。
 
 # QVideoSink A/B 实验探针(第二阶段内存归因；非产品组件，可整体删除)。
 # 探针源码不在仓库里时跳过该目标，产品目标 Yumeiren / YumeirenTest 照常构建。
