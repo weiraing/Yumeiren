@@ -2,6 +2,18 @@
 // 改版本号请改仓库根目录的 VERSION 文件，不要改这个模板里的版本字段。
 #include <windows.h>
 
+// 应用图标：资源管理器 / 任务栏 / Alt-Tab / 快捷方式都取 exe 里这个。
+//
+// ID 用 1 —— Windows 取「ID 最小的 RT_GROUP_ICON」当 exe 图标，给 1 最保险。
+// 和下面 manifest 的 `1 24` 不冲突：资源类型不同（3 = RT_ICON / 14 = RT_GROUP_ICON，
+// 24 = RT_MANIFEST），ID 各自独立编号。
+//
+// 路径由 cmake/Version.cmake 填成构建目录里的副本（和 manifest 同样的做法：
+// windres 需要一个能直接打开的真实路径，给绝对路径不依赖相对路径解析规则）。
+// 图标本身由 tools/icongen/make_icons.py 从原画生成，别手工替换这个 .ico。
+#define YUMEIREN_APPICON 1
+YUMEIREN_APPICON ICON "@YUMEIREN_ICON_PATH@"
+
 1 24 "@YUMEIREN_MANIFEST_PATH@"
 
 VS_VERSION_INFO VERSIONINFO
@@ -26,7 +38,9 @@ BEGIN
             VALUE "FileVersion", "@YUMEIREN_VERSION_NUMERIC_STRING@"
             VALUE "ProductVersion", "@YUMEIREN_VERSION_FULL@"
             VALUE "ProductName", "Yumeiren"
-            VALUE "OriginalFilename", "Yumeiren.exe"
+            // 产物名由 CMakeLists 的 OUTPUT_NAME 决定（虞美人.exe）。这里写的是
+            // 「文件属性里那个名字」，改 OUTPUT_NAME 时要一起改。
+            VALUE "OriginalFilename", "虞美人.exe"
             VALUE "LegalCopyright", "MIT / LGPL - integrates ExplorerBgTool & ExplorerBlurMica"
         END
     END

@@ -166,6 +166,12 @@ qt_add_executable(Yumeiren WIN32
 target_include_directories(Yumeiren PRIVATE src)
 yumeiren_apply_version(Yumeiren)
 
+# app.rc 里的 `YUMEIREN_APPICON ICON "..."` 是 windres 自己去读那个 .ico 的，
+# CMake 看不见这层依赖 —— 不显式声明的话，换了图标只会重新 configure + 复制，
+# app.rc 判定「没变」不重编，exe 里还是旧图标，而且没有任何提示。
+set_property(SOURCE "${YUMEIREN_GENERATED_RC}" APPEND PROPERTY
+    OBJECT_DEPENDS "${YUMEIREN_ICON_PATH}")
+
 target_link_libraries(Yumeiren PRIVATE ${YUMEIREN_LIBS})
 if(YUMEIREN_WITH_LIVE2D)
     # 窗口层(KanbanWindow)靠这个宏决定是否创建 GL 宿主视图；
@@ -176,8 +182,28 @@ endif()
 yumeiren_deploy_qt_runtime(Yumeiren)
 
 set_target_properties(Yumeiren PROPERTIES
-    OUTPUT_NAME "Yumeiren"
+    # 产物名用品牌名，不用 target 名（target 仍叫 Yumeiren，构建命令与依赖关系不变）。
+    #
+    # 这里出现了非 ASCII，链路是：CMakeLists 是 UTF-8 → Ninja 用 UTF-8 写 build.ninja
+    # → Ninja 在 Windows 上走 CreateProcessW，命令行是 UTF-16 → 但 MinGW 的 ld 拿到的
+    # argv 是 CRT 从**系统 ANSI 代码页**转出来的。中文 Windows 是 GBK，这三个字装得下，
+    # 所以能正确建出文件；英文/日文等代码页装不下就会变成 `???.exe`，Ninja 随后找不到
+    # 自己的产物、报「missing output」。
+    # 也就是说：**这条依赖系统区域设置**。本机（中文 Windows）实测通过；GitHub Actions 的
+    # windows-latest 是英文区域，release.yml 里已按这个名字取文件 —— 若那边失败，
+    # 改用下面被注释掉的那套（ASCII 产物名 + cmake -E 复制一份，CMake 自己的文件 API
+    # 是 UTF-8 → UTF-16，不受 ANSI 代码页影响）。
+    OUTPUT_NAME "虞美人"
 )
+
+# 备选方案（英文区域下更稳，代价是 build/ 里同时留一个 Yumeiren.exe）：
+# set_target_properties(Yumeiren PROPERTIES OUTPUT_NAME "Yumeiren")
+# add_custom_command(TARGET Yumeiren POST_BUILD
+#     COMMAND ${CMAKE_COMMAND} -E copy_if_different
+#         "$<TARGET_FILE:Yumeiren>"
+#         "$<TARGET_FILE_DIR:Yumeiren>/虞美人.exe"
+#     COMMENT "复制产物为 虞美人.exe"
+#     VERBATIM)
 
 # UI-test build without the requireAdministrator manifest (can be automated).
 qt_add_executable(YumeirenTest WIN32
@@ -197,6 +223,18 @@ set(APP_RESOURCES
     resources/light.qss
     resources/dlls/ExplorerBgTool.dll
     resources/dlls/ExplorerBlurMica.dll
+    # 应用图标。exe 内嵌的 .ico（resources/yumeiren.ico）管资源管理器那一侧；
+    # 这里这一套 PNG 是给 Qt 用的（窗口图标 / 托盘 / 自绘标题栏）—— QIcon 会按
+    # devicePixelRatio 挑最合适的一档，比只塞一张 256 再让 Qt 缩放清楚得多。
+    # 档位与 tools/icongen/make_icons.py 的 QT_SIZES 一一对应，改一边要改另一边。
+    resources/icons/yumeiren-16.png
+    resources/icons/yumeiren-20.png
+    resources/icons/yumeiren-24.png
+    resources/icons/yumeiren-32.png
+    resources/icons/yumeiren-48.png
+    resources/icons/yumeiren-64.png
+    resources/icons/yumeiren-128.png
+    resources/icons/yumeiren-256.png
 )
 
 # 复制 data/ 目录到编译输出目录（仅当 build/data/models 不存在时触发）

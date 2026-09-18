@@ -6,6 +6,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 
 #include <windows.h>
 
@@ -13,6 +14,10 @@ namespace {
 
 // Value name under HKCU\Software\Microsoft\Windows\CurrentVersion\Run.
 constexpr wchar_t kAutostartValue[] = L"Yumeiren";
+
+// 与 tools/icongen/make_icons.py 的 QT_SIZES 一致，也与 CMakeLists 的
+// APP_RESOURCES 一致 —— 三处任何一处改了都要同步。
+constexpr int kIconSizes[] = {16, 20, 24, 32, 48, 64, 128, 256};
 
 HKEY openRunKey(REGSAM access)
 {
@@ -57,6 +62,23 @@ QString version()
     // 文件 / git 标签 / -DYUMEIREN_VERSION。这里只做转发，不参与任何拼装 ——
     // 版本号的构造逻辑只允许有一处。
     return QStringLiteral(YUMEIREN_VERSION_FULL);
+}
+
+QIcon appIcon()
+{
+    // 静态缓存：QIcon 的构造要读 8 个 PNG 并解压，托盘、标题栏、对话框都会来要，
+    // 每次重建纯属浪费。QIcon 是隐式共享的，返回副本很便宜。
+    static const QIcon icon = [] {
+        QIcon result;
+        for (const int size : kIconSizes) {
+            const QString path =
+                QStringLiteral(":/icons/yumeiren-%1.png").arg(size);
+            if (QFile::exists(path))
+                result.addFile(path, QSize(size, size));
+        }
+        return result;
+    }();
+    return icon;
 }
 
 QString localAppDataDir()

@@ -314,7 +314,22 @@ QWidget *MainWindow::buildTitleBar()
     lay->setContentsMargins(12, 0, 6, 0);
     lay->setSpacing(2);
 
-    auto *title = new QLabel(QStringLiteral("🌸 ") + appinfo::displayName(), m_titleBar);
+    // 左上角那枚小标：原来是 "🌸 " 这个 emoji 占位，现在换成真图标。
+    // 20px 是自绘标题栏(高 34)下最合适的一档 —— 再大就把文字挤走，再小那圈
+    // 描边会糊掉。图标自带深色描边，浅色标题栏上轮廓才立得住（见 tools/icongen/）。
+    // devicePixelRatioF() 让 QIcon 直接给出对应物理像素的那一档，150% 缩放下不会糊；
+    // 代价是窗口被拖到另一块不同缩放比的屏幕上时这张位图不会重取，标题栏小标而已，
+    // 不值得为它挂一次 screenChanged。
+    constexpr int kTitleIconSize = 20;
+    auto *mark = new QLabel(m_titleBar);
+    mark->setObjectName(QStringLiteral("TitleIcon"));
+    mark->setFixedSize(kTitleIconSize, kTitleIconSize);
+    mark->setPixmap(appinfo::appIcon().pixmap(QSize(kTitleIconSize, kTitleIconSize),
+                                              devicePixelRatioF()));
+    lay->addWidget(mark);
+    lay->addSpacing(6);
+
+    auto *title = new QLabel(appinfo::displayName(), m_titleBar);
     title->setObjectName(QStringLiteral("TitleText"));
     lay->addWidget(title);
     lay->addStretch(1);

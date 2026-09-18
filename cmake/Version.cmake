@@ -153,6 +153,14 @@ function(yumeiren_generate_version_files)
     # 生成物在构建目录里，所以这里给绝对路径，不依赖相对路径解析规则。
     set(YUMEIREN_MANIFEST_PATH "${_dir}/app.manifest")
 
+    # 图标同理：windres 编译 app.rc 时自己去读 .ico，路径也必须是绝对的真实文件。
+    # 复制而不是直接指向源码树，是为了和 manifest 保持一致；另外 configure_file
+    # 会把源文件登记进 CMAKE_CONFIGURE_DEPENDS，改了 .ico 会自动重新 configure。
+    # （只有 configure 还不够 —— app.rc 重编与否要看 CMakeLists 里那条 OBJECT_DEPENDS。）
+    set(YUMEIREN_ICON_PATH "${_dir}/yumeiren.ico")
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/resources/yumeiren.ico"
+                   "${YUMEIREN_ICON_PATH}" COPYONLY)
+
     configure_file("${CMAKE_CURRENT_SOURCE_DIR}/resources/app.rc.in"
                    "${_dir}/app.rc" @ONLY)
     configure_file("${CMAKE_CURRENT_SOURCE_DIR}/resources/app.manifest.in"
@@ -162,6 +170,7 @@ function(yumeiren_generate_version_files)
 
     set(YUMEIREN_GENERATED_DIR "${_dir}"         PARENT_SCOPE)
     set(YUMEIREN_GENERATED_RC  "${_dir}/app.rc"  PARENT_SCOPE)
+    set(YUMEIREN_ICON_PATH     "${YUMEIREN_ICON_PATH}" PARENT_SCOPE)
 endfunction()
 
 # 给目标接上版本信息：让它能 #include <YumeirenVersion.h>。

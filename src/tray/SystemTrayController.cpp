@@ -14,7 +14,6 @@
 #include <QIcon>
 #include <QMenu>
 #include <QPainter>
-#include <QPainterPath>
 #include <QPixmap>
 #include <QSystemTrayIcon>
 
@@ -345,39 +344,30 @@ void SystemTrayController::onTrayActivated(QSystemTrayIcon::ActivationReason rea
     }
 }
 
-// 图标由代码绘制：exe 里没有嵌 .ico(resources/app.rc 未声明 ICON)，
-// 而托盘图标必须在无外部文件时也能出来。画的是虞美人(罂粟科)红花金蕊。
+// 托盘图标：与窗口图标、自绘标题栏左上角那枚小标共用同一份原画
+// （resources/icons/yumeiren-NN.png，多档编进 Qt 资源，见 tools/icongen/）。
+//
+// 早先这里是拿 QPainter 现画一朵红花金蕊 —— 那只是权宜之计：exe 里当时没有
+// .ico，托盘又必须在无外部文件时也能出图。现在图标成套了，托盘就跟主图标
+// 一致，不再各画各的。
 QIcon SystemTrayController::buildTrayIcon() const
 {
+    const QIcon icon = appinfo::appIcon();
+    if (!icon.isNull())
+        return icon;
+
+    // 兜底：资源万一没编进来，至少留一个能看见的圆点，别让托盘空着。
+    // 正常构建走不到这里 —— 资源是编进 exe 的，不会缺。
+    videodiag::log(videodiag::Level::Warning,
+                   QStringLiteral("托盘: 图标资源缺失，退化成占位圆点"),
+                   QStringLiteral("Tray"));
     QPixmap pixmap(64, 64);
     pixmap.fill(Qt::transparent);
-
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing, true);
-
-    constexpr int kPetals = 5;
-    const QPointF center(32.0, 33.0);
-    for (int i = 0; i < kPetals; ++i) {
-        const qreal angle = -90.0 + i * (360.0 / kPetals);
-        painter.save();
-        painter.translate(center);
-        painter.rotate(angle);
-        QPainterPath petal;
-        petal.moveTo(0.0, 0.0);
-        petal.cubicTo(QPointF(-15.0, -12.0), QPointF(-11.0, -30.0), QPointF(0.0, -26.0));
-        petal.cubicTo(QPointF(11.0, -30.0), QPointF(15.0, -12.0), QPointF(0.0, 0.0));
-        painter.fillPath(petal, QColor(i % 2 ? 0xC8 : 0xE0, 0x2B, 0x3B));
-        painter.restore();
-    }
-
-    // 深色描边让浅色任务栏上也看得清
-    painter.setPen(QPen(QColor(0x20, 0x14, 0x18), 2.0));
-    painter.setBrush(QColor(0xF6, 0xC4, 0x4A));
-    painter.drawEllipse(center, 7.0, 7.0);
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor(0x35, 0x1E, 0x22));
-    painter.drawEllipse(center, 3.0, 3.0);
+    painter.setPen(QPen(QColor(0x2E, 0x30, 0x38), 5.0));
+    painter.setBrush(QColor(0xF2, 0xF3, 0xF6));
+    painter.drawEllipse(QPointF(32.0, 32.0), 25.0, 25.0);
     painter.end();
-
     return QIcon(pixmap);
 }

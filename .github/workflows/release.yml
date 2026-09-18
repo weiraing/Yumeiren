@@ -81,10 +81,16 @@ jobs:
       # 这一步是「版本号真的贯通了」的证明：读的是 exe 里的 VERSIONINFO 资源，
       # 也就是 resources/app.rc.in 生成出来的东西。版本号若只在 CMake 变量里对、
       # 没写进资源，这里就会红。
+      #
+      # 产物名是品牌名「虞美人.exe」（CMakeLists 的 OUTPUT_NAME）。这个名字依赖
+      # 工具链能把非 ASCII 路径原样传下去 —— 中文 Windows 的 GBK 装得下，所以本机
+      # 实测通过；英文区域的 runner 装不下就会变成 `???.exe`，届时**编译那一步**
+      # 就会失败（Ninja 找不到自己的产物），不会走到这里。真遇到就把 CMakeLists 里
+      # 那段注释掉的「ASCII 产物名 + cmake -E 复制」方案启用。
       - name: 校验 exe 的版本资源与预期一致
         shell: pwsh
         run: |
-          $vi = (Get-Item "build/Release/Yumeiren.exe").VersionInfo
+          $vi = (Get-Item "build/Release/虞美人.exe").VersionInfo
           Write-Host "ProductVersion  = $($vi.ProductVersion)"
           Write-Host "FileVersion     = $($vi.FileVersion)"
           Write-Host "FileDescription = $($vi.FileDescription)"
@@ -100,7 +106,7 @@ jobs:
         run: |
           $out = "build/Release"
           # 拷贝 Qt DLL/插件与 VC 运行时到 exe 旁，做成免安装目录
-          windeployqt --release --no-translations --compiler-runtime "$out/Yumeiren.exe"
+          windeployqt --release --no-translations --compiler-runtime "$out/虞美人.exe"
           $zip = "Yumeiren-portable-v$env:YUMEIREN_VERSION-win64.zip"
           Compress-Archive -Path "$out/*" -DestinationPath $zip -Force
           "ZIP_NAME=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append

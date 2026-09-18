@@ -33,6 +33,10 @@ int main(int argc, char *argv[])
     QApplication::setOrganizationName(appinfo::id());
     QApplication::setApplicationName(appinfo::id());
     QApplication::setApplicationVersion(appinfo::version());
+    // 窗口图标：任务栏按钮、Alt-Tab、各对话框标题栏都取它。
+    // exe 内嵌的 .ico 管的是资源管理器/快捷方式那一侧，Qt 这边拿不到，要单独设。
+    // 必须在建任何窗口之前 —— 之后设只影响此后创建的窗口。
+    QApplication::setWindowIcon(appinfo::appIcon());
 
     // 缓存目录迁移：软件自身产生的缓存(缩略图/渲染背景图/诊断日志)统一写入
     // <程序目录>/.cache，位置只取决于 exe 所在目录，与当前工作目录无关。
