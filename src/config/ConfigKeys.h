@@ -74,6 +74,10 @@ inline constexpr auto Height = "window/height";
 inline constexpr auto X = "window/x";
 inline constexpr auto Y = "window/y";
 inline constexpr auto Maximized = "window/maximized";
+// 一次性标志：是否已把历史遗留的「超高窗口高度」收到新默认值。老版本默认高度是
+// 840，用户配置里却存着 929 —— 光改默认值不生效，得主动收一次。判据与理由见
+// MainWindow 构造函数里的几何注释。
+inline constexpr auto HeightFit = "window/heightFit";
 }
 
 // 看板娘(Live2D 桌宠)。只持久化用户设置，运行态(当前状态机状态、当前动作)

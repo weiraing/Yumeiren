@@ -85,13 +85,41 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     setWindowTitle(appinfo::windowTitle()); // 原生标题=Yumeiren(窗口行); 品牌名在自绘标题栏
     setMinimumSize(880, 660);
     // 初始窗口几何：优先恢复上次保存的尺寸位置(钳制在可用工作区 94% 内；越界
-    // 自动拉回主屏)，无保存记录时用自适应首选 960×840(贴近用户实测合适尺寸，
-    // 且高于最小值 880×660 不会裁掉底部按钮行)。
+    // 自动拉回主屏)，无保存记录时用自适应首选 960×836。
+    //
+    // 高度 840 → 830 → 836（2026-09-18，用户报「首次打开窗口明显过高，右下角一大片空白」）。
+    // 账是这么算的：文件夹美化页右列那张卡里，最后一行是「应用图片背景 / 恢复」两个
+    // 按钮，之后是一段 `addStretch(1)` 把内容顶到上边 —— 窗口比内容高多少，那段就白
+    // 多少。所以「可见空白 = 客户区高度 - 830」是**线性**的，实测(窗口宽 968 逻辑)：
+    //     客户区 892 → 卡底 878、按钮底 802，卡内空白 76 → 可见空白 62（用户红框量到的）
+    //     客户区 842 → 可见空白 12
+    //     客户区 836 → 可见空白 6
+    //     客户区 830 → 可见空白 1  **但页面冒出竖向滚动条**
+    // 可见空白压不到 0 —— 右卡自己还有 14 的下内边距，那就是它的下限。而高度一旦低于
+    // 「内容刚好装下」的阈值，QScrollArea 立刻冒竖向滚动条，**整页左移 8 像素**
+    // （滚动条 QSS `width:8px; margin:2px`，所以 handle 只有 4 宽）。实测阈值：
+    //     宽度 968 → 831（830 有滚动条、831 没有）
+    //     宽度 960 → 834 已无滚动条（窗口越窄，右卡里按宽高比算出的预览框越矮，
+    //                按钮底从 802 掉到 799，内容矮 3 像素，阈值也跟着下移）
+    // 取 836：宽度 968 下可见空白 6、离阈值留 5 像素；宽度 960 下可见空白 9、留 7 像素。
+    // **别再往下调** —— 830 那档试过，滚动条会让整页横跳。
     {
+        constexpr int kDefaultW = 960;
+        constexpr int kDefaultH = 836;
         const QRect avail = QGuiApplication::primaryScreen()->availableGeometry();
         auto &cfg = AppConfig::instance();
         const int cw = cfg.value(ConfigKeys::Window::Width, 0).toInt();
-        const int ch = cfg.value(ConfigKeys::Window::Height, 0).toInt();
+        int ch = cfg.value(ConfigKeys::Window::Height, 0).toInt();
+
+        // 一次性把历史遗留的「超高窗口」收下来：老版本默认 840，用户配置里却躺着 929
+        // （多半是更早那版「尺寸逐次膨胀」留下的），光改默认值他下次打开看到的还是老
+        // 样子。**只做一次**：之后用户把窗口拉高是他自己的选择，每次开机都按回去会让
+        // 人以为窗口尺寸存不住。
+        if (ch >= 660 && !cfg.value(ConfigKeys::Window::HeightFit, false).toBool()) {
+            cfg.setValue(ConfigKeys::Window::HeightFit, true);
+            ch = qMin(ch, kDefaultH);
+        }
+
         if (cw >= 880 && ch >= 660) {
             QSize want(cw, ch);
             want = want.boundedTo(avail.size() * 0.94);
@@ -104,7 +132,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
             if (cfg.value(ConfigKeys::Window::Maximized, false).toBool())
                 setWindowState(Qt::WindowMaximized);
         } else {
-            m_savedWindowSize = QSize(960, 840).boundedTo(avail.size() * 0.94);
+            m_savedWindowSize = QSize(kDefaultW, kDefaultH).boundedTo(avail.size() * 0.94);
             resize(m_savedWindowSize);
         }
     }
