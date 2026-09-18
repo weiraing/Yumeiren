@@ -52,7 +52,6 @@ QString Engine::imageIniPath()  { return imageDllDir() + QStringLiteral("/config
 QString Engine::effectIniPath() { return effectDllDir() + QStringLiteral("/config.ini"); }
 QString Engine::bgDir()   { return CachePaths::renderedBg(); }
 QString Engine::processedImagePath() { return bgDir() + QStringLiteral("/bg_custom.png"); }
-QString Engine::wallpaperPath() { return bgDir() + QStringLiteral("/current_wallpaper.jpg"); }
 QString Engine::imagePoolDir() { return CachePaths::imagePool(); }
 
 void Engine::ensureDataDirs()

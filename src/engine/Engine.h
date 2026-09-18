@@ -42,7 +42,6 @@ public:
     static QString effectIniPath();
     static QString bgDir();               // 处理后背景图缓存 = CachePaths::renderedBg()
     static QString processedImagePath();
-    static QString wallpaperPath();
     // 「随机」模式的图片池目录 = CachePaths::imagePool()。
     // 与 bgDir 分开，避免池里的图被「单图」模式误当候选。
     static QString imagePoolDir();

@@ -75,7 +75,6 @@ private slots:
     void updatePlayingHighlight(); // 播放列表中当前曲目条目高亮
     void pickPresetFolder();
     void rebuildGallery();
-    void pickWallpaper();
     void selectPreset(int index);
     void applyImage();
     void applyEffect();

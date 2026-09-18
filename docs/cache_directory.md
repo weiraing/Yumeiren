@@ -23,7 +23,7 @@
 | 子目录 | 谁写 | 内容 | 能不能删 |
 | --- | --- | --- | --- |
 | `.cache\thumbnails` | `mainwindow.cpp: galleryThumbPath()` | 图库缩略图 `<md5>_v2.png` | 可删，进图库自动重建 |
-| `.cache\media` | `Engine::bgDir()`(壁纸/图片处理) | `bg_custom.png`、`current_wallpaper.jpg` 等处理后背景图 | 可删，下次应用壁纸重生成 |
+| `.cache\media` | `Engine::bgDir()`(壁纸/图片处理) | `bg_custom.png` 等处理后背景图 | 可删，下次应用壁纸重生成。`current_wallpaper.jpg` 是 2026-09-18 删掉的「用桌面壁纸」功能留下的**历史文件**，程序不再写它；删掉只影响还把 `image/customPath` 指向它的旧配置 |
 | `.cache\logs` | `videodiag.cpp`、`main.cpp` 守卫 | `videowallpaper.log`(追加写，超限时滚成 `.log.old`)、`guard_<pid>.log` | 可删，下次写日志自动重建 |
 | `.cache\temp` | `CachePaths::isWritable()` | 可写性探针 `writetest-<pid>.tmp`，用完即删 | 可删 |
 

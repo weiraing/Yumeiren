@@ -170,10 +170,6 @@ QWidget *MainWindow::buildImagePage()
     folderRow->addWidget(folderBtn, 2);
     folderRow->addWidget(refreshBtn, 1);
     leftLay->addLayout(folderRow);
-    auto *wallBtn = new QPushButton(QStringLiteral("🖼 用桌面壁纸"), leftCard);
-    wallBtn->setToolTip(tooltipstyle::format(QStringLiteral("截取当前桌面壁纸作为背景")));
-    connect(wallBtn, &QPushButton::clicked, this, &MainWindow::pickWallpaper);
-    leftLay->addWidget(wallBtn);
 
     m_imageSourceLabel = new QLabel(leftCard);
     m_imageSourceLabel->setObjectName(QStringLiteral("HintLabel"));
@@ -475,31 +471,6 @@ void MainWindow::selectPreset(int index)
     if (m_galleryList && m_galleryList->currentRow() != index)
         m_galleryList->setCurrentRow(index);
     setImageSourceText(QStringLiteral("当前选择：图片 · %1").arg(m_presets[index].name));
-    updateImagePreview();
-}
-
-void MainWindow::pickWallpaper()
-{
-    QString src = QDir::fromNativeSeparators(
-        qEnvironmentVariable("APPDATA")
-        + QStringLiteral("/Microsoft/Windows/Themes/TranscodedWallpaper"));
-    if (!QFileInfo::exists(src)) {
-        setLog(QStringLiteral("未能获取桌面壁纸(可能是纯色桌面)"), true);
-        return;
-    }
-    QImage img(src);
-    if (img.isNull()) {
-        setLog(QStringLiteral("壁纸读取失败"), true);
-        return;
-    }
-    Engine::instance().ensureDataDirs();
-    QString dst = Engine::wallpaperPath();
-    img.convertToFormat(QImage::Format_RGB32).save(dst, "JPEG", 95);
-    m_customImage = dst;
-    m_selectedPreset = -1;
-    for (auto *b : m_presetButtons)
-        b->setChecked(false);
-    setImageSourceText(QStringLiteral("当前选择：桌面壁纸"));
     updateImagePreview();
 }
 

@@ -29,7 +29,7 @@
 | --- | --- | --- | --- | --- |
 | 1 | `mainwindow.cpp: galleryThumbPath()` / `rebuildGallery()` 线程池 `img.save()` | `%LOCALAPPDATA%\Yumeiren\thumbs\<md5>_v2.png` | 图库缩略图缓存 | `CachePaths::thumbnails()` |
 | 2 | `mainwindow.cpp: applyImage()` → `processed.save(Engine::processedImagePath())` | `...\bg\bg_custom.png` | 处理后背景图，每次应用重生成 | `CachePaths::media()` |
-| 3 | `mainwindow.cpp: pickWallpaper()` → `img.save(Engine::wallpaperPath())` | `...\bg\current_wallpaper.jpg` | 桌面壁纸转存(可重新获取) | `CachePaths::media()` |
+| 3 | ~~`mainwindow.cpp: pickWallpaper()` → `img.save(Engine::wallpaperPath())`~~ **已于 2026-09-18 随「用桌面壁纸」功能一并删除** | `...\bg\current_wallpaper.jpg` | 桌面壁纸转存(可重新获取) | 无（不再转存；历史文件若仍被 `image/customPath` 指着，照旧能读） |
 | 4 | `videodiag.cpp: logPath()`(含 `.old` 滚动与 `.<pid>.log` 变体) | `...\logs\videowallpaper.log` | 诊断日志，可删可再生 | `CachePaths::logs()` |
 | 5 | `main.cpp` 单实例守卫结果日志 | `...\logs\guard_<pid>.log` | 一次性诊断 | `CachePaths::logs()` |
 | 6 | ~~`appinfo.cpp: migrateLegacy()` 旧版背景导入落点~~ **已于 2026-09-18 随迁移代码一并删除** | `...\bg` | 缓存落点 | 无（不再有旧版导入） |
