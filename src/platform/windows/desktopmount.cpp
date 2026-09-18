@@ -144,7 +144,14 @@ bool isWindowMounted(QWidget *window, const QRect &physicalRect)
         return false;
     HWND hwnd = reinterpret_cast<HWND>(window->winId());
     RECT r;
-    return GetParent(hwnd) == g_workerW && IsWindowVisible(hwnd)
+    // 必须用 GetAncestor(GA_PARENT) 而不是 GetParent()：壁纸窗口带 WS_POPUP
+    // (Qt::Tool)，而 GetParent 对 WS_POPUP 的顶层窗口返回的是 **owner** 而不是
+    // 父窗口 —— 我们的 owner 是空的，于是它永远返回 NULL，这里的比较永远不成立。
+    // 后果不是"检查不通过"这么轻：mountIsStale() 会恒为真，1s 心跳经 10s 节流
+    // 每 10 秒重挂一次，而每次重挂都要 SetParent + SetWindowPos(SWP_FRAMECHANGED)，
+    // 窗口会被短暂移出 DWM 合成 —— 用户看到的就是壁纸画面"消失又出现"地闪一下。
+    // (实测本机稳定每 11s 闪一次，接近单视频循环的 12.5s，极易误判成循环交界问题。)
+    return GetAncestor(hwnd, GA_PARENT) == g_workerW && IsWindowVisible(hwnd)
            && GetWindowRect(hwnd, &r)
            && r.left == physicalRect.x() && r.top == physicalRect.y()
            && r.right - r.left == physicalRect.width()
