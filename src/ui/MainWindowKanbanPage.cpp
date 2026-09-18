@@ -706,7 +706,9 @@ void MainWindow::showKanbanModelMenu(const QPoint &viewportPos)
     // 对象树之后，exec() 期间触发的动作若导致父对象被销毁，返回时菜单自己就
     // 成了野指针。这里当前不会销毁任何东西，但没必要留这个隐患。
     QMenu menu;
-    QAction *deleteAction = menu.addAction(QStringLiteral("删除模型…"));
+    // 不写「删除模型…」：省略号在 Qt/Windows 惯例里表示「点了还会弹对话框」，
+    // 而现在点了就删（见 deleteKanbanModel 的说明）。
+    QAction *deleteAction = menu.addAction(QStringLiteral("删除模型"));
 
     // 用 exec() 的返回值判断点了哪一项，而不是在触发槽里直接干活：这样「菜单已关」
     // 与「动作执行」在时间上分开，执行期间不会还有菜单挂在屏幕上。
@@ -733,26 +735,16 @@ void MainWindow::deleteKanbanModel(QListWidgetItem *item)
     // 出来的 modelJsonPath，目录由它推出来，不可能和实际情况不一致。
     const QString dirPath = QFileInfo(jsonPath).absolutePath();
 
-    // 二次确认。破坏性操作只说「确定吗」是不够的 —— 要写清删的是哪个文件夹、
-    // 能不能找回，用户才有判断依据。默认按钮落在「取消」上。
-    QMessageBox box(this);
-    box.setIcon(QMessageBox::Warning);
-    box.setWindowTitle(QStringLiteral("删除模型"));
-    box.setText(QStringLiteral("确定要删除模型「%1」吗？").arg(modelName));
-    box.setInformativeText(
-        QStringLiteral("模型文件夹：\n%1\n\n"
-                       "整个文件夹会被移入回收站，之后还能还原；\n"
-                       "它的预览图缓存会一并清除。")
-            .arg(QDir::toNativeSeparators(dirPath)));
-    QPushButton *deleteButton =
-        box.addButton(QStringLiteral("删除"), QMessageBox::DestructiveRole);
-    QPushButton *cancelButton =
-        box.addButton(QStringLiteral("取消"), QMessageBox::RejectRole);
-    box.setDefaultButton(cancelButton);
-    box.exec();
-    if (box.clickedButton() != deleteButton)
-        return;
-
+    // **不弹确认框，点「删除模型…」即删**（2026-09-18 用户明确要求）。
+    //
+    // 敢这么做的前提是删除**走回收站**（见 fbswin::moveToRecycleBin），误删能还原 ——
+    // 撤销路径在回收站里，而不是在一个「确定吗」的弹窗里。而且右键 → 选菜单项本身
+    // 已经是两步刻意操作，不是一点就中的。
+    //
+    // 代价是删错了不会有第二次机会提示。所以删除结果必须**看得见**：下面无论成功
+    // 失败都写一行界面提示 + 一条落盘日志（含被删目录），别把反馈一起省掉。
+    //
+    // 别再把这个确认框加回来：它是用户主动要求去掉的。
     QString error;
     if (!fbswin::moveToRecycleBin(dirPath, &error)) {
         // 失败就到此为止，**绝不退化成永久删除**：用户以为东西进了回收站、实际被
@@ -785,7 +777,9 @@ void MainWindow::deleteKanbanModel(QListWidgetItem *item)
 
     updateKanbanControls();
 
-    QString log = QStringLiteral("已删除模型「%1」%2，剩余可用模型 %3 个。")
+    // 没有确认框之后，这行提示就是唯一的当场反馈 —— 必须说清「删了哪个」和
+    // 「去哪了」（回收站），用户才知道怎么反悔。
+    QString log = QStringLiteral("已删除模型「%1」%2，已移入回收站。剩余可用模型 %3 个。")
                       .arg(modelName,
                            thumbRemoved ? QStringLiteral("及预览图") : QString(),
                            QString::number(left.size()));

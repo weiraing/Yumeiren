@@ -77,19 +77,38 @@ bool moveToRecycleBin(const QString &absolutePath, QString *error)
     SHFILEOPSTRUCTW op = {};
     op.wFunc = FO_DELETE;
     op.pFrom = buffer.c_str();
-    // ALLOWUNDO 才是「进回收站」；NOCONFIRMATION 是因为确认已经由本程序的对话框
+    // ALLOWUNDO 才是「进回收站」；NOCONFIRMATION 是因为确认已经由本程序的界面
     // 做过一次了，再弹一个系统的只会让人以为要删两次。SILENT/NOERRORUI 关掉进度条
     // 与系统错误框 —— 失败原因由我们转达，风格才和界面一致。
     op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
 
     const int rc = SHFileOperationW(&op);
-    if (rc != 0)
-        return fail(describeShellError(rc));
-    // rc==0 也可能什么都没删（用户在系统层面取消了），要单独看这个标志。
+
+    // ---- 判据是文件系统，不是返回码 ----
+    //
+    // 2026-09-18 实测：**同一段代码、同样的参数，返回值会因目标路径而异**。删
+    // %TEMP% 下的目录返回 0，删 C:\Users\rain\... 或 C:\ProgramData\... 下的目录
+    // 却稳定返回 2(ERROR_FILE_NOT_FOUND) —— 而目录**确实进了回收站**：逐次核对过
+    // 回收站 $I 记录，每一次 rc=2 的调用都留下了一条时间戳对应的记录。怀疑是实时
+    // 防护/索引服务在目录刚建好时短暂持有句柄，SHFileOperation 事后报「找不到」，
+    // 但移动其实已经完成。
+    //
+    // 所以别拿 rc 当判据 —— 拿它当判据的后果是：明明删成功了，却弹一个「删除失败」
+    // 的框，还顺带跳过缩略图清理。**东西没了就是删掉了**。
+    //
+    // 曾经想过查回收站条目数，来区分「进了回收站」和「回收站装不下被永久删除」。
+    // **别再这么干**：SHQueryRecycleBinW 要遍历整个回收站，本机（25764 个条目 /
+    // 26 GB）实测**单次约 7 秒**，前后各查一次就是 14 秒，删除会像卡死。而且回收站
+    // 装不下时 Windows 的降级删除本来就不是我们能拦住的。
+    if (!QFileInfo::exists(info.absoluteFilePath()))
+        return true;
+
+    // 路径还在，这才是真的没删成。
     if (op.fAnyOperationsAborted)
         return fail(QStringLiteral("操作被中断，未删除任何内容"));
-
-    return true;
+    if (rc == 0)
+        return fail(QStringLiteral("没有删除任何内容"));
+    return fail(describeShellError(rc));
 }
 
 } // namespace fbswin
