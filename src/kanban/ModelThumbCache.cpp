@@ -86,6 +86,17 @@ QString ModelThumbCache::store(const QString &modelId, const QImage &image)
     return target;
 }
 
+bool ModelThumbCache::remove(const QString &modelId)
+{
+    const QString path = pathFor(modelId);
+    if (path.isEmpty())
+        return false;
+    // 只删这一张 PNG，连目录都不碰 —— 目录归 directory() 管。
+    // 「本来就没有缓存」与「删掉了」对调用方是同一个结果(缓存里没这张图了)，
+    // 所以删不到不算失败，返回值只用来决定要不要写日志。
+    return QFile::remove(path);
+}
+
 void ModelThumbCache::sweepTempFiles()
 {
     const QString dir = CachePaths::modelThumbs();

@@ -106,6 +106,7 @@ set(YUMEIREN_SOURCES
     src/wallpaper/VideoWallpaperSettings.cpp
     # platform/ module
     src/platform/windows/desktopmount.cpp
+    src/platform/windows/shellfileops.cpp
     # tray/ module
     src/tray/SystemTrayController.cpp
     # kanban/ module
@@ -126,7 +127,9 @@ set(YUMEIREN_SOURCES
 )
 
 # 两个产品目标共用的依赖清单；Live2D 开启时在下面追加。
-set(YUMEIREN_LIBS Qt6::Widgets Qt6::Multimedia Qt6::MultimediaWidgets dwmapi psapi)
+# shell32 是给 platform/windows/shellfileops.cpp 的 SHFileOperationW 用的
+# (删除模型时把文件夹移入回收站)，Qt 不会替我们链上它。
+set(YUMEIREN_LIBS Qt6::Widgets Qt6::Multimedia Qt6::MultimediaWidgets dwmapi psapi shell32)
 
 # Live2D(Cubism) 后端：SDK 受专有许可约束、不入库，所以仓库里只有解压好的
 # third_party/(同样被 .gitignore 排除)。于是默认值做成「探测」而不是写死：

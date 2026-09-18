@@ -9,6 +9,7 @@
 #include <QLabel>
 #include <QMainWindow>
 #include <QMutex>
+#include <QPoint>
 #include <QSize>
 #include <QSlider>
 #include <QStringList>
@@ -26,6 +27,7 @@ class SystemTrayController;
 
 class QLineEdit;
 class QListWidget;
+class QListWidgetItem;
 class QStackedWidget;
 class QCheckBox;
 class QComboBox;
@@ -168,6 +170,8 @@ private:
     void applyKanbanModelThumb(const QString &modelId); // 单个模型出图后即时贴图
     void pollKanbanModelThumbs();        // 任务期间轮询：已落盘的先贴上去
     void onKanbanThumbFinished(int exitCode);
+    void showKanbanModelMenu(const QPoint &viewportPos); // 模型卡片右键菜单
+    void deleteKanbanModel(QListWidgetItem *item);       // 删除模型文件夹 + 缓存预览图
 
     // data
     struct PresetImage { QString name; QString res; bool isFigure; };

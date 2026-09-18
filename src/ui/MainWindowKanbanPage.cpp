@@ -5,6 +5,7 @@
 #include "config/ConfigKeys.h"
 #include "core/Diagnostics.h"
 #include "kanban/ModelThumbCache.h"
+#include "platform/windows/shellfileops.h"
 #include "ui/TooltipStyle.h"
 #include "ui/UiMetrics.h" // 左列宽度：与动态壁纸页共用同一个常量
 
@@ -18,6 +19,7 @@
 #include "wallpaper/VideoWallpaper.h"
 
 #include <QApplication>
+#include <QAction>
 #include <QButtonGroup>
 #include <QCheckBox>
 #include <QComboBox>
@@ -31,6 +33,8 @@
 #include <QIcon>
 #include <QLabel>
 #include <QListWidget>
+#include <QMenu>
+#include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
 #include <QProcess>
@@ -340,6 +344,19 @@ QWidget *MainWindow::buildKanbanModelCard(QWidget *parent)
     grid->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
     grid->setMinimumHeight(240);
     grid->setSelectionMode(QAbstractItemView::SingleSelection);
+    // 右键卡片弹菜单（目前只有「删除模型」）。
+    //
+    // **策略必须装在 grid（QAbstractScrollArea）上，不能装在它的 viewport 上。**
+    // QAbstractScrollArea 给 viewport 装了事件过滤器，ContextMenu 事件会被它先
+    // 截下来转给 viewportEvent()，viewport 自己的 contextMenuPolicy 根本轮不到 ——
+    // 现象就是「右键卡片毫无反应」，而且一点日志都不打（槽函数压根没被调用）。
+    // 这是 Qt 里 QListWidget/QTreeView 的通行写法，用 viewport 是错的。
+    //
+    // 槽里拿到的 pos 是**视口坐标**，与 itemAt() 同一套；菜单定位再用 viewport
+    // 换算到屏幕，保持一致。
+    grid->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(grid, &QWidget::customContextMenuRequested, this,
+            &MainWindow::showKanbanModelMenu);
     connect(grid, &QListWidget::currentItemChanged, this,
             [this](QListWidgetItem *item, QListWidgetItem *) {
                 if (m_kanbanSyncing || !item)
@@ -671,6 +688,121 @@ void MainWindow::refreshKanbanModels()
         m_kanbanModelGrid->setCurrentRow(keepRow);
 
     reloadKanbanModelIcons();
+}
+
+// 模型卡片右键菜单。
+//
+// 目前只有「删除模型」一项。之所以还要弹个菜单而不是右键即删：右键本身没有任何
+// 破坏性含义，用户需要一次明确的「我要对这张卡片做点什么」。
+void MainWindow::showKanbanModelMenu(const QPoint &viewportPos)
+{
+    if (!m_kanbanModelGrid)
+        return;
+    QListWidgetItem *item = m_kanbanModelGrid->itemAt(viewportPos);
+    if (!item)
+        return; // 空白处不弹：没有「对谁操作」这个前提，菜单项就没有意义
+
+    // 菜单刻意不给父对象。与 KanbanWindow 的右键菜单同一讲究：菜单进了 Qt 的
+    // 对象树之后，exec() 期间触发的动作若导致父对象被销毁，返回时菜单自己就
+    // 成了野指针。这里当前不会销毁任何东西，但没必要留这个隐患。
+    QMenu menu;
+    QAction *deleteAction = menu.addAction(QStringLiteral("删除模型…"));
+
+    // 用 exec() 的返回值判断点了哪一项，而不是在触发槽里直接干活：这样「菜单已关」
+    // 与「动作执行」在时间上分开，执行期间不会还有菜单挂在屏幕上。
+    QAction *chosen = menu.exec(m_kanbanModelGrid->viewport()->mapToGlobal(viewportPos));
+    if (chosen == deleteAction)
+        deleteKanbanModel(item);
+}
+
+// 删除一个模型：整个文件夹移入回收站，缓存预览图一并清掉。
+void MainWindow::deleteKanbanModel(QListWidgetItem *item)
+{
+    if (!item || !m_kanban)
+        return;
+
+    // 先把要用的东西全部取出来。下面的 refreshKanbanModels() 会 clear() 整个网格，
+    // item 随即失效 —— 之后再碰 item->text() 就是 use-after-free。
+    const QString modelName = item->text();
+    const QString jsonPath = item->data(Qt::UserRole).toString();
+    const QString modelId = item->data(Qt::UserRole + 1).toString();
+    if (jsonPath.isEmpty() || modelId.isEmpty())
+        return;
+
+    // 模型文件夹 = .model3.json 所在目录。不另外存一份路径：网格条目里的就是扫描
+    // 出来的 modelJsonPath，目录由它推出来，不可能和实际情况不一致。
+    const QString dirPath = QFileInfo(jsonPath).absolutePath();
+
+    // 二次确认。破坏性操作只说「确定吗」是不够的 —— 要写清删的是哪个文件夹、
+    // 能不能找回，用户才有判断依据。默认按钮落在「取消」上。
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Warning);
+    box.setWindowTitle(QStringLiteral("删除模型"));
+    box.setText(QStringLiteral("确定要删除模型「%1」吗？").arg(modelName));
+    box.setInformativeText(
+        QStringLiteral("模型文件夹：\n%1\n\n"
+                       "整个文件夹会被移入回收站，之后还能还原；\n"
+                       "它的预览图缓存会一并清除。")
+            .arg(QDir::toNativeSeparators(dirPath)));
+    QPushButton *deleteButton =
+        box.addButton(QStringLiteral("删除"), QMessageBox::DestructiveRole);
+    QPushButton *cancelButton =
+        box.addButton(QStringLiteral("取消"), QMessageBox::RejectRole);
+    box.setDefaultButton(cancelButton);
+    box.exec();
+    if (box.clickedButton() != deleteButton)
+        return;
+
+    QString error;
+    if (!fbswin::moveToRecycleBin(dirPath, &error)) {
+        // 失败就到此为止，**绝不退化成永久删除**：用户以为东西进了回收站、实际被
+        // 永久抹掉，是最不能接受的一种「成功」。
+        videodiag::log(videodiag::Level::Warning,
+                       QStringLiteral("删除模型「%1」失败: %2 (目录 %3)")
+                           .arg(modelName, error, QDir::toNativeSeparators(dirPath)),
+                       QStringLiteral("Kanban"));
+        setKanbanLog(QStringLiteral("删除模型「%1」失败：%2").arg(modelName, error), true);
+        QMessageBox::warning(this, QStringLiteral("删除失败"),
+                             QStringLiteral("没能删除「%1」。\n\n%2\n\n模型文件未被改动。")
+                                 .arg(modelName, error));
+        return;
+    }
+
+    // 缓存图是可再生的，直接永久删掉，不必占回收站。
+    const bool thumbRemoved = kanban::ModelThumbCache::remove(modelId);
+
+    const bool wasCurrent = (m_kanban->modelPath() == jsonPath);
+
+    refreshKanbanModels(); // 重扫目录 + 重建网格（此刻 item 已失效，别再用）
+
+    // 删掉的正好是当前模型时要换一个：否则控制器里的 modelPath 会指向一个已经
+    // 不存在的文件，网格高亮、「下一个模型」这些以它为基准的地方都会落空。
+    // 一个可用模型都不剩时不做处理 —— 界面会显示「可用模型 0 个」，看板娘仍用
+    // 内存里已装载的形象继续跑，下次启动自然回落到占位形象。
+    const QVector<kanban::ModelInfo> left = m_kanban->validModelList();
+    if (wasCurrent && !left.isEmpty())
+        m_kanban->setModelPath(left.first().modelJsonPath);
+
+    updateKanbanControls();
+
+    QString log = QStringLiteral("已删除模型「%1」%2，剩余可用模型 %3 个。")
+                      .arg(modelName,
+                           thumbRemoved ? QStringLiteral("及预览图") : QString(),
+                           QString::number(left.size()));
+    if (left.isEmpty())
+        log += QStringLiteral(" 放进新模型后点「↻ 刷新」即可。");
+    setKanbanLog(log, left.isEmpty());
+
+    // 界面上那行字只活在当前会话里，翻篇就没了；删除是不可逆的破坏性操作，
+    // 日志里留一条才能事后追溯（谁在什么时候删了哪个目录）。
+    videodiag::log(videodiag::Level::Info,
+                   QStringLiteral("已删除模型「%1」: 目录 %2 已移入回收站，"
+                                  "预览图缓存 %3，剩余可用模型 %4 个")
+                       .arg(modelName, QDir::toNativeSeparators(dirPath),
+                            thumbRemoved ? QStringLiteral("已清除")
+                                         : QStringLiteral("原本就没有"),
+                            QString::number(left.size())),
+                   QStringLiteral("Kanban"));
 }
 
 // 按当前缓存重贴全部格子图标。
