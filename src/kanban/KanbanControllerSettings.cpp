@@ -197,6 +197,9 @@ bool KanbanController::setModelPath(const QString &modelJsonPath)
         return false;
     }
     m_modelPath = modelJsonPath;
+    // 挂起释放标记跟着装载结果复位：熄屏时会话仍是活跃的，用户在这期间换模型
+    // 会把刚释放掉的东西又装回显存。不复位，心跳就因为标记还挂着而再也不释放。
+    m_releasedForSuspend = false;
     m_currentModelName = info->name;
     m_lastError.clear();
     AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::ModelPath), m_modelPath);

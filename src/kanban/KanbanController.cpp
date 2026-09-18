@@ -5,12 +5,14 @@
 #include "config/AppConfig.h"
 #include "config/ConfigKeys.h"
 #include "core/Diagnostics.h"
+#include "platform/windows/desktopmount.h"
 #include "kanban/KanbanAnimationClock.h"
 #include "kanban/KanbanRenderer.h"
 #include "kanban/KanbanWindow.h"
 #include "kanban/Live2DRenderer.h"
 #include "kanban/PlaceholderRenderer.h"
 
+#include <QElapsedTimer>
 #include <QTimer>
 
 namespace kanban {
@@ -20,6 +22,13 @@ constexpr const char *kModule = "Kanban";
 // 等 GL 上下文的上限。超时说明这台机器/这次会话根本拿不到 GL 宿主，
 // 继续等下去就是状态机卡在 Starting —— 用户看到的正是「点了没反应」。
 constexpr int kGlReadyTimeoutMs = 5000;
+// 挂起判定心跳。1s 足够：这两个原因都是「持续几分钟起步」的事件，
+// 而再密也只是每秒多两次窗口句柄查询。
+constexpr int kSuspendHeartbeatMs = 1000;
+// 持续挂起到「连模型带纹理一起释放」的门槛。锁屏/熄屏下画面根本不存在，
+// 且恢复必然伴随人工动作，所以尽快释放不牺牲任何可感知体验 ——
+// 与视频壁纸的 kSuspendReleaseHiddenMs 同值同理(见 VideoWallpaper.cpp)。
+constexpr qint64 kSuspendReleaseHiddenMs = 5000;
 } // namespace
 
 KanbanController::KanbanController(QObject *parent)
@@ -29,6 +38,12 @@ KanbanController::KanbanController(QObject *parent)
     connect(m_clock, &KanbanAnimationClock::tick, this, &KanbanController::onFrameTick);
     connect(m_clock, &KanbanAnimationClock::measuredFpsChanged,
             this, &KanbanController::measuredFpsChanged);
+    // 挂起心跳只在跑起来时挂着：没在跑的时候它无事可判，白留一个每秒唤醒。
+    m_suspendClock = new QElapsedTimer();
+    m_suspendTimer = new QTimer(this);
+    m_suspendTimer->setTimerType(Qt::CoarseTimer);
+    m_suspendTimer->setInterval(kSuspendHeartbeatMs);
+    connect(m_suspendTimer, &QTimer::timeout, this, &KanbanController::evaluateSuspend);
     loadSettings();
 }
 
@@ -297,6 +312,8 @@ bool KanbanController::initializeAndLoad()
         }
         QString loadErr;
         if (m_renderer->loadModel(chosen->modelJsonPath, &loadErr)) {
+            // 装载成功即「模型又在显存里」，释放标记必须跟着复位(见 setModelPath 同名说明)。
+            m_releasedForSuspend = false;
             m_currentModelName = chosen->name;
             m_modelPath = chosen->modelJsonPath;
             AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::ModelPath), m_modelPath);
@@ -349,6 +366,13 @@ bool KanbanController::activateKanban()
     }
     m_clock->setTargetFps(m_targetFps);
     m_clock->start();
+    // 挂起心跳随运行状态起停。清零是必要的：本函数也是重试与降级路径的汇合点，
+    // 残留的上一轮状态会让第一次心跳把「刚起来的实例」当成「已经挂起很久」。
+    m_suspendReasons = 0;
+    m_releasedForSuspend = false;
+    m_suspendClock->invalidate();
+    m_fakeSuspendClock.invalidate();
+    m_suspendTimer->start();
     publishState();
     videodiag::log(videodiag::Level::Info,
                    QStringLiteral("[Kanban] 已启动：后端=%1 模型=%2 目标帧率=%3")
@@ -384,6 +408,7 @@ void KanbanController::enterError(const QString &reason)
 {
     m_lastError = reason;
     m_clock->stop();
+    m_suspendTimer->stop();
     m_machine.transition(State::Error, "enterError");
     // Error 不是「在跑」：后台任务位必须清掉，否则关窗后进程被一个失败的功能吊着。
     ApplicationRuntimeState::instance().setKanbanState(false, false);
@@ -404,7 +429,10 @@ void KanbanController::pauseResume()
         if (m_renderer) {
             m_renderer->resume();
         }
-        m_clock->start();
+        // 挂起中只恢复「暂停态」，不恢复绘制：画面此刻依然没人看得见。
+        if (m_suspendReasons == 0) {
+            m_clock->start();
+        }
         videodiag::log(videodiag::Level::Info, QStringLiteral("[Kanban] 恢复动画"),
                        QLatin1String(kModule));
     } else if (m_machine.isRunning() && !m_machine.is(State::Starting)) {
@@ -445,6 +473,9 @@ void KanbanController::stop()
         return;
     }
     m_clock->stop();
+    m_suspendTimer->stop();
+    m_suspendReasons = 0;
+    m_releasedForSuspend = false;
 
     if (m_renderer) {
         m_renderer->shutdown(); // 必须早于窗口销毁：GL 资源要活在上下文里
@@ -490,7 +521,9 @@ void KanbanController::showWindow()
     }
     m_window->show();
     // show 期间时钟是停的(不可见即停)，这里按当前状态恢复。
-    if (!m_machine.isPaused() && m_machine.isRunning()) {
+    // 挂起中例外：锁屏/熄屏时把窗口显示出来并不等于有人看得见，
+    // 起帧这件事交给心跳判定「挂起原因解除」的那一拍。
+    if (!m_machine.isPaused() && m_machine.isRunning() && m_suspendReasons == 0) {
         m_clock->start();
     }
     if (m_window->isVisible()) {
@@ -524,6 +557,7 @@ void KanbanController::hideWindow()
 void KanbanController::shutdownForExit()
 {
     m_clock->stop();
+    m_suspendTimer->stop();
     if (m_renderer) {
         m_renderer->shutdown();
     }
@@ -553,6 +587,121 @@ void KanbanController::publishState()
     AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::Enabled), running);
     emit stateChanged(stateText());
     emit backendChanged(m_backendName);
+}
+
+// —— 挂起(锁屏 / 熄屏) ——
+
+void KanbanController::setMonitorOn(bool on)
+{
+    if (m_monitorOn == on) {
+        return;
+    }
+    m_monitorOn = on;
+    // 不等下一拍心跳：电源广播本身就是准确时刻，立刻判一次。
+    evaluateSuspend();
+}
+
+qint64 KanbanController::suspendReleaseThresholdMs()
+{
+    if (const int overrideMs = qEnvironmentVariableIntValue("YUMEIREN_KANBAN_SUSPEND_MS");
+        overrideMs > 0) {
+        return overrideMs; // 自动化实测用它把阈值压到几秒内(壁纸那边同名机制)
+    }
+    return kSuspendReleaseHiddenMs;
+}
+
+// 只喂一个假的「看不见」信号，被测的仍是它下游那一整条链：停帧 → 数到阈值 →
+// 释放模型与纹理 → 信号消失后重新装载。之所以要它：锁屏要人回来输密码，
+// 没人能在无人值守的测量脚本里替你解锁，而这条链唯一的实测证据只能在释放
+// 之后才有意义。传感器本身(锁屏/电源广播)另有实测记录，不在这里的射程内。
+int KanbanController::fakeSuspendReasons()
+{
+    static const int windowMs = qEnvironmentVariableIntValue("YUMEIREN_KANBAN_FAKE_SUSPEND_MS");
+    if (windowMs <= 0) {
+        return 0;
+    }
+    if (!m_fakeSuspendClock.isValid()) {
+        m_fakeSuspendClock.start();
+    }
+    return m_fakeSuspendClock.elapsed() < windowMs ? SuspendMonitorOff : 0;
+}
+
+void KanbanController::evaluateSuspend()
+{
+    // Starting 期间不插手：那条路径自己会起时钟，这里停它一下就是把状态机
+    // 吊在半路上，而它正是「点了启动却没反应」的成因。
+    if (!m_machine.isRunning() || m_machine.is(State::Starting)) {
+        return;
+    }
+
+    int reasons = 0;
+    if (fbswin::isWorkstationLocked()) {
+        reasons |= SuspendLocked;
+    }
+    if (!m_monitorOn) {
+        reasons |= SuspendMonitorOff;
+    }
+    reasons |= fakeSuspendReasons();
+    const bool wasSuspended = m_suspendReasons != 0;
+    m_suspendReasons = reasons;
+
+    if (reasons != 0) {
+        if (!wasSuspended) {
+            m_clock->stop(); // 停帧：GL 侧不再产生任何 update，GPU 立刻归零
+            m_suspendClock->restart();
+            videodiag::log(videodiag::Level::Info,
+                           QStringLiteral("[Kanban] 挂起(原因 0x%1)：帧时钟已停")
+                               .arg(reasons, 0, 16),
+                           QLatin1String(kModule));
+        }
+        if (!m_releasedForSuspend && m_suspendClock->isValid()
+            && m_suspendClock->elapsed() >= suspendReleaseThresholdMs()) {
+            releaseForSuspend();
+        }
+        return;
+    }
+
+    // 原因已清零。既没挂起过也没释放过 = 什么都没发生，直接返回，
+    // 这条心跳在正常使用时是纯只读的。
+    if (!wasSuspended && !m_releasedForSuspend) {
+        return;
+    }
+    if (m_releasedForSuspend) {
+        restoreFromSuspend();
+        m_releasedForSuspend = false;
+    }
+    m_suspendClock->invalidate();
+    if (!m_machine.isPaused() && isVisible()) {
+        m_clock->start();
+    }
+    videodiag::log(videodiag::Level::Info, QStringLiteral("[Kanban] 挂起解除，恢复绘制"),
+                   QLatin1String(kModule));
+}
+
+void KanbanController::releaseForSuspend()
+{
+    if (!m_renderer) {
+        return;
+    }
+    // 只拆模型与纹理，不拆渲染器与窗口：前者才是几百 MB 的那一笔，后者要重建
+    // 得等 Qt 重新给上下文，代价大得多且会留下「桌面上一个空白小窗」。
+    m_renderer->unloadModel();
+    m_releasedForSuspend = true;
+    videodiag::log(videodiag::Level::Info,
+                   QStringLiteral("[Kanban] 持续挂起 %1ms(原因 0x%2)，已释放模型与纹理，"
+                                  "回到桌面自动装载")
+                       .arg(m_suspendClock->elapsed())
+                       .arg(m_suspendReasons, 0, 16),
+                   QLatin1String(kModule));
+    fbswin::trimProcessMemory(); // 立刻把腾出来的页还给系统，而不是等它慢慢换出
+}
+
+void KanbanController::restoreFromSuspend()
+{
+    // 走 initializeAndLoad 而不是只补一次 loadModel：挂起期间窗口可能被移动、
+    // 缩放甚至换过 DPI，纹理上限要按**当下**的绘制面重算 —— 这条正是启动时
+    // 走的那条路，装载失败也按同一种方式处理(记日志，画不出人但不再崩)。
+    initializeAndLoad();
 }
 
 } // namespace kanban

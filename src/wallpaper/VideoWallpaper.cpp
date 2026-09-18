@@ -39,8 +39,17 @@ namespace {
 VideoWallpaper *g_wallpaper = nullptr;
 
 // 持续挂起多久后卸载解码管线(省显存/内存)，恢复时重建约需 2s。
-// YUMEIREN_LONG_SUSPEND_MS 仅用于自动化测试覆盖阈值。
-constexpr qint64 kLongSuspendReleaseMs = 180000;
+// 按挂起原因分级，判据只有一条：**用户能不能看见，以及恢复要不要经过人工动作**。
+//   · 锁屏 / 熄屏：画面根本不存在，而且恢复必然先有「解锁 / 开屏」这个人工动作
+//     (≥1s)，重建延迟被它完全掩盖 → 尽快释放。熄屏一晚上能省下 4K 素材的
+//     全部显存与提交内存，是这台机器上最大的一笔平均占用。
+//   · 全屏 / 被遮挡：用户可能下一秒就切回桌面，留 60s 驻留避免来回重建。
+//   · 电池：30s，省电优先。
+// YUMEIREN_LONG_SUSPEND_MS 仅用于自动化测试覆盖全部档位。
+constexpr qint64 kLongSuspendReleaseMs = 180000;      // 兜底
+constexpr qint64 kSuspendReleaseHiddenMs = 5000;      // 锁屏 / 熄屏
+constexpr qint64 kSuspendReleaseCoveredMs = 60000;    // 全屏 / 桌面被完全遮挡
+constexpr qint64 kSuspendReleaseBatteryMs = 30000;    // 电池供电
 } // namespace
 
 // 显示模式名(仅诊断日志使用)：多屏问题的时序要靠这一行区分主屏/拉伸/镜像。
@@ -528,7 +537,10 @@ void VideoWallpaper::evaluateSuspend()
     int reasons = 0;
     if (m_pauseOnFullscreen && fbswin::isForegroundFullscreen())
         reasons |= SuspendFullscreen;
-    // 主屏模式下，前台应用盖满主屏工作区时壁纸完全不可见，暂停白省
+    // 主屏模式下，前台应用盖满主屏工作区时壁纸完全不可见，暂停白省。
+    // 扩展/镜像模式**刻意不做**遮挡判定：本机单屏无法验证多屏语义，而改动它
+    // 会让既有行为在无法实测的场景下漂移(实测：扩展模式会退化成每秒反复
+    // 暂停/恢复)。多屏遮挡留给有第二块屏的会话再评估。
     if (m_pauseOnFullscreen && m_screenMode == PrimaryScreen
         && fbswin::isDesktopCovered())
         reasons |= SuspendCovered;
@@ -620,20 +632,14 @@ void VideoWallpaper::evaluateSuspend()
             });
         }
     }
-    // 持续挂起超过阈值：壁纸反正看不见，整条解码管线+呈现表面全部释放，
+    // 持续挂起超过该原因的阈值：壁纸反正看不见，整条解码管线+呈现表面全部释放，
     // 显存/内存回落到近空闲水平；恢复时重建并续播(代价 ~2s)
     // 例外：列表已播完(不循环)时不释放。此时解码器本就停着、只剩一张定格的
     // 末帧，而播完状态会拦住心跳的管线重建分支，卸载之后壁纸就再也回不来了。
     if (!shouldPlay && !wasPlaying && !m_playbackFinished && !m_outputs.isEmpty()
-        && m_suspendClock->isValid()) {
-        qint64 threshold = kLongSuspendReleaseMs;
-        if (const int overrideMs = qEnvironmentVariableIntValue(
-                "YUMEIREN_LONG_SUSPEND_MS");
-            overrideMs > 0)
-            threshold = overrideMs;
-        if (m_suspendClock->elapsed() >= threshold)
-            longSuspendRelease();
-    }
+        && m_suspendClock->isValid()
+        && m_suspendClock->elapsed() >= suspendReleaseThresholdMs(m_suspendReasons))
+        longSuspendRelease();
     if (!shouldPlay) {
         if (reasons != m_lastEmittedReasons) {
             if (reasons & SuspendCovered)
@@ -679,6 +685,21 @@ void VideoWallpaper::emitTrackState()
     else
         emit playbackStateChanged(QStringLiteral("播放中"));
 }
+qint64 VideoWallpaper::suspendReleaseThresholdMs(int reasons) const
+{
+    if (const int overrideMs = qEnvironmentVariableIntValue("YUMEIREN_LONG_SUSPEND_MS");
+        overrideMs > 0)
+        return overrideMs; // 自动化测试覆盖全部档位
+    // 锁屏/熄屏优先判断：这两个原因下画面根本不存在，且恢复必然伴随人工动作，
+    // 所以「尽快释放」不牺牲任何可感知体验。
+    if (reasons & (SuspendLocked | SuspendMonitorOff))
+        return kSuspendReleaseHiddenMs;
+    if (reasons & SuspendBattery)
+        return kSuspendReleaseBatteryMs;
+    if (reasons & (SuspendFullscreen | SuspendCovered))
+        return kSuspendReleaseCoveredMs;
+    return kLongSuspendReleaseMs;
+}
 void VideoWallpaper::longSuspendRelease()
 {
     if (m_shuttingDown)
@@ -695,7 +716,9 @@ void VideoWallpaper::longSuspendRelease()
     }
     m_resumePosMs = pos;
     videodiag::log(videodiag::Level::Info,
-        QStringLiteral("长挂起释放管线: resumePos=%1").arg(pos));
+        QStringLiteral("长挂起释放管线: resumePos=%1 reasons=0x%2 阈值=%3ms")
+            .arg(pos).arg(m_suspendReasons, 0, 16)
+            .arg(suspendReleaseThresholdMs(m_suspendReasons)));
     teardownOutputs();
     if (m_reclaimMemory)
         trimMemory(); // 立刻把释放后的页还给系统

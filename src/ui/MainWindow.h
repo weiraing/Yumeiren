@@ -256,6 +256,10 @@ private:
     QComboBox *m_fpsBox = nullptr;
     QLabel *m_videoStatus = nullptr;
 
+    // 显示器电源通知的订阅句柄(Windows 的 HPOWERNOTIFY)。用 void* 是为了不在头文件
+    // 里引 windows.h；空 = 没订上，熄灭/唤醒判据随之不可用(构造时会记一行)。
+    void *m_powerNotify = nullptr;
+
     // shell
     QWidget *m_titleBar = nullptr;          // 自绘标题栏(无边框窗口)
     QPushButton *m_titleMin = nullptr;

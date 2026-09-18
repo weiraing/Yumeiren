@@ -123,6 +123,9 @@ private:
     };
     // 捕获型 lambda 的存活校验(任务书 6.3)：只比对指针值，绝不解引用可能已释放的对象
     bool isLiveOutput(const VideoOutput &out) const;
+    // 持续挂起多久后卸载解码管线。按挂起原因分级：看不见且恢复必然伴随人工
+    // 动作的场景(锁屏/熄屏)尽快释放，可能随时切回桌面的场景(全屏/遮挡)留短驻留。
+    qint64 suspendReleaseThresholdMs(int reasons) const;
     bool isPrimaryOutput(const VideoOutput &out) const;
     bool ensureOutputs(QString *error);
     void layoutOutputs();

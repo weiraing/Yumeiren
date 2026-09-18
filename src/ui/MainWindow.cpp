@@ -59,9 +59,17 @@ namespace {
 // 旧版 MinGW SDK 头文件可能缺失这些定义
 constexpr UINT kDwmwaCornerPreference = 33;
 constexpr UINT kDwmwcpRound = 2;
-// 显示器电源开关(开/关屏)通知 GUID
+// 显示器电源开关(开/关屏)通知 GUID。必须与系统里的值逐字节一致：抄错一个字节
+// 就是「订阅了一个不存在的设置」—— 注册调用照样返回成功，通知却永远不来，
+// 熄屏判定静默失效。本轮实测发现之前这份的尾字节是错的(9E9F91AA8CAB0F8A)，
+// 壁纸与看板娘的「熄屏就停」在实机上从未触发过。
+// 正确值取自 SDK：winnt.h 里
+//   DEFINE_GUID(GUID_MONITOR_POWER_ON, 0x02731015, 0x4510, 0x4526,
+//               0x99, 0xE6, 0xE5, 0xA1, 0x7E, 0xBD, 0x1A, 0xEA)
+// 即 {02731015-4510-4526-99E6-E5A17EBD1AEA}。不用 SDK 的符号而另写一份，是因为
+// 它只是 winuser.h 里的 extern 声明，取用要牵进 libuuid 这条链接依赖。
 const GUID kMonitorPowerOnGuid = {0x02731015, 0x4510, 0x4526,
-                                  {0x9E, 0x9F, 0x91, 0xAA, 0x8C, 0xAB, 0x0F, 0x8A}};
+                                  {0x99, 0xE6, 0xE5, 0xA1, 0x7E, 0xBD, 0x1A, 0xEA}};
 }
 #endif
 
@@ -209,9 +217,17 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     setCentralWidget(central);
 
 #ifdef Q_OS_WIN
-    // 订阅显示器开/关通知，供视频壁纸状态机在熄屏时自动暂停
-    RegisterPowerSettingNotification(reinterpret_cast<HWND>(winId()),
-                                     &kMonitorPowerOnGuid, 0);
+    // 订阅显示器开/关通知：壁纸与看板娘都用它做「看不见就别画」的判据。
+    // 结果必须过目：注册失败时这条判据会静默退化成「永远不触发」，
+    // 事后在日志里完全分不出「这次没熄屏」与「压根没订上」。
+    m_powerNotify = RegisterPowerSettingNotification(reinterpret_cast<HWND>(winId()),
+                                                    &kMonitorPowerOnGuid,
+                                                    DEVICE_NOTIFY_WINDOW_HANDLE);
+    videodiag::log(m_powerNotify ? videodiag::Level::Info : videodiag::Level::Warning,
+                   m_powerNotify ? QStringLiteral("显示器电源通知：订阅成功")
+                                 : QStringLiteral("显示器电源通知：订阅失败(%1)，熄屏自动暂停不可用")
+                                       .arg(GetLastError()),
+                   QLatin1String("Power"));
     // Win11 原生圆角 + 阴影(无边框窗口需显式开启；Win10 上调用失败无害)
     HWND hwndSelf = reinterpret_cast<HWND>(winId());
     UINT pref = kDwmwcpRound;
@@ -514,6 +530,9 @@ bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr
             // 显示器开关/系统休眠 → 通知视频壁纸状态机
             bool monitorOn;
             if (msg->wParam == PBT_POWERSETTINGCHANGE) {
+                // lParam 由系统给出，为空时不能当结构体读
+                if (!msg->lParam)
+                    return false;
                 const auto *setting = reinterpret_cast<const POWERBROADCAST_SETTING *>(msg->lParam);
                 if (!IsEqualGUID(setting->PowerSetting, kMonitorPowerOnGuid)
                     || setting->DataLength < sizeof(DWORD))
@@ -528,6 +547,11 @@ bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr
                 return false;
             }
             VideoWallpaper::instance().setMonitorOn(monitorOn);
+            // 同一条判据的第二个消费者：看板娘也是「看不见就别画」的对象，
+            // 而它有自己的挂起阈值(见 KanbanController::evaluateSuspend)。
+            if (m_kanban) {
+                m_kanban->setMonitorOn(monitorOn);
+            }
             *result = TRUE;
             return true;
         }

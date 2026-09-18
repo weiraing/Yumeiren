@@ -7,11 +7,15 @@
 #include <QString>
 #include <QStringList>
 
+#include <QElapsedTimer>
+
 #include <memory>
 
 #include "kanban/KanbanModelManager.h"
 #include "kanban/KanbanStateMachine.h"
 #include "kanban/KanbanTypes.h"
+
+class QTimer;
 
 namespace kanban {
 
@@ -82,6 +86,10 @@ public:
     QString modelPath() const { return m_modelPath; }
     int refreshModels(); // 重新扫描模型目录，返回可用模型数
 
+    // 显示器电源状态(由主窗口的 WM_POWERBROADCAST 投递，与视频壁纸同一个事件源)。
+    // 熄屏期间桌面上没有任何东西需要绘制，看板娘却还在按帧率整帧画进 GL。
+    void setMonitorOn(bool on);
+
     void loadSettings(); // 从配置读回全部看板娘设置
     void shutdownForExit(); // 先释放 GL 资源再销毁窗口，保留自动恢复设置
 
@@ -99,8 +107,31 @@ signals:
 private slots:
     void onFrameTick(float deltaSeconds);
     void onGlContextReady();
+    // 挂起判定心跳(1s)。判据与节奏跟视频壁纸同一套，但各自独立跑：看板娘可以
+    // 在壁纸停着的情况下单独运行，反过来也一样。
+    void evaluateSuspend();
 
 private:
+    // 挂起原因位。刻意只有这两项：
+    //   · 锁屏/熄屏是**必然看不见**，且判据本机可实测(会话锁定查询 + 电源广播)；
+    //   · 「前台全屏 / 桌面被遮挡」不做：看板娘默认置顶，本来就画在全屏应用之上；
+    //     不置顶时的遮挡判定又依赖多屏语义，本机单屏验证不了(视频壁纸那边同一个
+    //     结论，见 VideoWallpaper::evaluateSuspend 的注释)。宁可不省也不猜。
+    //
+    // 也刻意**不看主窗口有没有收进托盘**：看板娘是独立的桌面窗口，主界面隐藏时它
+    // 仍露在桌面上，冻住它只会看起来像坏了(2026-09-17 已按用户要求删掉那条联动)。
+    enum SuspendReason {
+        SuspendLocked = 1,
+        SuspendMonitorOff = 2,
+    };
+    // 释放模型与纹理(显存与常驻内存的大头)，保留渲染器与窗口，回来时重新装载。
+    void releaseForSuspend();
+    void restoreFromSuspend();
+    qint64 suspendReleaseThresholdMs();
+    // 仅由环境变量驱动的假「看不见」信号，为的是让释放/恢复这条链能在无人
+    // 值守的实测里跑到；变量没设时恒为 0。
+    int fakeSuspendReasons();
+
     // 组装/拆解
     bool ensureWindow();
     void destroyWindow();
@@ -133,6 +164,15 @@ private:
     bool m_waitingGl = false;
     bool m_runningPublished = false;
     bool m_pausedPublished = false;
+
+    // —— 挂起(锁屏/熄屏) ——
+    QTimer *m_suspendTimer = nullptr;    // 1s 心跳，只在跑起来时挂着
+    QElapsedTimer *m_suspendClock = nullptr; // 本次持续挂起的时长
+    int m_suspendReasons = 0;
+    bool m_releasedForSuspend = false;
+    bool m_monitorOn = true;
+    // 假挂起窗口的起算表(见 fakeSuspendReasons)，只在设了环境变量时走动。
+    QElapsedTimer m_fakeSuspendClock;
 
     // 设置镜像(落盘的单一来源；改设置走 setter，别直接写这几个字段)
     int m_scalePercent = 100;
