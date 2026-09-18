@@ -17,12 +17,13 @@ CMakeCache.txt
 cmake-build-debug
 
 dist/
-# tools/ 下基本是本地验证探针，不入库。但版本号脚本属于发布流程的一环，
-# 必须跟着仓库走，所以这里先整体忽略再单独放行它一个。
-# 注意必须写 tools/*（不能写 tools/）：带斜杠的写法会把整个目录排除掉，
-# git 不再往里看，后面的 ! 放行就完全无效。
-tools/*
-!tools/bump_version.py
+# tools/ 整体不入库（2026-09-18 定案）：里面是本地验证探针与开发期辅助脚本，都属于开发工具，
+# 不是产品的一部分。写 `tools/`（带斜杠）直接排除整个目录 —— 不再需要「tools/* 再 ! 放行」那套，
+# 因为目录里已经没有要入库的东西了。
+#
+# 代价：新克隆里没有发版脚本，改版本号只能手工编辑 VERSION（它仍是唯一来源，见 README 的
+# 「发版流程」）。构建不受影响 —— cmake/Version.cmake 只读 VERSION 文件，从不调用脚本。
+tools/
 new-build/
 live2d-build/
 data/

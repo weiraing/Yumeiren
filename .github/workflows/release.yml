@@ -60,7 +60,7 @@ jobs:
         run: |
           $file = (Get-Content VERSION -Raw).Trim()
           if ($file -ne $env:YUMEIREN_VERSION) {
-            Write-Host "::warning::标签是 $env:YUMEIREN_VERSION，但 VERSION 文件里写着 $file。本次以标签为准。建议执行：python tools/bump_version.py --set $env:YUMEIREN_VERSION --commit --tag"
+            Write-Host "::warning::标签是 $env:YUMEIREN_VERSION，但 VERSION 文件里写着 $file。本次以标签为准。建议把 VERSION 改成 $env:YUMEIREN_VERSION 后提交。"
           } else {
             Write-Host "标签与 VERSION 文件一致：$file"
           }

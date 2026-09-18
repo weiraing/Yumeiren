@@ -367,8 +367,8 @@ VERSION                    ← 唯一的「源头」，一行 X.Y.Z
 | 2 | git 标签恰好指向 HEAD（`v1.2.3` → `1.2.3`） | 在标签上直接构建，无需任何参数 |
 | 3 | 仓库根目录 `VERSION` 文件 | 开发期默认值 |
 
-> 改版本号请改 `VERSION` 文件，或用 `tools/bump_version.py`。`resources/app.rc.in`、
-> `resources/app.manifest.in`、`cmake/YumeirenVersion.h.in` 都只是模板，里面的版本字段由 CMake 填。
+> 改版本号请改 `VERSION` 文件。`resources/app.rc.in`、`resources/app.manifest.in`、
+> `cmake/YumeirenVersion.h.in` 都只是模板，里面的版本字段由 CMake 填。
 
 ### 发布版与开发版
 
@@ -395,24 +395,22 @@ VERSION                    ← 唯一的「源头」，一行 X.Y.Z
 
 ### 发版流程
 
+`VERSION` 是版本号的唯一来源，发版就是改它一行、再提交打标签：
+
 ```bash
-# 只看不写
-python tools/bump_version.py --show
-python tools/bump_version.py patch --dry-run
+# 1. 改号：直接编辑 VERSION，一行 X.Y.Z
+#    SemVer 惯例 —— patch 修 bug / minor 加功能 / major 破坏性改动；可带预发布后缀（2.0.0-rc1）
+#    想只看不写就直接读它：cat VERSION
 
-# 自增（SemVer 惯例：patch 修 bug / minor 加功能 / major 破坏性改动）
-python tools/bump_version.py patch      # 1.0.0 -> 1.0.1
-python tools/bump_version.py minor      # 1.0.0 -> 1.1.0
-python tools/bump_version.py major      # 1.0.0 -> 2.0.0
-
-# 指定精确版本（可带预发布后缀）
-python tools/bump_version.py --set 2.0.0-rc1
-
-# 一步到位：改号 → 提交 → 打 vX.Y.Z 标签 → 推送（推送后 CI 自动开始发布）
-python tools/bump_version.py patch --tag --push
+# 2. 提交并打标签（推送后 CI 自动开始发布）
+git commit -am "发布 1.0.1"
+git tag v1.0.1
+git push origin master --tags
 ```
 
-只要「改号」不要标签，去掉 `--tag --push` 即可；想顺手提交就加 `--commit`。
+> 仓库里**不含**发版辅助脚本 —— `tools/` 整体不入库（见 [`.gitignore`](.gitignore)），
+> 那里只有本地验证探针和开发期工具。想自动化就自己写一个：它要做的只是改 `VERSION` 一行，
+> 然后 `git commit` + `git tag vX.Y.Z` + `git push`，仅此而已。
 
 ### CI 自动发布
 
@@ -427,7 +425,7 @@ python tools/bump_version.py patch --tag --push
 只看编译日志是发现不了的。
 
 标签与 `VERSION` 文件不一致时**只警告、不阻断**（打个小补丁标签就发版是合理需求），
-但建议统一用 `bump_version.py --tag` 发版，让两者始终同步。
+但发版时建议**先改 `VERSION` 再打标签**，让两者始终同步。
 
 ---
 
@@ -440,7 +438,7 @@ python tools/bump_version.py patch --tag --push
 | C++ 源文件 | **72** 个（33 个头文件 + 39 个实现） |
 | 代码行数 | **16,434** 行 |
 | 模块数 | **10** 个 |
-| 入库文件 | **115** 个（`git ls-files` 计数；另有 `.gitignore` 排除的 SDK / 素材 / 探针） |
+| 入库文件 | **114** 个（`git ls-files` 计数；另有 `.gitignore` 排除的 SDK / 素材 / 探针） |
 | 设计文档 | **23** 篇（`docs/`） |
 | 构建目标 | 2 个产品目标 + 2 个探针 |
 | 内置 Live2D 模型 | 16 个（本地素材，未入库） |
@@ -537,7 +535,7 @@ Yumeiren/
 │   └── icons/                      # 界面图标
 ├── data/                           # 素材（不入库）：models / image / video
 ├── third_party/                    # Cubism SDK + GLEW（不入库，只读，保持上游原样）
-├── tools/                          # 验证探针（不入库）+ bump_version.py（入库）
+├── tools/                          # 验证探针与开发期脚本（不入库）
 ├── docs/                           # 设计与审计文档
 ├── VERSION                         # ★ 版本号唯一来源（一行 X.Y.Z）
 ├── CMakeLists.txt
