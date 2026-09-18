@@ -217,8 +217,8 @@ qt_add_resources(YumeirenTest app_res
     FILES ${APP_RESOURCES}
 )
 
-# 这里原本 include 了 cmake/{RenderTests,ControllerTests,UiTests}.cmake —— 三个可选的回归测试
-# 目标（渲染生命周期 / 看板娘控制器 / 界面辅助函数），由 YUMEIREN_BUILD_*_TESTS 开关控制。
+# 这里原本 include 了 cmake/{RenderTests,ControllerTests,UiTests}.cmake（即 `cmake/*Tests.cmake`）——
+# 三个可选的回归测试目标（渲染生命周期 / 看板娘控制器 / 界面辅助函数），由 YUMEIREN_BUILD_*_TESTS 开关控制。
 # 2026-09-18 定案：**测试代码用完即删**，于是测试源码、这三份接线与对应的三个选项一并移除，
 # 仓库里不再有任何测试目标。回归验证改由 tools/ 下的探针承担（那批本就不入库，见 .gitignore）。
 
