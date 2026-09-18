@@ -46,6 +46,16 @@ public:
     // 环形取下一个有效模型；不足两个时返回 nullptr(调用方保持当前模型)。
     const ModelInfo *nextValidAfter(const QString &currentJsonPath) const;
 
+    // 删掉下标 removedIndex 的模型之后，应当切到**剩下的**第几个(0 基)。
+    //
+    // 不能拿 nextValidAfter() 顶替：那个函数假定当前模型仍在列表里，删完再按路径去
+    // 找会找不到，而它「找不到就从 0 开始」的口径会给出第 2 个，不是第 1 个。
+    // 正确口径是：删掉第 i 个之后原来的第 i+1 个补到第 i 位，所以「下一个」在新列表
+    // 里仍然在下标 i；它本来就是最后一个(或下标无效)时绕回第一个。
+    //
+    // remainingCount = 删除**之后**剩下的数量。剩下 0 个时返回 0(调用方自行判空)。
+    static int successorIndexAfterRemoval(int removedIndex, int remainingCount);
+
     // 单个 json 的校验(界面「刷新」与扫描共用)；填好 out 的 valid/problems。
     static bool validateModelJson(const QString &jsonPath, ModelInfo *out);
 

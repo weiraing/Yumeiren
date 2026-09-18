@@ -749,13 +749,19 @@ void MainWindow::deleteKanbanModel(QListWidgetItem *item)
     if (!fbswin::moveToRecycleBin(dirPath, &error)) {
         // 失败就到此为止，**绝不退化成永久删除**：用户以为东西进了回收站、实际被
         // 永久抹掉，是最不能接受的一种「成功」。
+        //
+        // 措辞上不能说「模型文件未被改动」：本函数重试过之后仍失败时，最可能的情形
+        // 恰恰是「文件已经全进回收站了，只剩一个空目录删不掉」（见 shellfileops.cpp
+        // 里的实测记录）。拿「未被改动」去安抚用户，等于骗一个模型已经被毁掉的人。
         videodiag::log(videodiag::Level::Warning,
                        QStringLiteral("删除模型「%1」失败: %2 (目录 %3)")
                            .arg(modelName, error, QDir::toNativeSeparators(dirPath)),
                        QStringLiteral("Kanban"));
         setKanbanLog(QStringLiteral("删除模型「%1」失败：%2").arg(modelName, error), true);
         QMessageBox::warning(this, QStringLiteral("删除失败"),
-                             QStringLiteral("没能删除「%1」。\n\n%2\n\n模型文件未被改动。")
+                             QStringLiteral("没能删掉「%1」。\n\n%2\n\n"
+                                            "请点「↻ 刷新」确认它是否还在 —— "
+                                            "失败时可能已经删掉了其中一部分。")
                                  .arg(modelName, error));
         return;
     }
@@ -765,15 +771,40 @@ void MainWindow::deleteKanbanModel(QListWidgetItem *item)
 
     const bool wasCurrent = (m_kanban->modelPath() == jsonPath);
 
+    // 删掉的是当前模型时要换成「它的下一个」，所以**必须在刷新前**把这个模型在
+    // 列表里的下标记下来。刷新后它就不在列表里了，再按路径去找是找不到的 ——
+    // 按「找不到就从 0 开始找下一个」去算，会得到第 2 个而不是第 1 个（
+    // nextValidAfter() 就是那个口径，它假定当前模型仍在列表里）。
+    int removedIndex = -1;
+    if (wasCurrent) {
+        const QVector<kanban::ModelInfo> before = m_kanban->validModelList();
+        for (int i = 0; i < before.size(); ++i) {
+            if (before.at(i).modelJsonPath == jsonPath) {
+                removedIndex = i;
+                break;
+            }
+        }
+    }
+
     refreshKanbanModels(); // 重扫目录 + 重建网格（此刻 item 已失效，别再用）
 
     // 删掉的正好是当前模型时要换一个：否则控制器里的 modelPath 会指向一个已经
     // 不存在的文件，网格高亮、「下一个模型」这些以它为基准的地方都会落空。
+    //
+    // 换成「下一个」而不是列表第一个：删掉第 i 个之后，原来的第 i+1 个会补到第 i 位，
+    // 所以「下一个」在新列表里正好还在下标 i —— 用户看到的是下面那张卡片顶上来，
+    // 而不是画面跳到列表开头。它本来就是最后一个时绕回第一个，与 nextValidAfter()
+    // 的环形口径一致（那里是 (pos + 1) % size）。下标换算见
+    // KanbanModelManager::successorIndexAfterRemoval()，那里有单元测试。
+    //
     // 一个可用模型都不剩时不做处理 —— 界面会显示「可用模型 0 个」，看板娘仍用
     // 内存里已装载的形象继续跑，下次启动自然回落到占位形象。
     const QVector<kanban::ModelInfo> left = m_kanban->validModelList();
-    if (wasCurrent && !left.isEmpty())
-        m_kanban->setModelPath(left.first().modelJsonPath);
+    if (wasCurrent && !left.isEmpty()) {
+        const int next = kanban::KanbanModelManager::successorIndexAfterRemoval(
+            removedIndex, left.size());
+        m_kanban->setModelPath(left.at(next).modelJsonPath);
+    }
 
     updateKanbanControls();
 

@@ -44,6 +44,29 @@ int main(int argc, char *argv[])
     check(kanban::KanbanModelManager::defaultModelsRoot() == expectedModelsRoot,
           "Model root must be fixed relative to executable, not working directory");
     check(QDir::setCurrent(originalWorkingDirectory), "Working directory must be restored");
+
+    // 删掉当前模型后该切到哪一个。三处边界都容易写错，逐个钉住。
+    // 语义：preCount 个模型里删掉下标 i，剩下 postCount = preCount - 1 个。
+    {
+        // 中间：删掉第 1 个(共 5 个 → 剩 4 个)，原来的第 2 个补到第 1 位，
+        // 所以「下一个」在下标 1。**不是**第一个(0)。
+        check(kanban::KanbanModelManager::successorIndexAfterRemoval(1, 4) == 1,
+              "Removing a middle model must select the one that shifted into its slot");
+        // 第一个：删掉第 0 个(剩 4 个)，原来的第 1 个补到第 0 位 → 下标 0。
+        // 这条与「切到第一个」结果相同，但原因不同，别当成冗余删掉。
+        check(kanban::KanbanModelManager::successorIndexAfterRemoval(0, 4) == 0,
+              "Removing the first model must select the one that shifted into slot 0");
+        // 最后一个：没有下一个 → 绕回第一个。removedIndex(=4) 已经越界。
+        check(kanban::KanbanModelManager::successorIndexAfterRemoval(4, 4) == 0,
+              "Removing the last model must wrap around to the first");
+        // 找不到(下标无效)：兜底到第一个，别越界。
+        check(kanban::KanbanModelManager::successorIndexAfterRemoval(-1, 4) == 0,
+              "Unknown removed index must fall back to the first model");
+        // 删完一个不剩：调用方会判空，这里只保证不越界。
+        check(kanban::KanbanModelManager::successorIndexAfterRemoval(0, 0) == 0,
+              "No remaining models must not produce an out-of-range index");
+    }
+
     const QString strengthKey = QString::fromLatin1(ConfigKeys::Kanban::GazeStrength);
     const QString legacyKey = QString::fromLatin1(ConfigKeys::Kanban::GazeTrackingLegacy);
     const QString enabledKey = QString::fromLatin1(ConfigKeys::Kanban::Enabled);

@@ -233,4 +233,15 @@ const ModelInfo *KanbanModelManager::nextValidAfter(const QString &currentJsonPa
     return list.at((pos + 1) % list.size());
 }
 
+int KanbanModelManager::successorIndexAfterRemoval(int removedIndex, int remainingCount)
+{
+    if (remainingCount <= 0)
+        return 0; // 调用方负责判空，这里只保证不越界
+    // 删掉第 i 个之后，原来的第 i+1 个补到了第 i 位 —— 所以只要 i 还在新列表的
+    // 范围内，下标 i 指的就是「下一个」。i 越界说明删的是最后一个，绕回第一个。
+    if (removedIndex >= 0 && removedIndex < remainingCount)
+        return removedIndex;
+    return 0;
+}
+
 } // namespace kanban
