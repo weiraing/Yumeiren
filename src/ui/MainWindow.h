@@ -73,11 +73,6 @@ private slots:
     void onVideoStateChanged(const QString &text);
     void updateVideoButtons();
     void updatePlayingHighlight(); // 播放列表中当前曲目条目高亮
-    void transcodeSelectedVideo();      // “立即转码”：异步跑 ffmpeg，不阻塞界面
-    void onTranscodeOutput();           // 解析进度并回写到按钮文字
-    void onTranscodeFinished(int exitCode, bool crashed);
-    void updateTranscodeButton();       // 仅当列表里选中一个视频时可点
-    void addVideoToPlaylist(const QString &path);
     void pickPresetFolder();
     void rebuildGallery();
     void pickWallpaper();
@@ -109,7 +104,6 @@ private:
     QWidget *buildHelpPage();
     QWidget *buildWallpaperPage();
     QWidget *buildVideoWallpaperPage();
-    QWidget *buildTranscodeCard(QWidget *parent); // 视频转码模块(左列第二张卡片)
     QWidget *buildWebWallpaperPage();
     QSlider *makeSlider(int min, int max, int value, QLabel **valueLabel,
                         const QString &suffix = QString());
@@ -261,20 +255,6 @@ private:
     QPushButton *m_pauseBtn = nullptr;
     QComboBox *m_fpsBox = nullptr;
     QLabel *m_videoStatus = nullptr;
-
-    // 视频转码模块：帧率(15/24/30/60，默认24) + 音频(无/有，默认无) + 立即转码
-    QButtonGroup *m_tcFpsGroup = nullptr;
-    QRadioButton *m_tcAudioNo = nullptr;
-    QRadioButton *m_tcAudioYes = nullptr;
-    QPushButton *m_transcodeBtn = nullptr;
-    QLabel *m_transcodeHint = nullptr;   // 转码卡片的说明文字；缺 ffmpeg 时改写成红色告警
-    QProcess *m_transcodeProc = nullptr;
-    QString m_transcodeSrc;              // 本次转码的源文件(用于日志与完成后入列)
-    QString m_transcodeDst;              // 本次转码的输出文件
-    bool m_transcodeHadOutput = false;   // 启动前输出文件是否已存在(失败时不能删旧片)
-    qint64 m_transcodeTotalUs = 0;       // 源视频时长(微秒)，用于百分比
-    QByteArray m_transcodeBuf;           // ffmpeg 输出按行解析的残留缓冲
-    QString m_transcodeErrTail;          // 最后几行 ffmpeg 日志，失败时回显
 
     // shell
     QWidget *m_titleBar = nullptr;          // 自绘标题栏(无边框窗口)

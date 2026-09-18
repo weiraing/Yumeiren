@@ -1,4 +1,4 @@
-// MainWindow 动态壁纸页的构建与交互逻辑（含播放列表、播放控制、转码模块）。
+// MainWindow 动态壁纸页的构建与交互逻辑（含播放列表与播放控制）。
 #include "MainWindow.h"
 
 #include "app/ApplicationRuntimeState.h"
@@ -18,13 +18,11 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
-#include <QProcess>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QScrollArea>
 #include <QSlider>
 #include <QStackedWidget>
-#include <QStandardPaths>
 #include <QVBoxLayout>
 
 
@@ -234,8 +232,8 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     fpsRow->addWidget(m_fpsBox, 1);
     leftLay->addLayout(fpsRow);
 
-    // 左列两张卡片：上方视频壁纸参数，下方视频转码，中间留出明显间隙。
-    // 卡片高度改为随内容收缩(去掉卡内 addStretch)，空白集中到列尾。
+    // 左列一张卡片：视频壁纸参数。卡片高度随内容收缩(去掉卡内 addStretch)，
+    // 空白集中到列尾。
     // 列宽固定、不参与拉伸：窗口变宽时多出来的空间全给右侧播放列表。
     // 宽度与看板娘页共用同一个常量，免得两页左卡宽度漂开(切页会横向跳)。
     auto *leftCol = new QWidget(page);
@@ -244,7 +242,6 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     leftColLay->setContentsMargins(0, 0, 0, 0);
     leftColLay->setSpacing(18);
     leftColLay->addWidget(leftCard);
-    leftColLay->addWidget(buildTranscodeCard(leftCol));
     leftColLay->addStretch(1);
     lay->addWidget(leftCol);
 
@@ -274,9 +271,6 @@ QWidget *MainWindow::buildVideoWallpaperPage()
         if (row >= 0 && row < vp.playlist().size())
             vp.switchToTrack(row);
     });
-    // “立即转码”只在恰好选中一个视频时可用，与启动/暂停/取消互不影响
-    connect(m_videoList, &QListWidget::itemSelectionChanged,
-            this, &MainWindow::updateTranscodeButton);
     listRow->addWidget(m_videoList, 1);
 
     auto *strip = new QVBoxLayout();
@@ -337,423 +331,6 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     return scroll;
 }
 
-namespace {
-
-// 找 ffmpeg：**只看两个地方，顺序固定**（2026-09-17 按用户要求收敛到这里）。
-//   1) 系统 PATH —— 自己装过 ffmpeg 的机器走这条，用的就是他挑的那个版本；
-//   2) 程序所在目录下的 ffmpeg.exe —— 便携用法，拷进来就能用。
-// 刻意不再看 tools/、resources/ 这些子目录：每多一个候选，就多一种「为什么我这台
-// 机器上命中的是另一个 ffmpeg」的可能，出问题时搜索面越小越好排查。
-// 两处都没有 → 回空串，调用方据此把「立即转码」置灰。
-QString findFfmpeg()
-{
-    // PATH 优先。findExecutable 在 Windows 上会自己补 .exe，所以只写 "ffmpeg"。
-    const QString onPath = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
-    if (!onPath.isEmpty())
-        return onPath;
-
-    const QString beside = QCoreApplication::applicationDirPath()
-                           + QStringLiteral("/ffmpeg.exe");
-    if (QFileInfo::exists(beside))
-        return QFileInfo(beside).absoluteFilePath();
-
-    return QString();
-}
-
-// 「立即转码」的文案：能转的时候讲怎么用，不能转的时候讲缺什么、该放哪儿。
-// 两个地方都要用：按钮的 tooltip，以及卡片里的说明文字。
-// **说明文字才是主力** —— 禁用状态的控件在 Qt 里未必收得到 tooltip 事件
-// （实测本机探针里连可点状态的 tooltip 都抓不到，没法依赖），
-// 而「为什么点不了」必须让人一眼看见，不能藏在悬浮提示里。
-QString transcodeReadyTip()
-{
-    return tooltipstyle::format(QStringLiteral(
-        "先在右侧列表选中一个视频再点\n"
-        "输出名：{源文件名}_{帧率}fps_{无声0/有声1}.mp4，保存在源视频所在文件夹\n"
-        "转码完成后自动加入视频列表"));
-}
-
-QString transcodeNoFfmpegTip()
-{
-    return tooltipstyle::format(QStringLiteral(
-        "未找到 ffmpeg，转码功能不可用\n"
-        "把 ffmpeg.exe 放进程序目录，或把它的目录加入系统 PATH 后重启本程序"));
-}
-
-QString transcodeHintNormal()
-{
-    return QStringLiteral("转码列表中选中的视频：重采样帧率、可选去掉音频，结果保存在源视频同目录。");
-}
-
-QString transcodeHintNoFfmpeg()
-{
-    return QStringLiteral("未找到 ffmpeg，转码不可用：把 ffmpeg.exe 放进程序目录，"
-                          "或把它的目录加入系统 PATH。");
-}
-
-// 编码器运行时探测(结果缓存)：有些发行版(例如 conda 构建)是 --disable-gpl，
-// 根本没有 libx264，所以不能写死；按 libx264 → libopenh264 → mpeg4 取首个可用。
-QString pickVideoEncoder()
-{
-    static QString cached;
-    if (!cached.isEmpty())
-        return cached;
-    const QString exe = findFfmpeg();
-    if (exe.isEmpty())
-        return cached;
-
-    QProcess probe;
-    probe.setProcessChannelMode(QProcess::MergedChannels);
-    probe.start(exe, {QStringLiteral("-hide_banner"), QStringLiteral("-encoders")});
-    // 这里在点击线程上等，所以超时给得很短：探测不出来就用 mpeg4，
-    // 它是 ffmpeg 自带的核心编码器，任何发行版都有，宁可画质差也不能卡住界面。
-    if (!probe.waitForFinished(1500)) {
-        probe.kill();
-        probe.waitForFinished(200);
-        cached = QStringLiteral("mpeg4");
-        return cached;
-    }
-
-    QStringList available;
-    const QString out = QString::fromUtf8(probe.readAllStandardOutput());
-    for (const QString &line : out.split(QLatin1Char('\n'))) {
-        const QString t = line.trimmed();
-        if (t.isEmpty())
-            continue;
-        // 视频编码器行形如：" V....D libx264    H.264 / AVC / MPEG-4 AVC ..."，
-        // 开头那个空格会被 trimmed 掉，所以只能按首字母 V 判断，再取第二个 token。
-        const QStringList tokens = t.split(QLatin1Char(' '), Qt::SkipEmptyParts);
-        if (tokens.size() < 2 || !tokens.at(0).startsWith(QLatin1Char('V')))
-            continue;
-        available << tokens.at(1);
-    }
-    for (const char *cand : {"libx264", "libopenh264", "mpeg4"}) {
-        const QString name = QString::fromLatin1(cand);
-        if (available.contains(name)) {
-            cached = name;
-            break;
-        }
-    }
-    if (cached.isEmpty() && !available.isEmpty())
-        cached = available.first();
-    return cached;
-}
-
-// "HH:MM:SS.xx" → 微秒，解析失败返回 -1。
-qint64 parseFfmpegTime(const QString &value)
-{
-    const QStringList parts = value.trimmed().split(QLatin1Char(':'));
-    if (parts.size() != 3)
-        return -1;
-    bool okH = false, okM = false, okS = false;
-    const int h = parts.at(0).toInt(&okH);
-    const int m = parts.at(1).toInt(&okM);
-    const double s = parts.at(2).toDouble(&okS);
-    if (!okH || !okM || !okS)
-        return -1;
-    return qint64((h * 3600 + m * 60) * 1000000.0 + s * 1000000.0);
-}
-
-} // namespace
-QWidget *MainWindow::buildTranscodeCard(QWidget *parent)
-{
-    auto *card = new QFrame(parent);
-    card->setObjectName(QStringLiteral("PageCard"));
-    auto *lay = new QVBoxLayout(card);
-    lay->setContentsMargins(14, 14, 14, 14);
-    lay->setSpacing(10);
-
-    auto *t = new QLabel(QStringLiteral("视频转码"), card);
-    t->setObjectName(QStringLiteral("GroupTitle"));
-    lay->addWidget(t);
-
-    m_transcodeHint = new QLabel(transcodeHintNormal(), card);
-    m_transcodeHint->setObjectName(QStringLiteral("HintLabel"));
-    m_transcodeHint->setWordWrap(true);
-    lay->addWidget(m_transcodeHint);
-
-    // 帧率：15/24/30/60 帧互斥单选，默认 24 帧(250px 卡片里排版很紧，行距压到 2)
-    auto *fpsRow = new QHBoxLayout();
-    fpsRow->setSpacing(2);
-    fpsRow->addWidget(new QLabel(QStringLiteral("帧率"), card));
-    m_tcFpsGroup = new QButtonGroup(this);
-    m_tcFpsGroup->setExclusive(true);
-    for (int fps : {15, 24, 30, 60}) {
-        auto *rb = new QRadioButton(QStringLiteral("%1帧").arg(fps), card);
-        rb->setToolTip(tooltipstyle::format(QStringLiteral(
-                "转码后每秒 %1 帧：帧率越低越省解码资源，桌面壁纸建议 15 或 24 帧").arg(fps)));
-        m_tcFpsGroup->addButton(rb, fps);
-        if (fps == 24)
-            rb->setChecked(true);
-        fpsRow->addWidget(rb);
-    }
-    lay->addLayout(fpsRow);
-
-    // 音频：无(默认，转码时丢掉音轨) / 有(保留并转 AAC)
-    auto *audioRow = new QHBoxLayout();
-    audioRow->setSpacing(6);
-    audioRow->addWidget(new QLabel(QStringLiteral("音频"), card));
-    m_tcAudioNo = new QRadioButton(QStringLiteral("无"), card);
-    m_tcAudioNo->setToolTip(tooltipstyle::format(QStringLiteral(
-            "不保留音频，输出文件不含音轨(桌面壁纸通常用不到声音)")));
-    m_tcAudioYes = new QRadioButton(QStringLiteral("有"), card);
-    m_tcAudioYes->setToolTip(tooltipstyle::format(QStringLiteral(
-            "保留音频并转成 AAC 160k；源视频没有音轨时输出仍然无声")));
-    m_tcAudioNo->setChecked(true);
-    auto *audioGroup = new QButtonGroup(this);
-    audioGroup->setExclusive(true);
-    audioGroup->addButton(m_tcAudioNo);
-    audioGroup->addButton(m_tcAudioYes);
-    audioRow->addWidget(m_tcAudioNo);
-    audioRow->addWidget(m_tcAudioYes);
-    audioRow->addStretch(1);
-    lay->addLayout(audioRow);
-
-    m_transcodeBtn = new QPushButton(QStringLiteral("⚡ 立即转码"), card);
-    m_transcodeBtn->setObjectName(QStringLiteral("PrimaryButton"));
-    m_transcodeBtn->setMinimumHeight(36);
-    m_transcodeBtn->setEnabled(false); // 恰好选中一个视频、且本机有 ffmpeg 才可点
-    m_transcodeBtn->setToolTip(transcodeReadyTip());
-    connect(m_transcodeBtn, &QPushButton::clicked, this, &MainWindow::transcodeSelectedVideo);
-    lay->addWidget(m_transcodeBtn);
-
-    return card;
-}
-void MainWindow::updateTranscodeButton()
-{
-    if (!m_transcodeBtn)
-        return;
-    const bool busy = m_transcodeProc && m_transcodeProc->state() != QProcess::NotRunning;
-    if (busy) {
-        m_transcodeBtn->setEnabled(false);
-        return;
-    }
-    m_transcodeBtn->setText(QStringLiteral("⚡ 立即转码"));
-    // 本机没有 ffmpeg 就置灰，并**把原因写在卡片说明里**（tooltip 只当补充）：
-    // 跟看板娘「没有表情」的入口置灰是同一个套路。
-    // 注意这里**不缓存**查找结果：用户现把 ffmpeg.exe 拷进程序目录，
-    // 只要列表选中项变一下就重新判断，不必重启。
-    const bool hasFfmpeg = !findFfmpeg().isEmpty();
-    if (m_transcodeHint) {
-        m_transcodeHint->setText(hasFfmpeg ? transcodeHintNormal() : transcodeHintNoFfmpeg());
-        m_transcodeHint->setProperty("data-err", hasFfmpeg ? 0 : 1);
-        m_transcodeHint->style()->unpolish(m_transcodeHint);
-        m_transcodeHint->style()->polish(m_transcodeHint);
-    }
-    if (!hasFfmpeg) {
-        m_transcodeBtn->setEnabled(false);
-        m_transcodeBtn->setToolTip(transcodeNoFfmpegTip());
-        return;
-    }
-    m_transcodeBtn->setToolTip(transcodeReadyTip());
-    m_transcodeBtn->setEnabled(m_videoList && m_videoList->selectedItems().size() == 1);
-}
-
-void MainWindow::transcodeSelectedVideo()
-{
-    if (!m_videoList || !m_tcFpsGroup || !m_tcAudioNo || !m_tcAudioYes)
-        return;
-    if (m_transcodeProc && m_transcodeProc->state() != QProcess::NotRunning)
-        return; // 一次只跑一个转码任务
-
-    const auto selected = m_videoList->selectedItems();
-    if (selected.size() != 1) {
-        setLog(QStringLiteral("请先在右侧视频列表中选中一个视频，再点“立即转码”。"), true);
-        return;
-    }
-    const QString src = selected.first()->data(Qt::UserRole).toString();
-    const QFileInfo fi(src);
-    if (!fi.exists()) {
-        setLog(QStringLiteral("源视频不存在：%1").arg(QDir::toNativeSeparators(src)), true);
-        return;
-    }
-    const QString exe = findFfmpeg();
-    if (exe.isEmpty()) {
-        // 正常情况下按钮已经置灰，能走到这里说明运行期间 ffmpeg 被移走了，
-        // 或者是从别处调进来的；提示口径跟 tooltip 保持一致。
-        setLog(QStringLiteral("未找到 ffmpeg：把 ffmpeg.exe 放进程序目录，"
-                              "或把它的目录加入系统 PATH 后重试。"), true);
-        return;
-    }
-    const QString encoder = pickVideoEncoder();
-    if (encoder.isEmpty()) {
-        setLog(QStringLiteral("ffmpeg 没有可用的视频编码器(libx264 / libopenh264 / mpeg4)。"), true);
-        return;
-    }
-
-    const int fps = m_tcFpsGroup->checkedId();
-    const bool keepAudio = m_tcAudioYes->isChecked();
-    const QString dst = fi.absolutePath() + QLatin1Char('/')
-                        + QStringLiteral("%1_%2fps_%3.mp4")
-                              .arg(fi.completeBaseName()).arg(fps).arg(keepAudio ? 1 : 0);
-
-    QStringList args;
-    args << QStringLiteral("-hide_banner") << QStringLiteral("-nostdin")
-         << QStringLiteral("-loglevel") << QStringLiteral("info")
-         << QStringLiteral("-y") << QStringLiteral("-i") << src
-         << QStringLiteral("-map") << QStringLiteral("0:v:0")
-         << QStringLiteral("-vf") << QStringLiteral("fps=%1").arg(fps)
-         << QStringLiteral("-c:v") << encoder;
-    if (encoder == QLatin1String("libx264"))
-        args << QStringLiteral("-preset") << QStringLiteral("veryfast")
-             << QStringLiteral("-crf") << QStringLiteral("23");
-    else
-        args << QStringLiteral("-b:v") << QStringLiteral("6M"); // openh264/mpeg4 只吃码率
-    args << QStringLiteral("-pix_fmt") << QStringLiteral("yuv420p")
-         << QStringLiteral("-movflags") << QStringLiteral("+faststart");
-    if (keepAudio)
-        args << QStringLiteral("-map") << QStringLiteral("0:a:0?")
-             << QStringLiteral("-c:a") << QStringLiteral("aac")
-             << QStringLiteral("-b:a") << QStringLiteral("160k");
-    else
-        args << QStringLiteral("-an");
-    args << dst;
-
-    if (!m_transcodeProc) {
-        m_transcodeProc = new QProcess(this);
-        m_transcodeProc->setProcessChannelMode(QProcess::MergedChannels);
-        connect(m_transcodeProc, &QProcess::readyReadStandardOutput,
-                this, &MainWindow::onTranscodeOutput);
-        connect(m_transcodeProc, qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
-                this, [this](int code, QProcess::ExitStatus status) {
-                    onTranscodeFinished(code, status != QProcess::NormalExit);
-                });
-        connect(m_transcodeProc, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
-            if (error != QProcess::FailedToStart)
-                return; // 其余错误走 finished 统一收尾，避免重复报错
-            setLog(QStringLiteral("ffmpeg 启动失败：%1").arg(m_transcodeProc->errorString()), true);
-            m_transcodeDst.clear();
-            updateTranscodeButton();
-        });
-    }
-
-    m_transcodeSrc = src;
-    m_transcodeDst = dst;
-    // 同名输出可能已经存在(重复转码同一个视频)，失败时只能清理本次写的半成品
-    m_transcodeHadOutput = QFileInfo::exists(dst);
-    m_transcodeTotalUs = 0;
-    m_transcodeBuf.clear();
-    m_transcodeErrTail.clear();
-    m_transcodeBtn->setText(QStringLiteral("转码中 0%"));
-    m_transcodeBtn->setEnabled(false);
-    setLog(QStringLiteral("开始转码：%1 → %2（%3帧 · %4 · %5）")
-               .arg(fi.fileName(), QFileInfo(dst).fileName(), QString::number(fps),
-                    keepAudio ? QStringLiteral("有音频") : QStringLiteral("无音频"), encoder),
-           false);
-    m_transcodeProc->start(exe, args);
-}
-
-// ffmpeg 的进度行以 \r 分隔、普通日志以 \n 分隔，两种都当一行切出来。
-void MainWindow::onTranscodeOutput()
-{
-    if (!m_transcodeProc)
-        return;
-    m_transcodeBuf += m_transcodeProc->readAllStandardOutput();
-
-    auto handleLine = [this](const QString &raw) {
-        const QString line = raw.trimmed();
-        if (line.isEmpty())
-            return;
-        if (m_transcodeTotalUs <= 0) {
-            const int at = line.indexOf(QStringLiteral("Duration:"));
-            if (at >= 0) {
-                int end = line.indexOf(QLatin1Char(','), at);
-                if (end < 0)
-                    end = line.size();
-                m_transcodeTotalUs = parseFfmpegTime(line.mid(at + 9, end - (at + 9)));
-            }
-        }
-        const int at = line.indexOf(QStringLiteral("time="));
-        if (at >= 0 && m_transcodeTotalUs > 0 && m_transcodeBtn) {
-            QString value = line.mid(at + 5);
-            const int sp = value.indexOf(QLatin1Char(' '));
-            if (sp >= 0)
-                value = value.left(sp);
-            const qint64 cur = parseFfmpegTime(value);
-            if (cur >= 0) {
-                const int pct = int(qBound(0.0,
-                                           double(cur) * 100.0 / double(m_transcodeTotalUs),
-                                           99.0));
-                m_transcodeBtn->setText(QStringLiteral("转码中 %1%").arg(pct));
-                return;
-            }
-        }
-        // 非进度行留最后几行，失败时回显给用户定位原因
-        m_transcodeErrTail += line + QLatin1Char('\n');
-        if (m_transcodeErrTail.size() > 1500)
-            m_transcodeErrTail = m_transcodeErrTail.right(1500);
-    };
-
-    int from = 0;
-    for (;;) {
-        const int cr = m_transcodeBuf.indexOf('\r', from);
-        const int lf = m_transcodeBuf.indexOf('\n', from);
-        int idx = -1;
-        if (cr >= 0 && lf >= 0)
-            idx = qMin(cr, lf);
-        else if (cr >= 0)
-            idx = cr;
-        else if (lf >= 0)
-            idx = lf;
-        if (idx < 0)
-            break;
-        handleLine(QString::fromUtf8(m_transcodeBuf.constData() + from, idx - from));
-        from = idx + 1;
-    }
-    m_transcodeBuf = m_transcodeBuf.mid(from);
-}
-
-void MainWindow::onTranscodeFinished(int exitCode, bool crashed)
-{
-    const QFileInfo out(m_transcodeDst);
-    const bool ok = !crashed && exitCode == 0 && out.exists() && out.size() > 0;
-    if (ok) {
-        addVideoToPlaylist(out.absoluteFilePath());
-        setLog(QStringLiteral("转码完成：%1").arg(out.fileName()), false);
-    } else {
-        if (out.exists() && !m_transcodeHadOutput)
-            QFile::remove(out.absoluteFilePath()); // 半成品留在目录里只会误导
-        QString reason = crashed ? QStringLiteral("ffmpeg 异常退出")
-                                 : QStringLiteral("ffmpeg 返回错误码 %1").arg(exitCode);
-        const QString tail = m_transcodeErrTail.trimmed();
-        if (!tail.isEmpty())
-            reason += QStringLiteral("：%1").arg(tail.section(QLatin1Char('\n'), -2).trimmed());
-        setLog(QStringLiteral("转码失败（%1）").arg(reason), true);
-    }
-    m_transcodeSrc.clear();
-    m_transcodeDst.clear();
-    m_transcodeHadOutput = false;
-    m_transcodeTotalUs = 0;
-    m_transcodeBuf.clear();
-    m_transcodeErrTail.clear();
-    updateTranscodeButton();
-}
-
-// 把转码结果并入播放列表并持久化，同时选中它，方便连续操作。
-void MainWindow::addVideoToPlaylist(const QString &path)
-{
-    QStringList list = VideoWallpaper::instance().playlist();
-    if (!list.contains(path))
-        list.append(path);
-    VideoWallpaper::instance().setPlaylist(list);
-    AppConfig &st = AppConfig::instance();
-    st.setValue(ConfigKeys::Video::Playlist, list);
-    refreshVideoList();
-
-    if (m_videoList) {
-        for (int i = 0; i < m_videoList->count(); ++i) {
-            if (m_videoList->item(i)->data(Qt::UserRole).toString() != path)
-                continue;
-            m_videoList->clearSelection();
-            // Qt6 的 QAbstractItemView 没有 SelectCurrent，直接改条目选中态最稳
-            m_videoList->item(i)->setSelected(true);
-            m_videoList->setCurrentRow(i);
-            m_videoList->scrollToItem(m_videoList->item(i), QAbstractItemView::EnsureVisible);
-            break;
-        }
-    }
-    updateTranscodeButton();
-}
 QWidget *MainWindow::buildWebWallpaperPage()
 {
     auto *scroll = new QScrollArea(this);
@@ -1010,7 +587,6 @@ void MainWindow::refreshVideoList()
                                             ? QStringLiteral("播放中") : QStringLiteral("停止")));
     updateVideoButtons();
     updatePlayingHighlight();
-    updateTranscodeButton();  // 列表重建后选中项已失效，“立即转码”要跟着置灰
 }
 
 // 正在播放(含暂停/自动挂起，恢复时仍是这一曲)的条目以底色高亮，便于辨别当前曲目
