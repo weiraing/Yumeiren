@@ -29,13 +29,13 @@ struct ModelInfo {
 class KanbanModelManager
 {
 public:
-    // 默认模型根目录：<程序目录>/data/models。
+    // 固定模型根目录：<程序目录>/data/models，不受工作目录影响。
     // 刻意不放进 .cache：模型是用户资产，清缓存不该把它们带走。
     static QString defaultModelsRoot();
 
-    // 扫描(含默认目录与额外目录，去重)。返回有效模型数。
+    // 仅扫描固定模型目录，返回有效模型数。
     // 「没有模型」不算错误，只记日志；扫描中途的问题逐个记在 ModelInfo.problems 里。
-    int rescan(const QString &extraDir = QString());
+    int rescan();
 
     const QVector<ModelInfo> &models() const { return m_models; }
     // 只含 valid==true 的模型，界面与「下一个模型」都在这个集合上操作。

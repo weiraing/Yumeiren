@@ -10,6 +10,7 @@
 #include <QDebug>
 #include <QEventLoop>
 #include <QTimer>
+#include <QTemporaryDir>
 
 int main(int argc, char *argv[])
 {
@@ -33,6 +34,16 @@ int main(int argc, char *argv[])
             qCritical() << message;
         }
     };
+    // 从其他工作目录启动时，模型仍从可执行文件旁读取。
+    const QString originalWorkingDirectory = QDir::currentPath();
+    const QString expectedModelsRoot = QDir(QCoreApplication::applicationDirPath())
+                                          .absoluteFilePath(QStringLiteral("data/models"));
+    QTemporaryDir workingDirectory;
+    check(workingDirectory.isValid() && QDir::setCurrent(workingDirectory.path()),
+          "Temporary working directory must be available");
+    check(kanban::KanbanModelManager::defaultModelsRoot() == expectedModelsRoot,
+          "Model root must be fixed relative to executable, not working directory");
+    check(QDir::setCurrent(originalWorkingDirectory), "Working directory must be restored");
     const QString strengthKey = QString::fromLatin1(ConfigKeys::Kanban::GazeStrength);
     const QString legacyKey = QString::fromLatin1(ConfigKeys::Kanban::GazeTrackingLegacy);
     const QString enabledKey = QString::fromLatin1(ConfigKeys::Kanban::Enabled);

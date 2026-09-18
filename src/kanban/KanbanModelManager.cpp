@@ -142,25 +142,19 @@ bool KanbanModelManager::validateModelJson(const QString &jsonPath, ModelInfo *o
     return out->valid;
 }
 
-int KanbanModelManager::rescan(const QString &extraDir)
+int KanbanModelManager::rescan()
 {
     m_models.clear();
-    QStringList searched;
     const QString root = defaultModelsRoot();
-    searched << root;
-    if (!extraDir.isEmpty() && toNative(extraDir) != normalized(root))
-        searched << extraDir;
 
     QStringList files;
-    for (const QString &dir : searched) {
-        QDir d(dir);
-        if (!d.exists()) {
-            videodiag::log(videodiag::Level::Info,
-                           QStringLiteral("模型目录不存在，跳过: %1").arg(dir),
-                           QStringLiteral("KanbanModel"));
-            continue;
-        }
-        collectModelJsons(d, 1, &files);
+    const QDir modelDir(root);
+    if (modelDir.exists()) {
+        collectModelJsons(modelDir, 1, &files);
+    } else {
+        videodiag::log(videodiag::Level::Info,
+                       QStringLiteral("模型目录不存在，跳过: %1").arg(root),
+                       QStringLiteral("KanbanModel"));
     }
 
     QSet<QString> seen;
@@ -192,7 +186,7 @@ int KanbanModelManager::rescan(const QString &extraDir)
                    QStringLiteral("模型扫描完成: 共 %1 个，可用 %2 个(扫描目录 %3)")
                        .arg(m_models.size())
                        .arg(validCount)
-                       .arg(searched.join(QStringLiteral(" | "))),
+                       .arg(root),
                    QStringLiteral("KanbanModel"));
     return validCount;
 }
