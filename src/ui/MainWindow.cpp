@@ -59,15 +59,11 @@ namespace {
 // 旧版 MinGW SDK 头文件可能缺失这些定义
 constexpr UINT kDwmwaCornerPreference = 33;
 constexpr UINT kDwmwcpRound = 2;
-// 显示器电源开关(开/关屏)通知 GUID。必须与系统里的值逐字节一致：抄错一个字节
-// 就是「订阅了一个不存在的设置」—— 注册调用照样返回成功，通知却永远不来，
-// 熄屏判定静默失效。本轮实测发现之前这份的尾字节是错的(9E9F91AA8CAB0F8A)，
-// 壁纸与看板娘的「熄屏就停」在实机上从未触发过。
-// 正确值取自 SDK：winnt.h 里
-//   DEFINE_GUID(GUID_MONITOR_POWER_ON, 0x02731015, 0x4510, 0x4526,
-//               0x99, 0xE6, 0xE5, 0xA1, 0x7E, 0xBD, 0x1A, 0xEA)
-// 即 {02731015-4510-4526-99E6-E5A17EBD1AEA}。不用 SDK 的符号而另写一份，是因为
-// 它只是 winuser.h 里的 extern 声明，取用要牵进 libuuid 这条链接依赖。
+// 显示器电源开关通知 GUID。必须与系统里的值逐字节一致：抄错一个字节就是"订阅了一个
+// 不存在的设置"—— 注册照样返回成功，通知却永远不来，熄屏判定静默失效。
+// 正确值取自 SDK winnt.h 的 DEFINE_GUID(GUID_MONITOR_POWER_ON, 0x02731015, ...)。
+// 不用 SDK 的符号而另写一份，是因为它只是 winuser.h 里的 extern 声明，取用要牵进
+// libuuid 这条链接依赖。
 const GUID kMonitorPowerOnGuid = {0x02731015, 0x4510, 0x4526,
                                   {0x99, 0xE6, 0xE5, 0xA1, 0x7E, 0xBD, 0x1A, 0xEA}};
 }
@@ -84,25 +80,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 {
     setWindowTitle(appinfo::windowTitle()); // 原生标题=Yumeiren(窗口行); 品牌名在自绘标题栏
     setMinimumSize(880, 660);
-    // 初始窗口几何：优先恢复上次保存的尺寸位置(钳制在可用工作区 94% 内；越界
-    // 自动拉回主屏)，无保存记录时用自适应首选 960×836。
+    // 初始窗口几何：优先恢复上次保存的尺寸位置(钳制在可用工作区 94% 内；越界自动拉回
+    // 主屏)，无保存记录时用自适应首选 960×836。
     //
-    // 高度 840 → 830 → 836（2026-09-18，用户报「首次打开窗口明显过高，右下角一大片空白」）。
-    // 账是这么算的：文件夹美化页右列那张卡里，最后一行是「应用图片背景 / 恢复」两个
-    // 按钮，之后是一段 `addStretch(1)` 把内容顶到上边 —— 窗口比内容高多少，那段就白
-    // 多少。所以「可见空白 = 客户区高度 - 830」是**线性**的，实测(窗口宽 968 逻辑)：
-    //     客户区 892 → 卡底 878、按钮底 802，卡内空白 76 → 可见空白 62（用户红框量到的）
-    //     客户区 842 → 可见空白 12
-    //     客户区 836 → 可见空白 6
-    //     客户区 830 → 可见空白 1  **但页面冒出竖向滚动条**
-    // 可见空白压不到 0 —— 右卡自己还有 14 的下内边距，那就是它的下限。而高度一旦低于
-    // 「内容刚好装下」的阈值，QScrollArea 立刻冒竖向滚动条，**整页左移 8 像素**
-    // （滚动条 QSS `width:8px; margin:2px`，所以 handle 只有 4 宽）。实测阈值：
-    //     宽度 968 → 831（830 有滚动条、831 没有）
-    //     宽度 960 → 834 已无滚动条（窗口越窄，右卡里按宽高比算出的预览框越矮，
-    //                按钮底从 802 掉到 799，内容矮 3 像素，阈值也跟着下移）
-    // 取 836：宽度 968 下可见空白 6、离阈值留 5 像素；宽度 960 下可见空白 9、留 7 像素。
-    // **别再往下调** —— 830 那档试过，滚动条会让整页横跳。
+    // 高度 836 是实测的最小值：再低一点(830)整页就会冒出竖向滚动条、左移 8 像素。
     {
         constexpr int kDefaultW = 960;
         constexpr int kDefaultH = 836;
@@ -111,10 +92,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
         const int cw = cfg.value(ConfigKeys::Window::Width, 0).toInt();
         int ch = cfg.value(ConfigKeys::Window::Height, 0).toInt();
 
-        // 一次性把历史遗留的「超高窗口」收下来：老版本默认 840，用户配置里却躺着 929
-        // （多半是更早那版「尺寸逐次膨胀」留下的），光改默认值他下次打开看到的还是老
-        // 样子。**只做一次**：之后用户把窗口拉高是他自己的选择，每次开机都按回去会让
-        // 人以为窗口尺寸存不住。
+        // 一次性把历史遗留的「超高窗口」收下来。**只做一次**：之后用户把窗口拉高是他
+        // 自己的选择，每次开机都按回去会让人以为窗口尺寸存不住。
         if (ch >= 660 && !cfg.value(ConfigKeys::Window::HeightFit, false).toBool()) {
             cfg.setValue(ConfigKeys::Window::HeightFit, true);
             ch = qMin(ch, kDefaultH);
@@ -139,9 +118,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     // 标题栏自绘方案：保留 WS_THICKFRAME(圆角/阴影/贴边由 DWM 提供)，
     // 通过 WM_NCCALCSIZE 隐藏系统标题栏，WM_NCHITTEST 实现边缘缩放与标题拖动。
 
-    // 立刻恢复上次的视频壁纸：媒体打开+解码器初始化约需 1.5-2s，必须赶在
-    // 界面构建(图片库缩略图等)之前起跑，否则壁纸要多等近一秒才出现。
-    // 失败提示延迟到事件循环启动(日志控件就绪)后再补发。
+    // 立刻恢复上次的视频壁纸：解码器初始化约需 1.5-2s，必须赶在界面构建之前起跑。
     {
         AppConfig &early = AppConfig::instance();
         const QStringList earlyPlaylist =
@@ -166,7 +143,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
                              : QStringLiteral("壁纸状态恢复跳过(上次未播放)"));
     }
 
-    // Effect presets collected from the three projects' default configs.
+    // Effect presets 取自三个开源项目的默认配置。
     m_effectPresets = {
         {QStringLiteral("亚克力 · 浅色"),
          QStringLiteral("Win10/11 · Acrylic 白色薄纱，适配浅色模式"),
@@ -208,7 +185,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 
     m_topStack = new QStackedWidget(right);
 
-    // Top page 1: 文件夹美化 (three sub pages switched by header tabs).
     auto *folderPage = new QWidget(m_topStack);
     folderPage->setObjectName(QStringLiteral("ContentArea"));
     auto *folderLay = new QVBoxLayout(folderPage);
@@ -219,7 +195,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     m_stack->addWidget(buildHelpPage());   // 2
     folderLay->addWidget(m_stack, 1);
 
-    // log line lives inside the 文件夹美化 page only
     auto *logBar = new QFrame(folderPage);
     logBar->setObjectName(QStringLiteral("Header"));
     auto *logLayout = new QHBoxLayout(logBar);
@@ -232,10 +207,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 
     m_topStack->addWidget(folderPage);
 
-    // Top page 2: 动态壁纸 (design placeholder).
     m_topStack->addWidget(buildWallpaperPage());
 
-    // Top page 3: 看板娘
     m_topStack->addWidget(buildKanbanPage());
 
     rightLayout->addWidget(m_topStack, 1);
@@ -246,8 +219,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 
 #ifdef Q_OS_WIN
     // 订阅显示器开/关通知：壁纸与看板娘都用它做「看不见就别画」的判据。
-    // 结果必须过目：注册失败时这条判据会静默退化成「永远不触发」，
-    // 事后在日志里完全分不出「这次没熄屏」与「压根没订上」。
+    // 注册失败时这条判据会静默退化成「永远不触发」，所以结果必须过目。
     m_powerNotify = RegisterPowerSettingNotification(reinterpret_cast<HWND>(winId()),
                                                     &kMonitorPowerOnGuid,
                                                     DEVICE_NOTIFY_WINDOW_HANDLE);
@@ -271,7 +243,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     applyTheme(m_themeCombo->currentIndex());
     refreshStatus();
     // 装在只读目录(如 C:\Program Files)时 .cache 建不起来：明确提示用户，
-    // 不静默回退到 AppData，也不改任何非缓存数据的位置。
+    // 不静默回退到 AppData。
     QString cacheError;
     if (!CachePaths::isWritable(&cacheError))
         setLog(cacheError, true); // 诊断日志也写在 .cache 内，此时只能走界面日志
@@ -280,9 +252,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
         if (m_themeMode == 0)
             applyTheme(0);
     });
-
-    // 上次的视频壁纸已在构造函数开头恢复(抢先于界面构建)；loadSettings 会把
-    // 音量/帧率/多屏等设置应用到已存在的播放管线。
 
     // 看板娘与托盘放在最后装配：控件树、设置回填、视频壁纸恢复都已就位。
     setupKanbanAndTray();
@@ -295,9 +264,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
                               QStringLiteral("size=%1x%2").arg(width()).arg(height()));
 }
 
-// 退出闸门(任务书 6.3)：关闭缩略图后台任务的回调通路。锁内翻标志即可返回，
-// 不等待任务跑完(退出时卡住比多一次无效投递更糟)；已经通过检查的任务在投递时
-// 对象必然仍然存活，其队列回调由 ~QObject 丢弃。
+// 退出闸门：关闭缩略图后台任务的回调通路。锁内翻标志即可返回，不等待任务跑完(退出时
+// 卡住比多一次无效投递更糟)；已经通过检查的任务在投递时对象必然仍然存活。
 MainWindow::~MainWindow()
 {
     QMutexLocker guard(&m_thumbTasksMutex);
@@ -314,12 +282,9 @@ QWidget *MainWindow::buildTitleBar()
     lay->setContentsMargins(12, 0, 6, 0);
     lay->setSpacing(2);
 
-    // 左上角那枚小标：原来是 "🌸 " 这个 emoji 占位，现在换成真图标。
-    // 20px 是自绘标题栏(高 34)下最合适的一档 —— 再大就把文字挤走，再小那圈
-    // 描边会糊掉。图标自带深色描边，浅色标题栏上轮廓才立得住（见 tools/icongen/）。
-    // devicePixelRatioF() 让 QIcon 直接给出对应物理像素的那一档，150% 缩放下不会糊；
-    // 代价是窗口被拖到另一块不同缩放比的屏幕上时这张位图不会重取，标题栏小标而已，
-    // 不值得为它挂一次 screenChanged。
+    // 左上角那枚小标。20px 是自绘标题栏(高 34)下最合适的一档 —— 再大就把文字挤走，
+    // 再小那圈描边会糊掉。用 devicePixelRatioF() 取位图，150% 缩放下不糊；代价是窗口
+    // 拖到另一块不同缩放比的屏幕上时不会重取，不值得为它挂一次 screenChanged。
     constexpr int kTitleIconSize = 20;
     auto *mark = new QLabel(m_titleBar);
     mark->setObjectName(QStringLiteral("TitleIcon"));
@@ -417,8 +382,7 @@ QWidget *MainWindow::buildSidebar()
     m_adminLabel->setObjectName(QStringLiteral("EnvAdminLabel"));
     m_osLabel = new QLabel(sideCard);
     m_osLabel->setObjectName(QStringLiteral("EnvOsLabel"));
-    // 版本号由构建期决定（见 cmake/Version.cmake），这里只是显示出来 ——
-    // 本地开发版会带 "+提交数.g短sha" 后缀，一眼能看出手上这份是不是发布版。
+    // 版本号由构建期决定（见 cmake/Version.cmake），这里只是显示出来。
     m_versionLabel = new QLabel(sideCard);
     m_versionLabel->setObjectName(QStringLiteral("EnvVersionLabel"));
     cardLay->addWidget(m_adminLabel);
@@ -442,7 +406,6 @@ QWidget *MainWindow::buildHeader()
     lay->setContentsMargins(14, 6, 18, 6);
     lay->setSpacing(4);
 
-    // Header tabs where the page title used to be.
     const QStringList tabs = {QStringLiteral("图片背景"), QStringLiteral("效果样式"),
                               QStringLiteral("使用说明")};
     for (int i = 0; i < tabs.size(); ++i) {
@@ -456,7 +419,6 @@ QWidget *MainWindow::buildHeader()
     }
     lay->addSpacing(6);
 
-    // Wallpaper tabs: only visible on the 动态壁纸 page.
     const QStringList wallTabs = {QStringLiteral("视频壁纸"), QStringLiteral("动态网页壁纸")};
     for (int i = 0; i < wallTabs.size(); ++i) {
         auto *b = new QPushButton(wallTabs[i], header);
@@ -470,7 +432,6 @@ QWidget *MainWindow::buildHeader()
     }
     lay->addStretch(1);
 
-    // status chips live in the header but only on the 文件夹美化 page
     m_statusBox = new QWidget(header);
     auto *box = new QHBoxLayout(m_statusBox);
     box->setContentsMargins(0, 0, 0, 0);
@@ -642,14 +603,13 @@ bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr
             return true;
         }
         if (msg->message == WM_ENDSESSION && msg->wParam == TRUE) {
-            // 注销/关机：系统给的收尾窗口很短，直接走统一收口(存配置+停两路+quit)，
-            // 绝不隐藏到托盘，也不弹任何确认框。
+            // 注销/关机：系统给的收尾窗口很短，直接走统一收口，绝不隐藏到托盘、
+            // 也不弹任何确认框。
             ApplicationShutdown::instance().requestQuit(CloseReason::SystemShutdown);
         }
         if (const unsigned int showMsg = fbswin::showMainWindowMessage();
             showMsg && msg->message == showMsg) {
-            // 二次启动的实例请求唤起：转回主线程走托盘「显示主窗口」同一条路，
-            // 保证 show/raise/状态回填只有一处实现。
+            // 二次启动的实例请求唤起：转回主线程走托盘「显示主窗口」同一条路。
             videodiag::log(videodiag::Level::Info,
                            QStringLiteral("收到二次启动唤起请求，从托盘恢复主窗口"),
                            QLatin1String("UI"));
@@ -715,7 +675,7 @@ void MainWindow::reportDllMigration()
 
     // 注册表里的 InprocServer32 存的是绝对路径，目录搬家后旧注册指向的位置只能靠
     // 重新注册覆盖(需要管理员权限，且 Explorer 会重启)。这里只把新 DLL 预先投放好，
-    // 让用户点一次「应用」就能完成迁移，不自行提权，也不回退到旧目录。
+    // 让用户点一次「应用」就能完成迁移，不自行提权。
     Engine::instance().ensureDataDirs();
     QString derr;
     if (!Engine::instance().extractDlls(&derr))
@@ -784,8 +744,8 @@ public:
 
 // Qt shows the popup in a top-level QFrame of its own. That frame is square, and it is
 // all that sits behind the item view: leave it unpainted and the backing store comes
-// through as a black plate, round only the view and the two borders stack up. So the
-// frame takes the rounded panel from the stylesheet and this helper clips its corners.
+// through as a black plate. So the frame takes the rounded panel from the stylesheet and
+// this helper clips its corners.
 class ComboPopupShape : public QObject
 {
 public:
@@ -837,12 +797,7 @@ private:
             box->setFrameShape(QFrame::NoFrame);
             box->setFrameShadow(QFrame::Plain);
         }
-        // The panel deliberately keeps no layout margins of its own: Qt sizes the popup
-        // from the row hints plus the border and pays no attention to margins set here,
-        // so anything added at this level only eats the rows. The space around the list
-        // comes from the ::item margin instead, which the hints do account for.
-        // The name lands after the frame was first polished, so the style has to be
-        // told to look the rules up again or the panel keeps its palette grey.
+
         frame->style()->unpolish(frame);
         frame->style()->polish(frame);
         frame->update();
@@ -868,9 +823,6 @@ private:
 
 namespace {
 
-// TEMPORARY diagnostic hook, not part of a normal run: FBS_COMBO_DEBUG points at a
-// directory, and this opens every combo box in the window once per theme, writes down
-// the geometry Qt settled on, saves a picture of the popup, and then quits.
 void runComboSelfTest(QWidget *window)
 {
     const QString dirPath =
@@ -911,15 +863,10 @@ void runComboSelfTest(QWidget *window)
             applyQss(theme == 1);
 
         QComboBox *combo = boxes.at(i);
-        // Half of these live on a page of the stacked settings view, so bring that page
-        // forward first; a hidden combo box refuses to open its popup.
         for (QWidget *w = combo; w && w != combo->window(); w = w->parentWidget())
             if (auto *stack = qobject_cast<QStackedWidget *>(w->parentWidget()))
                 stack->setCurrentWidget(w);
 
-        // Probe matrix: the popup frame only exists after the first show, so open and
-        // close once to get it built, then hang a different selector form on each of
-        // the first five combos and see which one the painter actually obeys.
         combo->showPopup();
         combo->hidePopup();
         QAbstractItemView *probeView = combo->view();
@@ -1031,8 +978,6 @@ void runComboSelfTest(QWidget *window)
                        .arg(bar->maximum())
                    + rows);
 
-            // Grab at the ratio the popup is really shown at, so the picture says what
-            // the screen will instead of what a shrunken copy of it looks like.
             const qreal dpr = frame->devicePixelRatioF();
             QImage image(QSize(qRound(frame->width() * dpr), qRound(frame->height() * dpr)),
                          QImage::Format_ARGB32_Premultiplied);
@@ -1059,8 +1004,6 @@ void MainWindow::styleCombo(QComboBox *combo) const
     if (combo->property("fbsShape").isValid())
         return;
     combo->setProperty("fbsShape", true);
-    // Qt caps the popup at this many rows and scrolls the rest, so keep the ceiling
-    // well above any list this app builds; nothing here should ever need scrolling.
     combo->setMaxVisibleItems(32);
     combo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
 
@@ -1117,12 +1060,6 @@ void MainWindow::loadSettings()
             m_imgModeSingle->setChecked(true);
     }
     // 图片浏览目录：优先恢复用户上次选择的目录，否则默认 软件目录/data/image。
-    //
-    // 默认值从 media/image 改成 data/image：data/image 是与 data/models、data/video
-    // 并列的素材目录(见 CMakeLists 里把整个 data/ 复制到输出目录的那一步)，用户放进来的
-    // 图片本来就该在那儿被找到；media/image 是早期版本留下的空目录，指向它等于默认打开
-    // 一个永远没内容的文件夹。rebuildGallery() 是递归扫描的，所以 data/image 下按子目录
-    // 分好的图集(如 data/image/原神)也会一并收进图库。
     const QString savedDir = s.value(ConfigKeys::Image::GalleryDir).toString();
     if (!savedDir.isEmpty() && QDir(savedDir).exists())
         m_presetDir = savedDir;
@@ -1143,7 +1080,6 @@ void MainWindow::loadSettings()
     } else {
         selectPreset(0);
     }
-    // effect custom values
     m_effectCombo->setCurrentIndex(s.value(ConfigKeys::Effect::Type, 1).toInt());
     m_lightColor = QColor(s.value(ConfigKeys::Effect::LightColor, QStringLiteral("#ffffff")).toString());
     m_darkColor = QColor(s.value(ConfigKeys::Effect::DarkColor, QStringLiteral("#000000")).toString());
@@ -1159,19 +1095,15 @@ void MainWindow::loadSettings()
     m_darkColorBtn->setStyleSheet(
         QStringLiteral("QPushButton{background:%1;border:1px solid #3a3b44;border-radius:8px;}")
             .arg(m_darkColor.name()));
-    // video wallpaper settings
     const QStringList playlist = s.value(ConfigKeys::Video::Playlist).toStringList();
     VideoWallpaper::instance().setPlaylist(playlist);
     refreshVideoList();
     m_videoVolume->setValue(s.value(ConfigKeys::Video::Volume, 0).toInt());
     {
-        // 旧配置里的"列表循环播放/随机播放"两个开关已由 AppConfig 迁移成
-        // video/playMode，这里只需按模式点亮对应的单选框。
         const int mode = qBound(int(VideoWallpaper::SingleLoop),
                                 s.value(ConfigKeys::Video::PlayMode,
                                         VideoWallpaper::SingleLoop).toInt(),
                                 int(VideoWallpaper::Random));
-        // 三个单选框同属 leftCard，Qt 自动互斥：点亮一个即自动取消其余两个。
         if (mode == VideoWallpaper::ListLoop)
             m_modeList->setChecked(true);
         else if (mode == VideoWallpaper::Random)
@@ -1265,17 +1197,12 @@ void MainWindow::closeEvent(QCloseEvent *event)
 void MainWindow::hideEvent(QHideEvent *event)
 {
     QMainWindow::hideEvent(event);
-    // 主窗口的可见性**不再**联动看板娘（见 KanbanController 里 applyMainWindowVisible
-    // 的删除说明）。2026-09-18 撤掉托盘「显示窗口」项之后，这个状态位已无人读取 ——
-    // 留着只是因为 ApplicationRuntimeState 本来就是「全局事实的镜像」，
-    // 真要清理请连 setter 与这两个事件重载一起去掉，别只删一半。
     ApplicationRuntimeState::instance().setMainWindowVisible(false);
 }
 
 void MainWindow::resizeEvent(QResizeEvent *event)
 {
     QMainWindow::resizeEvent(event);
-    // 首次 show 后的布局调整不要记录，否则布局漂移会逐次膨胀窗口尺寸
     if (m_windowShown)
         m_savedWindowSize = event->size();
 }

@@ -11,8 +11,7 @@ namespace {
 // 浮层横向装饰 = 2 * (QTipLabel margin 1 + QSS padding 10 + border 1)。
 constexpr int kChromeWidth = 24;
 
-// 与 QSS 的 `font-size: 12px` 对齐；字号写死，折行结果才不会随 DPI
-// 与系统默认字号漂移(样式表里的 px 是逻辑像素，这里也是)。
+// 与 QSS 的 `font-size: 12px` 对齐；字号写死，折行结果才不会随 DPI 漂移。
 QFont tipFont()
 {
     QFont f = QApplication::font();
@@ -31,18 +30,15 @@ bool isCjk(QChar c)
         || (u >= 0xFF00 && u <= 0xFF65);   // 全角形式
 }
 
-// 断行点优先级：标点后(含右引号/右括号)最自然，其次是空白，最后才是
-// 汉字之间的任意位置。
+// 断行点优先级：标点后(含右引号/右括号)最自然，其次是空白，最后才是汉字之间。
 bool isPreferredAfter(QChar c)
 {
-    // 全角标点直接写在表里：这些字符后面断行读起来最自然。
     static const QString kTail =
         QStringLiteral("，。；：、！？）》”’%;,.)]}>");
     return kTail.contains(c);
 }
 
-// 能否在 i 之前断行。核心约束：纯 ASCII 连续段(路径、文件名、"1080p30"、
-// "PNG/JPG")内部绝不拆，否则提示里会出现半截单词，比横条更难读。
+// 能否在 i 之前断行。核心约束：纯 ASCII 连续段(路径、文件名)内部绝不拆。
 bool canBreakBefore(const QString &s, int i)
 {
     if (i <= 0 || i >= s.size())
@@ -65,20 +61,10 @@ QString format(const QString &text)
 
     const QFontMetrics fm(tipFont());
     const int maxWidth = kMaxTipWidth - kChromeWidth;
-    // 注：QFontMetrics::horizontalAdvance 对含 '\n' 的串返回的是**各行宽度之和**
-    // （2026-09-18 实测：两行 36+108 的串报 144），不是"最宽一行"。所以多行文本
-    // 基本都会走进下面的折行分支 —— 无害，每行各自量一次、放得下就原样成一行，
-    // 结果与不折时逐字相同，只是白算一遍。
+
     if (maxWidth <= 0 || fm.horizontalAdvance(text) <= maxWidth)
         return text;
 
-    // 折好的每一行，最后统一 join('\n')。
-    //
-    // 2026-09-18 修：原来是「算好切点 → result += piece」，而换行只在源文本自带的
-    // '\n' 处补过一次 —— 于是**同一源行里折出来的第 2 段起被原样拼回上一段后面**，
-    // 等于没折：830px 的长句进去、830px 一行出来，一个 '\n' 都没有。
-    // 之所以长期没暴露，是因为既有提示每一行都短于 maxWidth，从没走进折行分支。
-    // 改成收集「行」再 join，顺带把「源文本里的空行」也自然保留下来。
     QStringList outLines;
     int pos = 0;
     while (pos <= text.size()) {

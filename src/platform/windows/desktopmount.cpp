@@ -10,10 +10,7 @@
 #include <dwmapi.h>
 #include <tlhelp32.h>
 
-// Desktop hosts icons inside SHELLDLL_DefView on a WorkerW window. After
-// sending 0x052C to Progman, an extra WorkerW is spawned BEHIND that one; our
-// windows are parented to it, so video renders behind the icons but above the
-// plain wallpaper.
+// 渲染顺序：图标层 -> 壁纸 WorkerW -> 纯色背景。向 Progman 发 0x052C 会让 shell 额外生成一个位于图标层之后的 WorkerW，挂到它下面即插在图标与纯色之间
 namespace fbswin {
 
 namespace {
@@ -22,7 +19,7 @@ HWND g_workerW = nullptr;
 
 HWND findDefViewHost()
 {
-    // SHELLDLL_DefView(桌面图标层)通常在 Progman 里，个别系统在某个 WorkerW 里
+    // DefView 宿主通常在 Progman 里，个别系统在某个 WorkerW 里
     const HWND progman = FindWindowW(L"Progman", nullptr);
     if (progman && FindWindowExW(progman, nullptr, L"SHELLDLL_DefView", nullptr))
         return progman;
@@ -35,13 +32,7 @@ HWND findDefViewHost()
 
 HWND findWorkerW()
 {
-    // 挂载点优先级：
-    //   (1) DefView 宿主之后的全屏顶层 WorkerW —— 经典布局；
-    //   (2) Progman 的全屏 WorkerW 子窗口 —— 部分 Win11 构建把 0x052C 生成的
-    //       WorkerW 挂在 Progman 下面，顶层枚举根本看不到它；
-    //   (3) 找不到就由调用方回落到 Progman 本体。
-    // 尺寸校验会拒绝 explorer 顺手的 202x56 迷你 WorkerW：窗口挂进去会被
-    // 裁剪到什么都看不见，而各项状态检查还都显示"健康"。
+    // 优先级：图标层之后的全屏顶层 WorkerW；其次 Progman 下的全屏 WorkerW 子窗口(部分 Win11 的 0x052C WorkerW 挂在 Progman 下，顶层枚举看不到)。必须校验尺寸：挂进 explorer 那个 202x56 迷你 WorkerW 会被裁到什么都看不见，状态检查却全"健康"
     RECT full = {GetSystemMetrics(SM_XVIRTUALSCREEN),
                  GetSystemMetrics(SM_YVIRTUALSCREEN), 0, 0};
     full.right = full.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
@@ -77,7 +68,7 @@ bool isWorkerValid()
 
 bool isProgmanFallback()
 {
-    // FindWindowW 的标题参数传 nullptr 才能匹配无标题窗口
+    // 标题参数传 nullptr 才能匹配无标题窗口
     return g_workerW && g_workerW == FindWindowW(L"Progman", nullptr);
 }
 
@@ -88,9 +79,7 @@ bool hasRealWorker()
 
 bool ensureWorker()
 {
-    // explorer 重启后旧 WorkerW 句柄失效，需要重新查找；Progman 兜底 mount
-    // 在部分 Win11 构建上 DWM 不合成(壁纸永不显示)，所以兜底状态下每次都
-    // 重新尝试找到真正的 WorkerW，找到即迁移。
+    // 兜底(Progman)在部分 Win11 构建上不被 DWM 合成、壁纸永不显示，故落兜底后每次重查真 WorkerW、找到即迁移；explorer 重启使旧句柄失效时同样靠这里重查
     if (hasRealWorker())
         return true;
     const bool firstTry = g_workerW == nullptr;
@@ -98,9 +87,7 @@ bool ensureWorker()
     HWND progman = FindWindowW(L"Progman", nullptr);
     if (!progman)
         return false;
-    // The shell spawns the WorkerW asynchronously - poll for it. Bounds are
-    // kept tight because this can run on the GUI thread during a health fix;
-    // worst case ~3s on the first call, ~0.7s on the throttled re-evaluations.
+    // shell 异步生成，需轮询；重试次数刻意压小(本函数跑在 GUI 线程：首次最坏 ~3s，节流后 ~0.7s)
     const int attempts = firstTry ? 10 : 2;
     for (int attempt = 0; attempt < attempts && !g_workerW; ++attempt) {
         SendMessageTimeoutW(progman, 0x052C, 0, 0, SMTO_NORMAL, 300, nullptr);
@@ -109,7 +96,7 @@ bool ensureWorker()
             Sleep(50);
     }
     if (!g_workerW)
-        g_workerW = progman; // fallback: still renders behind the icons
+        g_workerW = progman; // 兜底：仍能在图标之后渲染
     return true;
 }
 
@@ -118,17 +105,12 @@ void mountBehindIcons(QWidget *window, const QRect &logicalTarget)
     HWND hwnd = reinterpret_cast<HWND>(window->winId());
     const qreal dpr = window->devicePixelRatioF();
     SetParent(hwnd, g_workerW);
-    // 挂到 WorkerW 后坐标是相对虚拟桌面原点的物理像素；次屏的 logicalTarget
-    // 按其自身 devicePixelRatio 换算才能落到正确的屏幕（此前硬编码 0,0 会把
-    // 所有副屏输出叠到主屏左上角）。
+    // WorkerW 坐标系是相对虚拟桌面原点的物理像素：logicalTarget 必须按 dpr 换算，否则副屏叠到主屏左上角
     SetWindowPos(hwnd, HWND_BOTTOM,
                  int(logicalTarget.x() * dpr), int(logicalTarget.y() * dpr),
                  int(logicalTarget.width() * dpr), int(logicalTarget.height() * dpr),
                  SWP_NOACTIVATE | SWP_FRAMECHANGED);
-    // 关键：去掉 WS_EX_LAYERED。Qt 的 WindowTransparentForInput 会附带
-    // layered 样式，而 Win11 的 DWM 不合成跨进程挂载的分层子窗口——窗口
-    // 状态一切正常(IsWindowVisible/alpha=255/在播)却永远不出现在桌面上。
-    // 点击穿透只依赖 WS_EX_TRANSPARENT，剥离 layered 对透明度无影响。
+    // 必须剥离 WS_EX_LAYERED(Qt 的 WindowTransparentForInput 会带上它)：Win11 的 DWM 不合成跨进程挂载的分层子窗口，状态一切正常却永不出现在桌面上。点击穿透只靠 WS_EX_TRANSPARENT
     const LONG ex = GetWindowLongW(hwnd, GWL_EXSTYLE);
     SetWindowLongW(hwnd, GWL_EXSTYLE, ex & ~LONG(WS_EX_LAYERED));
 }
@@ -145,13 +127,7 @@ bool isWindowMounted(QWidget *window, const QRect &physicalRect)
         return false;
     HWND hwnd = reinterpret_cast<HWND>(window->winId());
     RECT r;
-    // 必须用 GetAncestor(GA_PARENT) 而不是 GetParent()：壁纸窗口带 WS_POPUP
-    // (Qt::Tool)，而 GetParent 对 WS_POPUP 的顶层窗口返回的是 **owner** 而不是
-    // 父窗口 —— 我们的 owner 是空的，于是它永远返回 NULL，这里的比较永远不成立。
-    // 后果不是"检查不通过"这么轻：mountIsStale() 会恒为真，1s 心跳经 10s 节流
-    // 每 10 秒重挂一次，而每次重挂都要 SetParent + SetWindowPos(SWP_FRAMECHANGED)，
-    // 窗口会被短暂移出 DWM 合成 —— 用户看到的就是壁纸画面"消失又出现"地闪一下。
-    // (实测本机稳定每 11s 闪一次，接近单视频循环的 12.5s，极易误判成循环交界问题。)
+    // 必须用 GetAncestor(GA_PARENT) 而非 GetParent()：壁纸窗口带 WS_POPUP，GetParent 返回的是 owner(我们为空)而非父窗口 → 恒 NULL，本函数永不成立 → mountIsStale() 恒真 → 每 10 秒重挂一次，重挂会让窗口短暂移出 DWM 合成，用户看到壁纸每 11 秒闪一下
     return GetAncestor(hwnd, GA_PARENT) == g_workerW && IsWindowVisible(hwnd)
            && GetWindowRect(hwnd, &r)
            && r.left == physicalRect.x() && r.top == physicalRect.y()
@@ -161,8 +137,7 @@ bool isWindowMounted(QWidget *window, const QRect &physicalRect)
 
 bool isSelfOrShellProcess(HWND hwnd)
 {
-    // 自家进程与 explorer(Progman/WorkerW/DefView 等桌面层都是全屏矩形)都不算
-    // "前台全屏/遮挡"——用户看着桌面时壁纸必须照常播放
+    // 自家进程与 explorer 桌面层(Progman/WorkerW/DefView 都是全屏矩形)不算遮挡，否则看着桌面也会停播
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
     if (pid == GetCurrentProcessId())
@@ -183,8 +158,7 @@ bool isSelfOrShellProcess(HWND hwnd)
 
 namespace {
 
-// DWM 没在合成它 = 屏幕上根本没有这个窗口：别的虚拟桌面上的窗口、被挂起的
-// UWP 应用都会这样。不排除就会「在桌面 1 上被桌面 2 的全屏应用停掉壁纸」。
+// cloaked = DWM 没在合成它，屏幕上根本没这个窗口(别的虚拟桌面上的窗口、被挂起的 UWP)；不排除会"被桌面 2 的全屏应用停掉桌面 1 的壁纸"
 bool isDwmCloaked(HWND hwnd)
 {
     BOOL cloaked = FALSE;
@@ -193,9 +167,7 @@ bool isDwmCloaked(HWND hwnd)
            && cloaked != FALSE;
 }
 
-// 在可见的顶层窗口里找一个把 target(物理像素)盖住的窗口。
-// exactFit=true 还要求逐边贴合(全屏)，false 只要求包含(遮挡)。
-// 判据刻意与「谁在前台」无关：全屏应用前面压一个小窗口时桌面依然不可见。
+// 在可见顶层窗口里找盖住 target(物理像素)的窗口：exactFit=true 要求逐边贴合(全屏)，false 只需包含(遮挡)。判据刻意与"谁在前台"无关：全屏应用前面压个小窗口时桌面依然不可见
 HWND findCoveringWindow(const RECT &target, bool exactFit)
 {
     struct Ctx
@@ -207,21 +179,19 @@ HWND findCoveringWindow(const RECT &target, bool exactFit)
     EnumWindows(
         [](HWND hwnd, LPARAM lp) -> BOOL {
             auto *c = reinterpret_cast<Ctx *>(lp);
-            // 最小化窗口在 WS_VISIBLE 意义上仍是「可见」的，先按状态剔掉
+            // 最小化窗口在 WS_VISIBLE 意义上仍"可见"，先按状态剔掉
             if (!IsWindowVisible(hwnd) || IsIconic(hwnd))
                 return TRUE;
             RECT r;
             if (!GetWindowRect(hwnd, &r))
                 return TRUE;
             const RECT &t = *c->target;
-            // 注意别把这个 lambda 叫 near —— windef.h 里 near/far 是空宏
+            // 别把这个 lambda 叫 near —— windef.h 里 near/far 是空宏
             const auto closeEnough = [](LONG a, LONG b) {
                 return qAbs(int(a - b)) <= 2;
             };
             if (c->exactFit) {
-                // 宽高即 right-left，不能 +1；±2px 容差给 DPI 不感知进程的
-                // 贴边窗口(虚拟化取整常差 1px)，而最大化窗口带 11px 隐形边框
-                // 外扩，不会落进容差里被误判成全屏。
+                // 宽高即 right-left，不能 +1；±2px 容差给 DPI 不感知进程的贴边窗口。最大化窗口带 11px 隐形边框外扩，不会误判成全屏
                 if (!closeEnough(r.left, t.left) || !closeEnough(r.top, t.top)
                     || !closeEnough(r.right - r.left, t.right - t.left)
                     || !closeEnough(r.bottom - r.top, t.bottom - t.top))
@@ -230,7 +200,7 @@ HWND findCoveringWindow(const RECT &target, bool exactFit)
                        || r.bottom < t.bottom) {
                 return TRUE;
             }
-            // 矩形已经对上了才做这两项较贵的检查(OpenProcess / 问 DWM)
+            // 矩形对上后才做这两项较贵的检查
             if (isSelfOrShellProcess(hwnd) || isDwmCloaked(hwnd))
                 return TRUE;
             c->hit = hwnd;
@@ -244,12 +214,11 @@ HWND findCoveringWindow(const RECT &target, bool exactFit)
 
 bool isFullscreenWindowPresent()
 {
-    // 只认前台窗口所在那块屏：用户在副屏上做事时，副屏挂着的全屏应用不该把
-    // 主屏壁纸一起停掉(本机单屏，多屏语义无法实测，故取保守口径)。
+    // 只认前台窗口所在那块屏，免得多屏时副屏全屏应用把主屏壁纸一起停掉
     const HWND fg = GetForegroundWindow();
     HMONITOR mon = fg ? MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST) : nullptr;
     if (!mon) {
-        // 没有前台窗口(刚切到桌面/锁屏前)：退回主屏，与旧实现同口径
+        // 没有前台窗口(刚切到桌面/锁屏前)：退回主屏
         POINT origin{0, 0};
         mon = MonitorFromPoint(origin, MONITOR_DEFAULTTOPRIMARY);
     }
@@ -257,8 +226,7 @@ bool isFullscreenWindowPresent()
     mi.cbSize = sizeof(mi);
     if (!mon || !GetMonitorInfoW(mon, &mi))
         return false;
-    // MONITORINFO.rcMonitor 与 GetWindowRect 同为物理像素，不需要 QScreen 那套
-    // devicePixelRatio 换算，也就没有取整误差。
+    // rcMonitor 与 GetWindowRect 同为物理像素，无需 QScreen 的 dpr 换算，也就没有取整误差
     return findCoveringWindow(mi.rcMonitor, true) != nullptr;
 }
 
@@ -267,9 +235,7 @@ bool isDesktopCoveredByWindow()
     RECT wa;
     if (!SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0))
         return false;
-    // SPI_GETWORKAREA 在本进程按物理像素返回；窗口盖满主屏工作区即视为桌面
-    // 被完全遮挡(最大化普通窗口带边框外扩，恰好落进包含关系)。
-    // 工作区只有主屏一个，天然不存在「副屏窗口误停主屏壁纸」的问题。
+    // SPI_GETWORKAREA 按物理像素返回；盖满主屏工作区即桌面完全不可见(最大化窗口带边框外扩，恰好落进包含关系)。工作区只有主屏一个
     return findCoveringWindow(wa, false) != nullptr;
 }
 
@@ -293,9 +259,7 @@ bool isOnBattery()
     return s.ACLineStatus == 0;
 }
 
-// 用 RelationProcessorCore 的 ProcessorMask 反查物理核分组，每组取编号最小的
-// 逻辑处理器，凑够 maxCores 个物理核。返回 0 表示不可用(API 失败、掩码为空等)，
-// 由调用方回退到「前 N 个逻辑号」。结果一定是当前进程亲和性掩码的子集。
+// 按 RelationProcessorCore 反查物理核分组，每组取编号最小的逻辑处理器，凑够 maxCores 个；返回 0 表示不可用，调用方回退到"前 N 个逻辑号"
 static DWORD_PTR distinctCoreAffinity(int maxCores)
 {
     DWORD_PTR procMask = 0;
@@ -333,11 +297,7 @@ bool applyProcessAffinityLimit(int maxCores)
     GetSystemInfo(&si);
     if (si.dwNumberOfProcessors <= static_cast<DWORD>(maxCores))
         return false; // 核数本就不多，不限制
-    // 挑「每个物理核只占一个逻辑号」的掩码，而不是直接取前 N 个逻辑号。
-    // 本机(锐龙 16C32T)的 SMT 兄弟核相邻成对枚举：0/1 同属一个物理核，
-    // 旧掩码 0b1111 只有 2 个物理核 + 2 个超线程，解码线程全挤在两个核上
-    // 互抢执行端口与 L1/L2。逻辑核个数不变，QThread::idealThreadCount 仍是 N，
-    // 既保留原有降线程/降内存收益，又拿到接近一倍的真实吞吐。
+    // 取"每物理核一个逻辑号"的掩码而非前 N 个逻辑号：SMT 兄弟核相邻成对枚举(0/1 同核)，前 N 个逻辑号会把解码线程挤在少数物理核上互抢执行端口。逻辑核总数不变，吞吐近一倍
     const DWORD_PTR distinct = distinctCoreAffinity(maxCores);
     const DWORD_PTR mask = distinct ? distinct : ((1ULL << maxCores) - 1);
     return SetProcessAffinityMask(GetCurrentProcess(), mask) != FALSE;
@@ -345,8 +305,7 @@ bool applyProcessAffinityLimit(int maxCores)
 
 bool acquireSingleInstanceLock()
 {
-    // Local\ 前缀=每会话命名空间(同登录会话内唯一)。持有句柄的进程退出时，
-    // 内核自动销毁互斥锁——强杀/崩溃都不会留下残段。
+    // Local\ 前缀 = 每会话命名空间。进程退出(含强杀/崩溃)时内核自动释放互斥锁，不留残段
     HANDLE m = CreateMutexW(nullptr, TRUE, L"Local\\Yumeiren.single-instance");
     if (!m)
         return true; // 极罕见的创建失败不阻止启动
@@ -354,7 +313,7 @@ bool acquireSingleInstanceLock()
         CloseHandle(m);
         return false;
     }
-    // 故意不关闭句柄：锁的生命周期=本进程生命周期
+    // 故意不关闭句柄：锁的生命周期 = 本进程生命周期
     return true;
 }
 
@@ -365,9 +324,7 @@ bool activateExistingInstanceWindow(const QString &mainWindowTitle, QString *rea
             *reason = r;
         return false;
     };
-    // 1) 找到本产品任一二进制的已运行实例(排除本进程)。互斥锁是全产品共享的
-    //    (Yumeiren.single-instance)，运行中的可能是 Yumeiren.exe 也可能是
-    //    YumeirenTest.exe——只按自身 exe 名找会漏配(实测复现：跨 exe 二次启动弹"已在运行")。
+    // 1) 找本产品任一二进制的已运行实例(排除本进程)：互斥锁全产品共享，只按自身 exe 名找会漏配
     const QString selfExe = [] {
         wchar_t buf[MAX_PATH] = {};
         GetModuleFileNameW(nullptr, buf, MAX_PATH);
@@ -398,10 +355,7 @@ bool activateExistingInstanceWindow(const QString &mainWindowTitle, QString *rea
     if (!targetPid)
         return fail(QStringLiteral("未找到已运行的产品进程"));
 
-    // 2) 该实例的顶层主窗口：标题精确匹配(壁纸窗口无标题，不会误中)。
-    //    这里不能要求 IsWindowVisible —— 隐藏到托盘后窗口还在，只是不可见，
-    //    一旦把这种状态当成「没有实例」，用户二次启动就会看到
-    //    「虞美人已经在运行」弹窗而窗口永远叫不醒。
+    // 2) 该实例的顶层主窗口：标题精确匹配。刻意不要求 IsWindowVisible —— 隐藏到托盘的窗口仍在，当成"没有实例"会让二次启动只见弹窗、窗口永远叫不醒
     const std::wstring wantTitle = mainWindowTitle.toStdWString();
     struct Ctx { DWORD pid; const std::wstring *title; HWND main; long area; bool visible; } ctx{
         targetPid, &wantTitle, nullptr, 0, false};
@@ -416,8 +370,7 @@ bool activateExistingInstanceWindow(const QString &mainWindowTitle, QString *rea
         wchar_t title[128] = {};
         GetWindowTextW(hwnd, title, 128);
         if (*c->title == title) {
-            // 可见窗口优先，其次取面积最大：兜底弹窗(MessageBox)标题与应用名相同，
-            // 主窗口(990x780)远大于它，避免旧弹窗残留在场时误中
+            // 可见优先、其次面积最大：兜底 MessageBox 标题与应用名相同，主窗口远大于它，免误中
             RECT r;
             if (!GetWindowRect(hwnd, &r))
                 return TRUE;
@@ -436,7 +389,7 @@ bool activateExistingInstanceWindow(const QString &mainWindowTitle, QString *rea
         return fail(QStringLiteral("已运行实例(pid=%1)未找到标题匹配的主窗口").arg(targetPid));
 
     if (!ctx.visible) {
-        // 隐藏到托盘：让已运行实例自己唤醒(见 showMainWindowMessage 注释)。
+        // 隐藏到托盘：不能直接 ShowWindow(Qt 状态会失真)，让已运行实例自己唤醒
         const unsigned int showMsg = showMainWindowMessage();
         if (!showMsg || !PostMessageW(ctx.main, showMsg, 0, 0))
             return fail(QStringLiteral("已运行实例(pid=%1)在托盘中，但唤醒消息发送失败")
@@ -446,8 +399,7 @@ bool activateExistingInstanceWindow(const QString &mainWindowTitle, QString *rea
         return true;
     }
 
-    // 3) 最小化则还原；置顶一拍再还原以绕过前台锁(本实例由用户点击启动，
-    //    本身具备前台激活权限，双保险)
+    // 3) 最小化则还原；置顶/取消置顶各一拍以绕过前台锁
     if (IsIconic(ctx.main))
         ShowWindow(ctx.main, SW_RESTORE);
     SetWindowPos(ctx.main, HWND_TOPMOST, 0, 0, 0, 0,
@@ -462,7 +414,7 @@ bool activateExistingInstanceWindow(const QString &mainWindowTitle, QString *rea
 
 unsigned int showMainWindowMessage()
 {
-    // 注册名固定即可，跨进程拿到的是同一个消息号；注册失败返回 0，调用方兜底。
+    // 注册名固定，跨进程拿到同一消息号；失败返回 0
     static const unsigned int msg = static_cast<unsigned int>(
         RegisterWindowMessageW(L"Yumeiren.ShowMainWindow"));
     return msg;

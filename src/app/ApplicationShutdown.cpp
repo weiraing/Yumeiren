@@ -37,7 +37,7 @@ void ApplicationShutdown::addStep(const QString &name, std::function<void()> ste
     if (!step)
         return;
     if (m_started) {
-        // 退出已经开始还来注册：立刻补做，别把这一步静默丢掉。
+        // 退出已开始还来注册：立刻补做，别静默丢掉这一步。
         step();
         return;
     }
@@ -63,8 +63,8 @@ void ApplicationShutdown::runSteps()
 void ApplicationShutdown::requestQuit(CloseReason reason)
 {
     if (m_started) {
-        // §7.7 递归闸门：quit() 引发的第二次关闭请求(以及注销/关机同时到达)
-        // 在这里被吃掉，不再重复清理，也不再改来路文本。
+        // 递归闸门：quit() 引发的第二次关闭请求(以及注销/关机同时到达)在这里
+        // 被吃掉，不再重复清理，也不改来路文本。
         videodiag::log(videodiag::Level::Debug,
                        QStringLiteral("退出请求重复(来路=%1)，忽略")
                            .arg(reasonText(reason)),

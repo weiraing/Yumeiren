@@ -1,7 +1,6 @@
 #include "app/AppInfo.h"
 
-// 构建期生成的版本号宏（<build>/generated/YumeirenVersion.h）。
-// 由 yumeiren_apply_version() 把这个目录加进 include path。
+// 构建期生成的版本号宏；由 yumeiren_apply_version() 把该目录加进 include path。
 #include "YumeirenVersion.h"
 
 #include <QCoreApplication>
@@ -15,8 +14,8 @@ namespace {
 // Value name under HKCU\Software\Microsoft\Windows\CurrentVersion\Run.
 constexpr wchar_t kAutostartValue[] = L"Yumeiren";
 
-// 与 tools/icongen/make_icons.py 的 QT_SIZES 一致，也与 CMakeLists 的
-// APP_RESOURCES 一致 —— 三处任何一处改了都要同步。
+// 必须与 tools/icongen/make_icons.py 的 QT_SIZES 及 CMakeLists 的 APP_RESOURCES
+// 一致，三处改一处就要同步。
 constexpr int kIconSizes[] = {16, 20, 24, 32, 48, 64, 128, 256};
 
 HKEY openRunKey(REGSAM access)
@@ -49,8 +48,8 @@ QString displayName()
     return QStringLiteral("虞美人");
 }
 
-// 原生窗口标题(任务栏/Alt-Tab/任务管理器窗口行显示的就是它)。
-// 与品牌名分离：管理器里进程行显示 FileDescription"虞美人"、窗口行显示"Yumeiren"
+// 原生窗口标题(任务栏/Alt-Tab/任务管理器窗口行)。与品牌名分离：管理器里进程行
+// 显示 FileDescription"虞美人"，窗口行显示"Yumeiren"。
 QString windowTitle()
 {
     return QStringLiteral("Yumeiren");
@@ -58,16 +57,14 @@ QString windowTitle()
 
 QString version()
 {
-    // YumeirenVersion.h 由 cmake/Version.cmake 生成，值来自仓库根目录的 VERSION
-    // 文件 / git 标签 / -DYUMEIREN_VERSION。这里只做转发，不参与任何拼装 ——
-    // 版本号的构造逻辑只允许有一处。
+    // 只做转发，不参与拼装——版本号的构造逻辑只允许有一处。
     return QStringLiteral(YUMEIREN_VERSION_FULL);
 }
 
 QIcon appIcon()
 {
-    // 静态缓存：QIcon 的构造要读 8 个 PNG 并解压，托盘、标题栏、对话框都会来要，
-    // 每次重建纯属浪费。QIcon 是隐式共享的，返回副本很便宜。
+    // 静态缓存：构造 QIcon 要读 8 个 PNG 并解压，而调用方很多；QIcon 隐式共享，
+    // 返回副本很便宜。
     static const QIcon icon = [] {
         QIcon result;
         for (const int size : kIconSizes) {

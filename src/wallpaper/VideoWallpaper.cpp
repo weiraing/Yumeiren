@@ -31,28 +31,17 @@
 // 仅 GUI 线程可调用的断言宏，用于确保后台线程不使用 QWidget/QVideoWidget。
 #define VW_ASSERT_GUI() Q_ASSERT(QThread::currentThread() == qApp->thread())
 
-
 namespace {
 
-// 单例裸句柄：仅供 shutdown() 判断“实例是否存在”，绝不触发构造。
-// 构造时赋值、析构时清空，因此退出清理完成后析构不会二次清理。
 VideoWallpaper *g_wallpaper = nullptr;
 
-// 持续挂起多久后卸载解码管线(省显存/内存)，恢复时重建约需 2s。
-// 按挂起原因分级，判据只有一条：**用户能不能看见，以及恢复要不要经过人工动作**。
-//   · 锁屏 / 熄屏：画面根本不存在，而且恢复必然先有「解锁 / 开屏」这个人工动作
-//     (≥1s)，重建延迟被它完全掩盖 → 尽快释放。熄屏一晚上能省下 4K 素材的
-//     全部显存与提交内存，是这台机器上最大的一笔平均占用。
-//   · 全屏 / 被遮挡：用户可能下一秒就切回桌面，留 60s 驻留避免来回重建。
-//   · 电池：30s，省电优先。
-// YUMEIREN_LONG_SUSPEND_MS 仅用于自动化测试覆盖全部档位。
-constexpr qint64 kLongSuspendReleaseMs = 180000;      // 兜底
-constexpr qint64 kSuspendReleaseHiddenMs = 5000;      // 锁屏 / 熄屏
-constexpr qint64 kSuspendReleaseCoveredMs = 60000;    // 全屏 / 桌面被完全遮挡
-constexpr qint64 kSuspendReleaseBatteryMs = 30000;    // 电池供电
+// 长挂起卸载管线的分级阈值(重建约 2s)：看不见且恢复必伴随人工动作的尽快放，可能随时切回桌面留 60s，电池 30s
+constexpr qint64 kLongSuspendReleaseMs = 180000;
+constexpr qint64 kSuspendReleaseHiddenMs = 5000;
+constexpr qint64 kSuspendReleaseCoveredMs = 60000;
+constexpr qint64 kSuspendReleaseBatteryMs = 30000;
 } // namespace
 
-// 显示模式名(仅诊断日志使用)：多屏问题的时序要靠这一行区分主屏/拉伸/镜像。
 VideoWallpaper &VideoWallpaper::instance()
 {
     static VideoWallpaper v;
@@ -60,10 +49,7 @@ VideoWallpaper &VideoWallpaper::instance()
 }
 VideoWallpaper::~VideoWallpaper()
 {
-    // 兜底路径：正常退出应走 main() 里的显式 shutdown()(见 shutdownNow 注释)。
-    // 这里只在“qApp 仍存活且尚未清理”时补做一次；qApp 已销毁时必须放弃清理——
-    // 此时任何 QWidget 调用都会踩到 Qt6Widgets 内部的空 qApp 路径(c0000005)，
-    // 正是 docs/crash_analysis.md 定位到的退出崩溃。
+    // qApp 已销毁时绝不能走清理：QWidget 调用会踩到空 qApp 路径崩溃(c0000005)
     g_wallpaper = nullptr;
     if (!qApp || m_shutdownDone)
         return;
@@ -71,7 +57,7 @@ VideoWallpaper::~VideoWallpaper()
 }
 void VideoWallpaper::shutdown()
 {
-    // 单例不存在(未使用视频壁纸)时什么都不做：绝不能为了清理而构造单例。
+    // 单例不存在时什么都不做：绝不能为了清理而构造单例
     if (!qApp || !g_wallpaper)
         return;
     g_wallpaper->shutdownNow();
@@ -79,7 +65,7 @@ void VideoWallpaper::shutdown()
 void VideoWallpaper::shutdownNow()
 {
     if (m_shutdownDone)
-        return; // 幂等：重复调用不再触碰任何 Qt 对象
+        return;
     m_shutdownDone = true;
     m_shuttingDown = true; // 此后所有信号回调/延迟任务直接短路
     VW_ASSERT_GUI();
@@ -89,12 +75,10 @@ void VideoWallpaper::shutdownNow()
             .arg(videodiag::elapsedMs()),
         QStringLiteral("Lifecycle"));
     stopHeartbeatTimers();
-    // 取消尚未触发的延迟任务(重试/跳曲/重布局/裁剪)：context 是本单例，
-    // 用 removePostedEvents 一次性摘掉，避免清理中再被回调拽回播放路径。
+    // 一次性摘掉未触发的延迟任务，避免清理中再被回调拽回播放路径
     QCoreApplication::removePostedEvents(this, QEvent::Timer);
-    stopAll(); // 复用统一的停播收口(teardownOutputs + 状态复位)
-    // 探针对象(仅 YUMEIREN_PROBE_STAGE 使用)同样必须赶在 qApp 销毁前释放，
-    // 否则 ~QWidget/~QMediaPlayer 落到 atexit 链上，与上面的崩溃同因。
+    stopAll();
+    // 探针对象同样必须赶在 qApp 销毁前释放，否则落到 atexit 链上，与上面的崩溃同因。
     if (m_probePlayer) {
         m_probePlayer->stop();
         m_probePlayer->setVideoOutput(nullptr);
@@ -128,29 +112,22 @@ VideoWallpaper::VideoWallpaper(QObject *parent) : QObject(parent)
     m_reclaimTimer = new QTimer(this);
     m_reclaimTimer->setInterval(30000);
     connect(m_reclaimTimer, &QTimer::timeout, this, [this] {
-        // 仅在“故意空闲”(已完全停止/手动暂停/被挂起原因暂停)时裁剪工作集。
-        // 播放中曲目切换的 EndOfMedia 边界 isPlaying() 会短暂为 false，此时
-        // 裁剪会把活跃的视频缓冲换出，引起卡顿与页面错误。
+        // 只在"故意空闲"时裁剪：换曲边界 isPlaying() 会短暂为 false，裁剪活跃缓冲会引起卡顿
         const bool deliberateIdle =
             m_outputs.isEmpty() || m_manualPaused || m_suspendReasons != 0;
         if (m_reclaimMemory && deliberateIdle)
             trimMemory();
     });
-    // 心跳定时器这里只创建不启动：只有“用户启动过且未停止”(m_started)期间才需要
-    // 轮询，见 ensureHeartbeatTimers/stopHeartbeatTimers。未播放时进程完全静默
-    // (任务书 10.1)，不再有空转的 1s/30s 唤醒。
+    // 心跳定时器只创建不启动，仅在 m_started 期间启用，未播放时进程完全静默、无空转唤醒
 
-    // 关闭/重载实验驱动(仅自动化测试使用)：定时调用 stopAll/startPlaying，
-    // 用于验证“停止→等待→重载”后内存回落并复现同一基线(排查 deleteLater 残留)。
+    // 关闭/重载实验驱动(仅自动化测试)，用于验证"停止→等待→重载"后内存回落并复现同一基线。
     if (const int stopMs = qEnvironmentVariableIntValue("YUMEIREN_AUTO_STOP_MS");
         stopMs > 0)
         QTimer::singleShot(stopMs, this, &VideoWallpaper::stopAll);
     if (const int startMs = qEnvironmentVariableIntValue("YUMEIREN_AUTO_START_MS");
         startMs > 0)
         QTimer::singleShot(startMs, this, [this] { startPlaying(nullptr); });
-    // 暂停/恢复循环实验驱动(仅自动化测试使用)：每 N 毫秒切换一次 pauseResume()。
-    // 用于「暂停/恢复 ×100」与「暂停期间是否仍在渲染」两项取证——外部没有
-    // 稳定的入口驱动暂停按钮，只有 UI 点击。正常运行不设置该变量，零开销。
+    // 暂停/恢复循环实验驱动(仅自动化测试)
     if (const int pauseMs = qEnvironmentVariableIntValue("YUMEIREN_AUTO_PAUSE_MS");
         pauseMs > 0) {
         auto *toggle = new QTimer(this);
@@ -164,15 +141,13 @@ VideoWallpaper::VideoWallpaper(QObject *parent) : QObject(parent)
         toggle->start();
     }
 
-    // 分辨率/DPI/显示器热插拔变化 → 防抖后重建布局(仅播放中有效)。
-    // QScreen 没有 devicePixelRatioChanged 信号；DPI 变化会同时触发 geometryChanged。
+    // 分辨率/DPI/热插拔变化 → 防抖后重建布局。QScreen 无 devicePixelRatioChanged，DPI 变化会一并触发 geometryChanged
     const auto screens = QGuiApplication::screens();
     for (QScreen *s : screens)
         connect(s, &QScreen::geometryChanged, this, &VideoWallpaper::scheduleRelayout);
     connect(qGuiApp, &QGuiApplication::screenAdded, this, &VideoWallpaper::scheduleRelayout);
     connect(qGuiApp, &QGuiApplication::screenRemoved, this, &VideoWallpaper::scheduleRelayout);
 
-    // 阶段7 诊断：采样器仅诊断模式生效(默认 no-op)
     videodiag::startDiagSampling();
     videodiag::log(videodiag::Level::Info,
         QStringLiteral("VideoWallpaper 初始化完成 uptime=%1ms")
@@ -223,14 +198,13 @@ void VideoWallpaper::playIndex(int index, qint64 resumePos)
         return;
     VW_ASSERT_GUI();
     m_started = true;
-    ensureHeartbeatTimers(); // 起播即恢复挂起状态机与回收心跳
+    ensureHeartbeatTimers();
     ++m_playbackSessionId; // 会话 ID：每次起播/换曲/重试自增，供诊断日志关联
     if (index != m_index)
-        m_fileRetries = 0; // 换曲重置单文件重试额度；同 index 的重试调用保留计数
+        m_fileRetries = 0; // 换曲重置；同 index 的重试调用保留计数
     m_index = qBound(0, index, m_playlist.size() - 1);
-    m_resumePosMs = resumePos;   // LoadedMedia 时消费；普通换曲传 -1 即无跳转
-    // 任何一次显式起播都意味着"列表又活了"：播完标志必须失效，否则心跳的
-    // 挂起恢复与管线重建会被上一次会话的收口状态永久锁住(壁纸再也捞不回来)。
+    m_resumePosMs = resumePos;   // LoadedMedia 时消费；普通换曲传 -1
+    // 起播意味着"列表又活了"：播完标志必须失效，否则挂起恢复与管线重建会被上次会话的收口状态锁住
     m_playbackFinished = false;
     m_watchPosMs = -1;
     m_watchStalls = 0;
@@ -247,8 +221,7 @@ void VideoWallpaper::playIndex(int index, qint64 resumePos)
         return;
     }
     const QUrl url = QUrl::fromLocalFile(m_playlist[m_index]);
-    // 同一文件(单视频循环最常见)：不重设 source，避免 FFmpeg 每圈销毁重建解码器；
-    // 从头继续播即可，零资源churn、无黑帧。
+    // 不重设 source 是可播同一文件时的快路径：避免 FFmpeg 每圈销毁重建解码器(无黑帧)
     bool sameSource = true;
     for (const VideoOutput &out : std::as_const(m_outputs)) {
         if (out.player->source() != url) {
@@ -257,28 +230,24 @@ void VideoWallpaper::playIndex(int index, qint64 resumePos)
         }
     }
     if (!sameSource) {
-        // 换素材：自动限帧值先清零，等新素材的元数据到达再重新判定，否则 1080p
-        // 素材会继承上一条 4K 的 24 帧上限。同一素材重播(单循环/错误重试)必须
-        // 保留该值——那条路径不会再发一次 metaDataChanged，清了就永久丢失自动限帧。
+        // 自动限帧值清零，等新素材元数据到达再判定，否则会继承上一条的上限；同一素材重播须保留(不再发 metaDataChanged)
         m_autoFps = 0;
         resetFramePacing();
-        // 媒体打开+解码器初始化需要 1-2s，立刻给出状态反馈避免“点了没反应”
+        // 媒体打开需要 1-2s，立刻给状态反馈避免"点了没反应"
         emit playbackStateChanged(
             QStringLiteral("第 %1 个 打开中…").arg(m_index + 1));
     }
     bool first = true;
     for (const VideoOutput &out : std::as_const(m_outputs)) {
         if (!isLiveOutput(out))
-            continue; // 防御：列表中不应有失效项，出现即跳过而非解引用
+            continue;
         if (sameSource)
             out.player->setPosition(0); // 解码器复用，原地重播
         else {
             out.player->setSource(url);
             applyAudioPolicy(out, first);
         }
-        // 循环策略与媒体源无关，必须每次都断言：列表从 1 个变成多个(或反过来)时
-        // 走的是 sameSource 快路径，漏掉这里会把 setLoops(Infinite) 遗留在播放器上，
-        // 单曲循环就此吃掉整个列表。
+        // 循环策略必须每次都断言：列表从 1 个变多个时走 sameSource 快路径，漏掉会遗留单曲循环
         applyLoopPolicy(out.player);
         applyPlaybackRate(out.player);
         out.audio->setVolume(first ? qBound(0, m_volume, 100) / 100.0 : 0);
@@ -322,26 +291,22 @@ bool VideoWallpaper::atMediaEnd(const QMediaPlayer *player) const
 void VideoWallpaper::nextTrack()
 {
     if (m_shuttingDown)
-        return; // 清理中不再推进列表(否则会被拽回起播路径)
+        return; // 清理中不再推进列表
     if (m_playlist.isEmpty())
         return;
     const int size = m_playlist.size();
-    // 失败名单里的曲目不再参与轮换(阶段3)，避免坏素材每圈触发解码器重建
+    // 失败名单里的曲目不再参与轮换，避免坏素材每圈触发解码器重建
     const auto alive = [&](int i) { return !m_deadTracks.contains(i); };
     if (m_deadTracks.size() >= size) {
         emit playbackStateChanged(QStringLiteral("所有视频都无法播放，已停止"));
         stopAll();
         return;
     }
-    // 单视频：绝不进入列表推进，也不产生任何用户可见的"播放结束"。
-    // 放在失败名单判断之后，坏文件不会被无限重播(任务书 十二)。
-    // 单循环模式同理：无论列表多长，都只把当前这一条从头再来一遍。
     if (isSeamlessLoop()) {
         restartSingleLoop();
         return;
     }
-    // 随机模式：从"不是当前曲且可播"的候选里等概率挑一个。旧实现用 do-while
-    // 反复摇骰子，一旦当前曲是唯一的幸存者就会原地死循环，这里改成有限候选表。
+    // 随机：从"非当前曲且可播"的候选里等概率挑一个，避免 do-while 在当前曲是唯一幸存者时死循环。
     if (m_mode == Random && size > 1) {
         QVector<int> candidates;
         candidates.reserve(size - 1);
@@ -355,9 +320,9 @@ void VideoWallpaper::nextTrack()
         restartSingleLoop(); // 只剩当前一条可播：原地重播，不切源
         return;
     }
-    // 列表循环：向后找下一条可播曲目，跨过列表末尾绕回表头，一圈接一圈。
-    // 步数上限取 size 覆盖整个列表(最后一步会回到 m_index 自身)。
+    // 列表循环：向后找下一条可播曲目，跨过末尾绕回表头；步数上限取 size 覆盖整个列表
     int next = -1;
+
     for (int step = 1; step <= size; ++step) {
         const int i = (m_index + step) % size;
         if (alive(i)) {
@@ -366,7 +331,7 @@ void VideoWallpaper::nextTrack()
         }
     }
     if (next < 0) {
-        finishPlaylist(); // 防御收口：整表没有可播曲目(正常模式轮换到不了这里)
+        finishPlaylist(); // 整表没有可播曲目
         return;
     }
     playIndex(next);
@@ -414,7 +379,7 @@ void VideoWallpaper::advanceOnError()
 void VideoWallpaper::handleUnplayable(const QString &reason)
 {
     if (m_shuttingDown)
-        return; // 清理中不再跳曲/重试
+        return;
     m_fileRetries = 0;
     const int fails = ++m_trackFails[m_index];
     m_deadTracks.insert(m_index);
@@ -448,21 +413,21 @@ bool VideoWallpaper::startPlaying(QString *error, int preferIndex)
         if (error) *error = QStringLiteral("播放列表为空，请先添加视频");
         return false;
     }
-    m_manualPaused = false; // 用户点击“启动”即视为要求播放
+    m_manualPaused = false; // 用户点击"启动"即视为要求播放
     m_started = true;
-    m_playbackFinished = false; // 新会话：允许心跳继续接管恢复
+    m_playbackFinished = false;
     ensureHeartbeatTimers();
-    m_trackFails.clear(); // 全新起播会话：失败名单清空，所有曲目重新获得机会
+    m_trackFails.clear(); // 新会话：失败名单清空，所有曲目重新获得机会
     m_deadTracks.clear();
     m_fileRetries = 0;
-    // 列表中选中了条目时，从选中项开始(用户点名的曲目优先于上次进度)
+    // 列表中选中了条目时从选中项开始(用户点名的曲目优先于上次进度)
     const bool preferValid = preferIndex >= 0 && preferIndex < m_playlist.size();
     if (m_outputs.isEmpty()) {
         playIndex(preferValid ? preferIndex : (m_index >= 0 ? m_index : 0));
     } else if (preferValid && preferIndex != m_index) {
         playIndex(preferIndex); // 运行中点了启动且选中了其他曲目：直接切换
     } else {
-        evaluateSuspend(); // 可能处于挂起原因中，由状态机决定播/停
+        evaluateSuspend();
     }
     return true;
 }
@@ -478,19 +443,14 @@ void VideoWallpaper::pauseResume()
         }
         return;
     }
-    m_manualPaused = isPlaying(); // 正在播 → 用户要暂停；已暂停(含自动挂起) → 用户要继续
-    // 用户亲手点的暂停/继续优先于"播完待命"：点了就要重新起播，
-    // 否则播完的列表按了继续也没反应。
-    // 播完之后点"继续"= 重走一圈：停在列表末尾的播放器直接 play() 只会立刻
-    // 再结束一次，所以显式回到表头重新起播(sameSource 快路径，原地回绕不重建)。
+    m_manualPaused = isPlaying(); // 正在播 → 用户要暂停；已暂停 → 用户要继续
+    // 用户手点的暂停/继续优先于"播完待命"；播完后点继续须显式回表头重新起播，对末尾播放器直接 play() 只会立刻再结束
     const bool restartLap = m_playbackFinished && !m_manualPaused;
     m_playbackFinished = false;
     if (restartLap && !m_playlist.isEmpty())
         playIndex(0);
     evaluateSuspend();
-    // 状态文本必须反映真实结果：手动暂停发“已暂停”(按钮文字靠这条信号翻转)；
-    // 请求被挂起原因拦下时 evaluateSuspend 已发出原因文本，不能再用
-    // “播放中”把它盖掉(否则画面停着、状态栏却显示播放中且不会自愈)。
+    // 被挂起原因拦下时 evaluateSuspend 已发出原因文本，不能再用"播放中"盖掉
     if (isPlaying())
         emitTrackState();
     else if (m_manualPaused)
@@ -499,7 +459,7 @@ void VideoWallpaper::pauseResume()
 void VideoWallpaper::stopAll()
 {
     VW_ASSERT_GUI();
-    stopHeartbeatTimers(); // 停播即停止轮询(任务书 10.1)
+    stopHeartbeatTimers();
     for (const VideoOutput &out : std::as_const(m_outputs))
         if (out.player)
             out.player->stop();
@@ -515,10 +475,10 @@ void VideoWallpaper::stopAll()
     m_lastErrorText.clear();
     m_resumePosMs = -1;
     if (m_reclaimMemory)
-        trimMemory(); // 停止后立即把解码器释放后的内存还给系统，不等下一个回收周期
+        trimMemory(); // 停止后立即还给系统，不等下一个回收周期
     videodiag::log(videodiag::Level::Info,
         QStringLiteral("stopAll: 管线已卸载 session=%1").arg(m_playbackSessionId));
-    // 退出清理中不再向 UI 广播状态变化：此时窗口正在销毁，文本无人消费。
+    // 退出清理中窗口正在销毁，不再广播状态变化
     if (!m_shuttingDown)
         emit playbackStateChanged(QStringLiteral("已停止"));
 }
@@ -541,16 +501,10 @@ void VideoWallpaper::evaluateSuspend()
     }
 
     int reasons = 0;
-    // 判据与「谁在前台」无关：全屏应用前面压着一个小窗口(对话框/通知/输入法)
-    // 时桌面依然不可见，只看前台窗口会误判成「已回到桌面」而恢复播放、白白解码。
-    // 实现见 fbswin::isFullscreenWindowPresent()：遍历可见顶层窗口找精确铺满
-    // 前台窗口所在那块屏的窗口。
+    // 判据与"谁在前台"无关：全屏应用前面压着小窗口时桌面依然不可见，只看前台会误判成已回桌面
     if (m_pauseOnFullscreen && fbswin::isFullscreenWindowPresent())
         reasons |= SuspendFullscreen;
-    // 主屏模式下，应用盖满主屏工作区时壁纸完全不可见，暂停白省。
-    // 扩展/镜像模式**刻意不做**遮挡判定：本机单屏无法验证多屏语义，而改动它
-    // 会让既有行为在无法实测的场景下漂移(实测：扩展模式会退化成每秒反复
-    // 暂停/恢复)。多屏遮挡留给有第二块屏的会话再评估。
+    // 仅主屏模式做遮挡判定：扩展模式下实测会退化成每秒反复暂停/恢复
     if (m_pauseOnFullscreen && m_screenMode == PrimaryScreen
         && fbswin::isDesktopCoveredByWindow())
         reasons |= SuspendCovered;
@@ -561,11 +515,7 @@ void VideoWallpaper::evaluateSuspend()
     if (m_pauseOnBattery && fbswin::isOnBattery())
         reasons |= SuspendBattery;
     m_suspendReasons = reasons;
-
-    // 挂载健康检查放在同一条 1s 心跳里，开销为几次窗口句柄查询。
-    // Progman 兜底挂载在部分 Win11 构建上不被 DWM 合成(壁纸永不显示)，
-    // 因此兜底状态下由 scheduleMountFix 的 10s 节流持续重查，
-    // 真正的 WorkerW 一出现就自动迁入。
+    // 挂载健康检查复用同一条 1s 心跳：Progman 兜底在部分 Win11 不被 DWM 合成，故兜底状态由 scheduleMountFix 持续重查
     if (mountIsStale() || !fbswin::hasRealWorker())
         scheduleMountFix();
 
@@ -575,7 +525,7 @@ void VideoWallpaper::evaluateSuspend()
     // 长挂起期间管线已被释放，现在应当恢复：重建管线并跳回暂停时的进度
     if (shouldPlay && !m_playbackFinished && m_outputs.isEmpty()
         && !m_playlist.isEmpty()) {
-        // 节流：挂载点缺失(如 explorer 未响应)时每 5s 重试一次，不空转
+        // 节流：挂载点缺失时每 5s 重试，不空转
         if (!m_suspendClock->isValid() || m_suspendClock->elapsed() >= 5000) {
             m_suspendClock->restart();
             playIndex(qMax(0, m_index), m_resumePosMs);
@@ -584,14 +534,11 @@ void VideoWallpaper::evaluateSuspend()
         return;
     }
 
-    // 只有"被挂起/被手动暂停后才解除"才需要心跳捞回来。列表正常播完(不循环)时
-    // 播放器停在末尾，这里若照抄恢复逻辑就会每秒看到 !isPlaying，几秒后把整个
-    // 列表从头重新点火——用户侧表现为壁纸闪没 + "播放结束/第 N 个 播放中"来回跳。
+    // 只有"被挂起/被手动暂停后才解除"才需要心跳捞回来：列表正常播完(不循环)时播放器停在末尾，照抄恢复逻辑会每秒看到 !isPlaying，几秒后把整个列表从头重新点火
     if (shouldPlay && !wasPlaying && !m_playbackFinished) {
         videodiag::log(videodiag::Level::Info,
             QStringLiteral("恢复播放: reasons=0 manualPaused=%1").arg(m_manualPaused));
-        // 无缝循环兜底：后端没遵守 setLoops(Infinite) 时(时长未知的流 / 个别
-        // 后端)，播放器会停在末尾，心跳的 play() 只会让它原地卡死。先回绕再播。
+        // 无缝循环兜底：后端没遵守 setLoops 时会停在末尾，先回绕再播
         const bool rewindTail = isSeamlessLoop();
         for (const VideoOutput &out : std::as_const(m_outputs))
             if (isLiveOutput(out)) {
@@ -603,12 +550,10 @@ void VideoWallpaper::evaluateSuspend()
         m_lastEmittedReasons = 0;
         return;
     }
-    // 无缝循环看门狗：进度连续 3 拍(约 3s)完全不前进，说明后端既没回绕也没
-    // 上报 EndOfMedia，壁纸会永远定格在最后一帧。原地回到起点重播，不停播、
-    // 不切源、不重建窗口。进度倒退视为正常回绕，只重置计数。
+    // 无缝循环看门狗：进度连续 3 拍(约 3s)不前进 = 后端既没回绕也没上报 EndOfMedia → 原地回绕重播
     if (shouldPlay && wasPlaying && isSeamlessLoop() && !m_outputs.isEmpty()
         && isLiveOutput(m_outputs.first())
-        // 素材还在探测/缓冲时进度本就不动，那不是停滞，别误判成卡死
+        // 素材还在探测/缓冲时进度本就不动，别误判成卡死
         && (m_outputs.first().player->mediaStatus() == QMediaPlayer::BufferedMedia
             || m_outputs.first().player->mediaStatus() == QMediaPlayer::EndOfMedia)) {
         const qint64 pos = m_outputs.first().player->position();
@@ -632,9 +577,9 @@ void VideoWallpaper::evaluateSuspend()
         for (const VideoOutput &out : std::as_const(m_outputs))
             if (isLiveOutput(out))
                 out.player->pause();
-        m_suspendClock->restart(); // 挂起计时开始(持续挂起超阈值即释放管线)
+        m_suspendClock->restart(); // 挂起计时开始
         if (m_reclaimMemory) {
-            // 暂停后解码器队列逐渐排空，稍等片刻再把工作集还给系统
+            // 暂停后解码器队列逐渐排空，稍等片刻再还工作集
             QTimer::singleShot(2000, this, [this] {
                 if (!m_shuttingDown && !isPlaying()
                     && (m_manualPaused || m_suspendReasons != 0))
@@ -642,10 +587,7 @@ void VideoWallpaper::evaluateSuspend()
             });
         }
     }
-    // 持续挂起超过该原因的阈值：壁纸反正看不见，整条解码管线+呈现表面全部释放，
-    // 显存/内存回落到近空闲水平；恢复时重建并续播(代价 ~2s)
-    // 例外：列表已播完(不循环)时不释放。此时解码器本就停着、只剩一张定格的
-    // 末帧，而播完状态会拦住心跳的管线重建分支，卸载之后壁纸就再也回不来了。
+    // 持续挂起超过该原因的阈值即整条释放(见 kSuspendRelease*Ms)。例外：列表已播完(不循环)时不释放——播完状态会拦住心跳的重建分支，卸载后壁纸再也回不来
     if (!shouldPlay && !wasPlaying && !m_playbackFinished && !m_outputs.isEmpty()
         && m_suspendClock->isValid()
         && m_suspendClock->elapsed() >= suspendReleaseThresholdMs(m_suspendReasons))
@@ -668,8 +610,7 @@ void VideoWallpaper::evaluateSuspend()
     }
     m_lastEmittedReasons = reasons;
 
-    // 循环边界取证(任务书 十三.2)：复用同一条 1s 心跳顺带记录进度与对象地址，
-    // 不新增定时器。Debug 级在非诊断模式下直接返回，产品环境零噪声。
+    // 循环边界取证：复用同一条 1s 心跳记录进度与对象地址，不新增定时器
     if (!m_outputs.isEmpty() && isLiveOutput(m_outputs.first())) {
         const VideoOutput &out = m_outputs.first();
         videodiag::log(videodiag::Level::Debug,
@@ -700,8 +641,7 @@ qint64 VideoWallpaper::suspendReleaseThresholdMs(int reasons) const
     if (const int overrideMs = qEnvironmentVariableIntValue("YUMEIREN_LONG_SUSPEND_MS");
         overrideMs > 0)
         return overrideMs; // 自动化测试覆盖全部档位
-    // 锁屏/熄屏优先判断：这两个原因下画面根本不存在，且恢复必然伴随人工动作，
-    // 所以「尽快释放」不牺牲任何可感知体验。
+    // 锁屏/熄屏优先：画面根本不存在，且恢复必然伴随人工动作
     if (reasons & (SuspendLocked | SuspendMonitorOff))
         return kSuspendReleaseHiddenMs;
     if (reasons & SuspendBattery)

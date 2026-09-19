@@ -30,7 +30,6 @@ QWidget *MainWindow::buildEffectPage()
     lay->setContentsMargins(18, 16, 18, 16);
     lay->setSpacing(14);
 
-    // ---- preset cards ----
     auto *card = new QFrame(page);
     card->setObjectName(QStringLiteral("PageCard"));
     auto *cardLay = new QVBoxLayout(card);
@@ -86,7 +85,6 @@ QWidget *MainWindow::buildEffectPage()
     flow->setRowStretch(flow->rowCount(), 1);
     cardLay->addLayout(flow);
 
-    // ---- custom settings ----
     auto *t2 = new QLabel(QStringLiteral("自定义参数"), card);
     t2->setObjectName(QStringLiteral("GroupTitle"));
     cardLay->addWidget(t2);
@@ -165,7 +163,6 @@ QWidget *MainWindow::buildEffectPage()
 
     lay->addWidget(card);
 
-    // ---- apply ----
     auto *btnCard = new QFrame(page);
     btnCard->setObjectName(QStringLiteral("PageCard"));
     auto *btnLay = new QHBoxLayout(btnCard);
@@ -207,7 +204,7 @@ void MainWindow::applyEffect()
     setLog(QStringLiteral("正在注册 DLL(需要管理员权限)…"), false);
     QCoreApplication::processEvents();
 
-    // 只动特效 Hook：图片 Hook 的注册状态与配置原样保留，两页互不影响。
+    // 只动特效 Hook：图片 Hook 的注册状态与配置原样保留。
     saveEffectSettings();
     if (!Engine::instance().registerEffectDll(&err)) {
         setLog(err, true);

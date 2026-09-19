@@ -27,7 +27,7 @@ namespace kanban::detail {
 using namespace Live2D::Cubism::Framework;
 using namespace Live2D::Cubism::Framework::DefaultParameterId;
 
-// 模型装配与状态；CPU 装载和 GL 上传分别执行。
+// 模型装配与状态；CPU 装载与 GL 上传分两步走。
 class CubismModelImpl final : public CubismUserModel, public kanban::CubismModel
 {
 public:
@@ -59,7 +59,7 @@ public:
     int expressionCount() const override { return m_expressionNames.size(); }
     int playableMotionCount() const override { return m_playableMotions.size(); }
 
-    // 输出参数值与范围，区分参数缺失、运动覆盖和素材幅度限制。
+    // 输出参数值与范围。
     QString gazeDebugText() override
     {
         if (!_model) {
@@ -74,7 +74,7 @@ public:
             {ParamEyeBallY, "ParamEyeBallY"},
         };
         QStringList parts;
-        // 缺失参数返回虚拟索引，不是负数，必须与实际参数总数比较。
+        // 缺失参数返回虚拟索引(不是负数)，必须与实际参数总数比较。
         const csmInt32 total = _model->GetParameterCount();
         for (const Item &it : items) {
             const CubismIdHandle id = CubismFramework::GetIdManager()->GetId(it.id);
@@ -109,8 +109,7 @@ public:
                    : QString();
     }
 
-    // 上下文销毁后只清除句柄记录，不再发送 GL 调用。
-    // 渲染器自身仍须由控制器在窗口销毁前 shutdown。
+    // 上下文销毁后只清除句柄记录，不再发送 GL 调用；渲染器仍须由控制器在窗口销毁前 shutdown。
     void invalidateGl() override
     {
         m_glLive = false;
@@ -124,13 +123,13 @@ private:
     QString relativeToHome(const csmChar *relative) const;
     bool loadSettingJson(const QString &jsonPath, QString *outError);
     void releaseCpu();
-    // 只判断每张纹理能否解码，不产出位图：坏图要在装载阶段就报出来，
-    // 但全尺寸位图一旦为「校验」而常驻就白白占掉几百 MB。
+    // 只判断每张纹理能否解码、不产出位图：坏图要在装载阶段就报出来，而全尺寸位图
+    // 一旦为「校验」常驻就白白占掉几百 MB。
     bool validateTextures(QString *outError);
-    // windowMaxDim = 窗口尺寸推出的纹理最长边上限(0 = 原尺寸)。实际用的上限还会
-    // 叠一条与素材尺寸挂钩的质量底线(textureMaxDimFor 的重载)，见 KanbanRenderer.h。
+    // windowMaxDim = 窗口尺寸推出的纹理最长边上限(0 = 原尺寸)；实际上限还叠了一条与
+    // 素材尺寸挂钩的质量底线，见 KanbanRenderer.h 的 textureMaxDimFor()。
     bool decodeTextures(int windowMaxDim, QString *outError);
-    // 仅返回预载成功的动作序号，界面据此判断是否可播。
+    // 仅返回预载成功的动作序号。
     QVector<int> preloadMotionGroup(const QString &group);
     void fitProjection(const QSize &pixelSize, CubismMatrix44 *out);
     int motionCount(int group) const;
@@ -146,8 +145,8 @@ private:
     csmVector<CubismIdHandle> m_eyeBlinkIds;
     csmVector<CubismIdHandle> m_lipSyncIds;
     QVector<QImage> m_textureImages;
-    // m_textureImages 是按哪个最长边上限解出来的(0 = 原尺寸)。上限变了就必须重解，
-    // 而 m_textureImages 在上传后会被清掉，所以下一次上传一定重解。
+    // m_textureImages 是按哪个最长边上限解出来的(0 = 原尺寸)：上限变了必须重解，
+    // 而 m_textureImages 上传后即清空，所以下一次上传一定重解。
     int m_textureMaxDim = 0;
     // 首次解码失败后记住原因：ensureGl 由动画时钟逐帧重试，不缓存就成了每帧读盘解码。
     QString m_decodeError;

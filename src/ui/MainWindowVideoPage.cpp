@@ -86,12 +86,10 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     lay->setContentsMargins(18, 16, 18, 16);
     lay->setSpacing(14);
 
-    // ---- left: start / pause + options ----
     auto *leftCard = new QFrame(page);
     leftCard->setObjectName(QStringLiteral("PageCard"));
-    // 宽度不在这里定：它由下面的 leftCol 统一决定（本卡是 leftCol 的唯一子件、
-    // 列内边距为 0，所以会自然撑满整列）。两处各写一个宽度迟早会漂开，
-    // 出现「列宽 300、卡宽 250、右边空一条」那种缝。
+    // 宽度由下面的 leftCol 统一决定(本卡是唯一子件、列内边距为 0，会自然撑满整列)；
+    // 两处各写一个宽度迟早会漂开。
     auto *leftLay = new QVBoxLayout(leftCard);
     leftLay->setContentsMargins(14, 14, 14, 14);
     leftLay->setSpacing(10);
@@ -127,7 +125,6 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     playRow->addWidget(m_pauseBtn, 1);
     leftLay->addLayout(playRow);
 
-    // 播放模式：单循环(默认) / 列表循环 / 随机，三选一互斥
     auto *playModeRow = new QHBoxLayout();
     playModeRow->setSpacing(6);
     playModeRow->addWidget(new QLabel(QStringLiteral("模式"), leftCard));
@@ -234,8 +231,7 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     fpsRow->addWidget(m_fpsBox, 1);
     leftLay->addLayout(fpsRow);
 
-    // 限帧方式(二选一，默认保速丢帧)。两档的省法完全不同，用词必须写清楚，
-    // 否则用户只会看到"帧率上限"却不知道自己付了什么代价。
+    // 限帧方式(二选一，默认保速丢帧)。两档的省法完全不同，用词必须写清楚。
     m_fpsKeepSpeedBox = new QCheckBox(QStringLiteral("限帧时保持播放速度"), leftCard);
     m_fpsKeepSpeedBox->setChecked(true);
     m_fpsKeepSpeedBox->setToolTip(tooltipstyle::format(QStringLiteral(
@@ -250,10 +246,8 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     });
     leftLay->addWidget(m_fpsKeepSpeedBox);
 
-    // 左列一张卡片：视频壁纸参数。卡片高度随内容收缩(去掉卡内 addStretch)，
-    // 空白集中到列尾。
-    // 列宽固定、不参与拉伸：窗口变宽时多出来的空间全给右侧播放列表。
-    // 宽度与看板娘页共用同一个常量，免得两页左卡宽度漂开(切页会横向跳)。
+    // 列宽固定、不参与拉伸：窗口变宽时多出来的空间全给右侧播放列表；宽度与看板娘页
+    // 共用同一个常量，免得切页时左卡横向跳。卡片高度随内容收缩，空白集中到列尾。
     auto *leftCol = new QWidget(page);
     leftCol->setFixedWidth(uimetrics::kPageLeftColWidth);
     auto *leftColLay = new QVBoxLayout(leftCol);
@@ -263,7 +257,6 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     leftColLay->addStretch(1);
     lay->addWidget(leftCol);
 
-    // ---- right: playlist + vertical action strip ----
     auto *rightCard = new QFrame(page);
     rightCard->setObjectName(QStringLiteral("PageCard"));
     auto *rightLay = new QVBoxLayout(rightCard);
@@ -317,7 +310,7 @@ QWidget *MainWindow::buildVideoWallpaperPage()
 
     lay->addWidget(rightCard, 1);
 
-    // option changes apply immediately
+    // 选项改动立即生效
     connect(m_fullscreenPauseBox, &QCheckBox::toggled, this, [this](bool on) {
         VideoWallpaper::instance().setPauseOnFullscreen(on);
         AppConfig &st = AppConfig::instance();
@@ -461,8 +454,7 @@ void MainWindow::addVideos()
     refreshVideoList();
 }
 
-// 扫描软件目录 data/video(含子目录)下的视频文件，去重后并入播放列表。
-// 只增不删：不影响现有条目与正在播放的曲目(setPlaylist 按文件名保持当前曲)。
+// 扫描 data/video(含子目录)下的视频，去重后并入播放列表；只增不删。
 void MainWindow::scanVideoDir()
 {
     const QString videoDir = QCoreApplication::applicationDirPath()
@@ -502,9 +494,7 @@ void MainWindow::removeSelectedVideos()
     const QList<QListWidgetItem *> selected = m_videoList->selectedItems();
     if (selected.isEmpty())
         return;
-    // 就地删除选中行(不重建列表)：删除后把选中迁移到同位置条目(非末项)或新的
-    // 末项——滚动位置、选中高亮都保持，支持连点删除。此前 clear+重建 的方案会让
-    // 滚动归顶、选中丢失，正是要避免的。
+
     int firstRow = m_videoList->count();
     QStringList list = VideoWallpaper::instance().playlist();
     for (QListWidgetItem *item : selected) {
@@ -527,7 +517,7 @@ void MainWindow::removeSelectedVideos()
         m_videoList->scrollToItem(m_videoList->item(target),
                                   QAbstractItemView::EnsureVisible);
     }
-    // 就地删除不重建列表：计数标签需要单独刷新
+    // 就地删除不重建列表，计数标签需要单独刷新
     if (m_videoStatus)
         m_videoStatus->setText(QStringLiteral("共 %1 个视频 · %2")
                                    .arg(list.size())
@@ -607,7 +597,7 @@ void MainWindow::refreshVideoList()
     updatePlayingHighlight();
 }
 
-// 正在播放(含暂停/自动挂起，恢复时仍是这一曲)的条目以底色高亮，便于辨别当前曲目
+// 正在播放(含暂停/自动挂起)的条目以底色高亮，便于辨别当前曲目。
 void MainWindow::updatePlayingHighlight()
 {
     if (!m_videoList)
@@ -634,9 +624,6 @@ void MainWindow::updatePlayingHighlight()
 
 void MainWindow::onVideoStateChanged(const QString &text)
 {
-    // 用户可见的壁纸状态单独落一条诊断日志。排查循环边界是否出现
-    // "第 N 个 播放中 → 播放结束 → 第 N 个 播放中"这类可见抖动时，
-    // 这是唯一直接的取证点(任务书 十三.2)。
     videodiag::log(videodiag::Level::Debug,
                    QStringLiteral("UI状态 %1").arg(text));
     if (m_videoStatus)
@@ -644,10 +631,6 @@ void MainWindow::onVideoStateChanged(const QString &text)
     updateVideoButtons();
     updatePlayingHighlight();
 
-    // 这里是视频壁纸所有状态变化(启动/暂停/自动挂起/取消)的唯一漏斗，
-    // 把事实推进聚合器；托盘菜单和「关窗口是隐藏还是退出」只认那一份。
-    // running 用 isStarted()(用户启动过且未取消)，不是 isPlaying()，
-    // 否则自动挂起期间会被误判成「没在跑」，进程就被 Qt 顺手收掉了。
     VideoWallpaper &video = VideoWallpaper::instance();
     ApplicationRuntimeState::instance().setWallpaperState(
         video.isStarted(), video.isStarted() && !video.isPlaying());
@@ -673,8 +656,7 @@ void MainWindow::updateVideoButtons()
 }
 void MainWindow::saveWindowGeometry()
 {
-    // 窗口几何持久化(统一配置)：退出时保存尺寸/位置/最大化状态
-    // 使用 m_savedWindowSize 而非 width()/height() 防止布局漂移导致窗口尺寸逐次膨胀
+    // 用 m_savedWindowSize 而非 width()/height()，防止布局漂移导致窗口尺寸逐次膨胀。
     auto &cfg = AppConfig::instance();
     cfg.setValue(ConfigKeys::Window::Maximized, isMaximized());
     if (!isMaximized()) {
@@ -686,6 +668,3 @@ void MainWindow::saveWindowGeometry()
     cfg.save();
 }
 
-// 关闭请求的三分岔(任务书 §7.6)：
-//   已经在退出流程里     → 放手，让 Qt 正常销毁窗口
-//   有后台任务且允许最小化 → 只隐藏窗口，进程交给托盘

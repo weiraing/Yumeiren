@@ -1,15 +1,8 @@
-// 看板娘 OpenGL 宿主视图：Live2D 后端的绘制面。
+// 看板娘 OpenGL 宿主视图：Live2D 后端的绘制面，仅 YUMEIREN_WITH_LIVE2D=ON 时编译。
 //
-// 仅在 YUMEIREN_WITH_LIVE2D=ON 时参与编译(见 CMakeLists.txt)：默认构建不引入
-// Qt6::OpenGLWidgets 依赖，产物 DLL 需求与接入前完全一致。
-//
-// 为什么必须单独一个 QOpenGLWidget：Cubism 的 glDeleteTextures / 着色器对象等
-// 资源只能在拥有当前上下文的线程上创建与释放(任务书 §4.3)。QOpenGLWidget 的
-// initializeGL / paintGL / shutdownGL 正好给出这三个时机，于是 SDK 的
-// initialize() 走 contextReady、shutdown() 走 shutdownGL，绝不在别处碰 GL。
-//
-// 本类不含任何 Cubism 头文件：它只认 KanbanRenderer 抽象，SDK 类型一律留在
-// Live2DRenderer.cpp 里(任务书 §17 第 2 条)。
+// 为什么必须单独一个 QOpenGLWidget：Cubism 的纹理/着色器资源只能由持有当前上下文的
+// 线程创建与释放，而 initializeGL / paintGL / shutdownGL 正好给出这三个时机。
+// 本类不含任何 Cubism 头文件，只认 KanbanRenderer 抽象。
 #ifndef KANBANOPENGLVIEW_H
 #define KANBANOPENGLVIEW_H
 
@@ -51,12 +44,10 @@ protected:
 
 private:
     KanbanRenderer *m_renderer = nullptr;
-    // 首帧 paintGL 只记一次日志：这是「上下文建好了」到「画面真的出来了」
-    // 之间唯一的分界点，每帧刷屏就没用了。
+    // 首帧 paintGL 只记一次日志：这是「上下文建好了」到「画面真的出来了」的分界点。
     bool m_firstPaintDone = false;
-    // 本视图所承载的那个 GL 上下文的世代号，在 initializeGL 里领一次。
-    // 渲染器靠它认出「Cubism 的进程级着色器缓存属于上一个上下文、已经作废」，
-    // 详见 KanbanGlHost::glContextGeneration()。
+    // 本视图承载的 GL 上下文世代号，在 initializeGL 里领一次。渲染器靠它认出
+    // 「Cubism 的进程级着色器缓存属于上一个上下文、已作废」。
     quint64 m_contextGeneration = 0;
 };
 

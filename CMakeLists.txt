@@ -23,40 +23,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-# The sources are UTF-8 and most UI strings are Chinese; MSVC needs to be told,
-# otherwise it falls back to the system ANSI codepage.
 if(MSVC)
     add_compile_options(/utf-8)
 endif()
 
-# app.rc is UTF-8 too; windres otherwise decodes it with the ANSI codepage and
-# the version-info strings (FileDescription/ProductName) turn into mojibake.
 if(MINGW)
     set(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -c 65001")
 endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets)
 
-# 把本 target 真正需要的 Qt 模块 DLL 复制到可执行文件旁边。
-#
-# 为什么不直接跑 windeployqt：那工具会顺带打包 platforms/、imageformats/、
-# multimedia/ 等一堆插件目录，每次构建都重扫一遍，开发期太慢。这里只搬 Qt 的
-# 模块 DLL(插件目录仍需 windeployqt 或手工准备一次)。
-#
-# 为什么用 $<TARGET_RUNTIME_DLLS> 而不是遍历链接库清单：早先的写法只搬「链接行
-# 上点名的那几个 Qt6:: 目标」，而 Qt6Core / Qt6Gui 是 Qt6::Widgets 的**传递**
-# 依赖，不在名单里 —— 于是干净的构建目录里双击 exe 毫无反应、退出码 127，
-# 正是下面警告的那种情况。生成器表达式会把传递依赖一并列出，顺带也让 Live2D
-# 打开时新增的 Qt6OpenGL / Qt6OpenGLWidgets 自动跟上，不必再手工维护清单。
-#
-# 为什么必须有这一步：Live2D 打开后依赖里会多出 Qt6OpenGL.dll 与
-# Qt6OpenGLWidgets.dll。开发目录里若只手工抄过 Qt6Widgets 那一批 DLL，
-# 新依赖缺席的表现是「编译全绿、双击没反应」，退出码 127 —— 没有任何提示，
-# 很难往「少了个 DLL」上想。
 function(yumeiren_deploy_qt_runtime target)
-    # COMMAND_EXPAND_LISTS 是必须的：$<TARGET_RUNTIME_DLLS> 求值出来是分号分隔的
-    # 列表，不加这个修饰，它会被当成「一个」文件名传给 copy_if_different，
-    # 报 "Error copying file ... from A.dll;B.dll;C.dll"。
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_RUNTIME_DLLS:${target}> "$<TARGET_FILE_DIR:${target}>"
@@ -64,9 +41,6 @@ function(yumeiren_deploy_qt_runtime target)
         COMMENT "复制 ${target} 的 Qt 运行时依赖"
         VERBATIM)
 
-    # 平台插件是「能跑」与「双击没反应」的分界线：少了 platforms/qwindows.dll，
-    # Qt 连一个窗口都开不出来。其余插件(styles/imageformats/tls)不影响启动，
-    # 交给发布脚本或 windeployqt 处理。
     if(TARGET Qt6::QWindowsIntegrationPlugin)
         add_custom_command(TARGET ${target} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory
@@ -129,9 +103,6 @@ set(YUMEIREN_SOURCES
     src/kanban/ImageDecode.cpp
 )
 
-# 两个产品目标共用的依赖清单；Live2D 开启时在下面追加。
-# shell32 是给 platform/windows/shellfileops.cpp 的 SHFileOperationW 用的
-# (删除模型时把文件夹移入回收站)，Qt 不会替我们链上它。
 set(YUMEIREN_LIBS Qt6::Widgets Qt6::Multimedia Qt6::MultimediaWidgets dwmapi psapi shell32)
 
 # Live2D(Cubism) 后端：SDK 受专有许可约束、不入库，所以仓库里只有解压好的
@@ -146,8 +117,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cubism/Framework/src/CubismFr
 endif()
 option(YUMEIREN_WITH_LIVE2D "编译 Live2D Cubism 看板娘后端" ${YUMEIREN_LIVE2D_DEFAULT})
 if(YUMEIREN_WITH_LIVE2D)
-    # 工程只声明了 CXX，但 GLEW 是 .c。必须在目录作用域打开 C 语言，
-    # 放进函数里调用会让 CMake 的 C 编译规则变量随函数返回一起丢失。
     enable_language(C)
     # SDK / GLEW / Core 的构建细节都在这个模块里，主文件只负责接线。
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/Live2DCubism.cmake")
@@ -161,17 +130,12 @@ endif()
 
 qt_add_executable(Yumeiren WIN32
     ${YUMEIREN_SOURCES}
-    # 版本资源由 cmake/Version.cmake 从 resources/app.rc.in 生成到构建目录，
-    # 所以这里的路径是生成物而不是源码 —— 版本号只有一个来源（VERSION 文件）。
     ${YUMEIREN_GENERATED_RC}
 )
 
 target_include_directories(Yumeiren PRIVATE src)
 yumeiren_apply_version(Yumeiren)
 
-# app.rc 里的 `YUMEIREN_APPICON ICON "..."` 是 windres 自己去读那个 .ico 的，
-# CMake 看不见这层依赖 —— 不显式声明的话，换了图标只会重新 configure + 复制，
-# app.rc 判定「没变」不重编，exe 里还是旧图标，而且没有任何提示。
 set_property(SOURCE "${YUMEIREN_GENERATED_RC}" APPEND PROPERTY
     OBJECT_DEPENDS "${YUMEIREN_ICON_PATH}")
 
@@ -185,30 +149,9 @@ endif()
 yumeiren_deploy_qt_runtime(Yumeiren)
 
 set_target_properties(Yumeiren PROPERTIES
-    # 产物名用品牌名，不用 target 名（target 仍叫 Yumeiren，构建命令与依赖关系不变）。
-    #
-    # 这里出现了非 ASCII，链路是：CMakeLists 是 UTF-8 → Ninja 用 UTF-8 写 build.ninja
-    # → Ninja 在 Windows 上走 CreateProcessW，命令行是 UTF-16 → 但 MinGW 的 ld 拿到的
-    # argv 是 CRT 从**系统 ANSI 代码页**转出来的。中文 Windows 是 GBK，这三个字装得下，
-    # 所以能正确建出文件；英文/日文等代码页装不下就会变成 `???.exe`，Ninja 随后找不到
-    # 自己的产物、报「missing output」。
-    # 也就是说：**这条依赖系统区域设置**。本机（中文 Windows）实测通过；GitHub Actions 的
-    # windows-latest 是英文区域，release.yml 里已按这个名字取文件 —— 若那边失败，
-    # 改用下面被注释掉的那套（ASCII 产物名 + cmake -E 复制一份，CMake 自己的文件 API
-    # 是 UTF-8 → UTF-16，不受 ANSI 代码页影响）。
     OUTPUT_NAME "虞美人"
 )
 
-# 备选方案（英文区域下更稳，代价是 build/ 里同时留一个 Yumeiren.exe）：
-# set_target_properties(Yumeiren PROPERTIES OUTPUT_NAME "Yumeiren")
-# add_custom_command(TARGET Yumeiren POST_BUILD
-#     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-#         "$<TARGET_FILE:Yumeiren>"
-#         "$<TARGET_FILE_DIR:Yumeiren>/虞美人.exe"
-#     COMMENT "复制产物为 虞美人.exe"
-#     VERBATIM)
-
-# UI-test build without the requireAdministrator manifest (can be automated).
 qt_add_executable(YumeirenTest WIN32
     ${YUMEIREN_SOURCES}
 )
@@ -226,10 +169,6 @@ set(APP_RESOURCES
     resources/light.qss
     resources/dlls/ExplorerBgTool.dll
     resources/dlls/ExplorerBlurMica.dll
-    # 应用图标。exe 内嵌的 .ico（resources/yumeiren.ico）管资源管理器那一侧；
-    # 这里这一套 PNG 是给 Qt 用的（窗口图标 / 托盘 / 自绘标题栏）—— QIcon 会按
-    # devicePixelRatio 挑最合适的一档，比只塞一张 256 再让 Qt 缩放清楚得多。
-    # 档位与 tools/icongen/make_icons.py 的 QT_SIZES 一一对应，改一边要改另一边。
     resources/icons/yumeiren-16.png
     resources/icons/yumeiren-20.png
     resources/icons/yumeiren-24.png
@@ -240,9 +179,9 @@ set(APP_RESOURCES
     resources/icons/yumeiren-256.png
 )
 
-# 复制 data/ 目录到编译输出目录（仅当 build/data/models 不存在时触发）
+# 复制 data/ 目录到编译输出目录（仅当 build/data 整个不存在时触发）
 add_custom_command(TARGET Yumeiren POST_BUILD
-    COMMAND powershell -Command "if (!(Test-Path '${CMAKE_BINARY_DIR}/data/models')) { Remove-Item -Path '${CMAKE_BINARY_DIR}/data' -Recurse -ErrorAction SilentlyContinue; Copy-Item -Path '${CMAKE_SOURCE_DIR}/data' -Destination '${CMAKE_BINARY_DIR}/data' -Recurse; Write-Host 'Copied data/ to build directory' } else { Write-Host 'data/ already exists in build directory' }"
+    COMMAND powershell -Command "if (!(Test-Path '${CMAKE_BINARY_DIR}/data')) { Copy-Item -Path '${CMAKE_SOURCE_DIR}/data' -Destination '${CMAKE_BINARY_DIR}/data' -Recurse; Write-Host 'Copied data/ to build directory' } else { Write-Host 'data/ already exists in build directory' }"
     COMMENT "Copying data/ directory to build output if needed"
 )
 
@@ -258,13 +197,7 @@ qt_add_resources(YumeirenTest app_res
     FILES ${APP_RESOURCES}
 )
 
-# 这里原本 include 了 cmake/{RenderTests,ControllerTests,UiTests}.cmake（即 `cmake/*Tests.cmake`）——
-# 三个可选的回归测试目标（渲染生命周期 / 看板娘控制器 / 界面辅助函数），由 YUMEIREN_BUILD_*_TESTS 开关控制。
-# 2026-09-18 定案：**测试代码用完即删**，于是测试源码、这三份接线与对应的三个选项一并移除，
-# 仓库里不再有任何测试目标。回归验证改由 tools/ 下的探针承担（那批本就不入库，见 .gitignore）。
 
-# QVideoSink A/B 实验探针(第二阶段内存归因；非产品组件，可整体删除)。
-# 探针源码不在仓库里时跳过该目标，产品目标 Yumeiren / YumeirenTest 照常构建。
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/sinkprobe/main.cpp")
     qt_add_executable(SinkProbe WIN32
         tools/sinkprobe/main.cpp

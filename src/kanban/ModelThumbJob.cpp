@@ -91,18 +91,7 @@ QSurfaceFormat thumbSurfaceFormat()
     return format;
 }
 
-// 往 stdout 打一行进度。**仅供人在控制台手工跑时查看**，不是与主程序的协议。
-//
-// 为什么不能当协议：本程序是 **GUI 子系统**的可执行文件(WIN32 目标)，实测它的
-// stdout 只在 GL 上下文建立**之前**写得出去，之后就静默丢失。证据是一次
-// 「1 个要渲染 + 15 个跳过」的运行：15 行 SKIP 全在，而随后的 OK 与 DONE
-// 一行不剩 —— 图片本身是正常落盘的，说明文件 I/O 没问题，丢的是标准输出。
-// 换成 CRT 的 fwrite+fflush 重测**同样丢**，所以不是 QTextStream 的问题，
-// 是子系统层面的。同源码的控制台程序 KanbanProbe 没有这个现象。
-//
-// 因此主程序完全不读它：完成与否只看 <程序目录>/.cache/model-thumbs/ 下的
-// 文件(见 ModelThumbJob.h 的契约说明)。这里的 fwrite 只是省得为了几行调试
-// 输出引一个 QTextStream，顺带保证在能出字的环境里逐行即时可见。
+// 往 stdout 打一行进度，**仅供人在控制台手工跑时查看**：本程序是 GUI 子系统目标，stdout 在 GL 上下文建立后就写不出去了。
 void report(const QString &line)
 {
     const QByteArray bytes = line.toUtf8() + '\n';
@@ -112,8 +101,7 @@ void report(const QString &line)
 
 QString failLine(const QString &id, const QString &reason)
 {
-    // 原因里可能有换行(渲染器给的多是带换行的诊断文本)，压成一行，
-    // 否则主程序的按行解析会把后半截当成一条独立消息。
+    // 原因里可能带换行(渲染器给的多是带换行的诊断文本)，必须压成一行，否则按行解析会把后半截当成独立消息。
     QString flat = reason;
     flat.replace(QLatin1Char('\n'), QLatin1Char(' '));
     flat.replace(QLatin1Char('\r'), QLatin1Char(' '));
@@ -179,9 +167,7 @@ int runModelThumbJob(const QStringList &args, QString *error)
     KanbanModelManager manager;
     manager.rescan();
 
-    // 先算清楚「到底要出哪几张图」。
-    // 这一步在创建 GL 上下文**之前**做完是有意的：全部命中缓存时(最常见的情况，
-    // 只有第一次进页面才需要真出图)，本进程连一个 GL 上下文都不该建。
+    // 先算清楚「到底要出哪几张图」，且必须在创建 GL 上下文**之前**做完：全部命中缓存时不该建上下文。
     struct Task {
         QString id;
         QString jsonPath;
@@ -225,9 +211,7 @@ int runModelThumbJob(const QStringList &args, QString *error)
     if (!context.makeCurrent(&surface))
         return bail(3, QStringLiteral("离屏目标 makeCurrent 失败。"));
 
-    // 离屏表面自带的默认帧缓冲尺寸由驱动决定，未必等于我们要的绘制面；
-    // 显式建 FBO，「画在哪」和「从哪读」才是同一块、尺寸确定的地方。
-    // 注意必须在 makeCurrent 之后构造 —— FBO 的构造函数要抓当前上下文。
+    // 离屏表面的默认帧缓冲尺寸由驱动决定，显式建 FBO 才能确定「画在哪」和「从哪读」；且必须在 makeCurrent 之后构造(构造函数要抓当前上下文)。
     QOpenGLFramebufferObject fbo(kThumbWidth, kThumbHeight,
                                  QOpenGLFramebufferObject::CombinedDepthStencil);
     if (!fbo.isValid())
@@ -278,7 +262,7 @@ int runModelThumbJob(const QStringList &args, QString *error)
         // GL 原点在左下，QImage 在左上。
         frame = frame.mirrored(false, true);
 
-        // 裁到内容边界：让每个模型都把格子用满；整张全透明则判为出图失败。
+        // 裁到内容边界，整张全透明则判为出图失败(见 trimToContent)。
         frame = trimToContent(frame, kTrimMargin);
         if (frame.isNull()) {
             report(failLine(task.id, QStringLiteral("画面全空 —— 模型没画出来")));

@@ -8,11 +8,11 @@ namespace kanban {
 namespace {
 
 // 愿意为单张图付的最大解压内存。给到 1 GiB：16384x8192 的 RGBA8888 是 512 MiB，
-// 装得下；再往上基本就是文件头里的宽高不可信了，那种情况不抬上限、让 Qt 按默认
-// 策略拒绝更安全（否则一个坏头就能让进程去申请几十 GB）。
+// 装得下；再往上基本就是文件头里的宽高不可信了，那时不抬上限、让 Qt 按默认策略
+// 拒绝更安全(否则一个坏头就能让进程去申请几十 GB)。
 constexpr qint64 kMaxDecodeBytes = qint64(1024) * 1024 * 1024;
 
-// 保护全局分配上限的抬升与还原。见头文件里那三条说明。
+// 保护全局分配上限的抬升与还原，详见 ImageDecode.h。
 QMutex &limitMutex()
 {
     static QMutex mutex;
@@ -23,8 +23,8 @@ QMutex &limitMutex()
 
 QImage readImageDownscaled(QImageReader &reader, int maxDim)
 {
-    // reader.size() 只读文件头，不解码 —— 这里拿到的是素材的真实尺寸，
-    // 也正是 Qt 那条上限检查用的尺寸。
+    // reader.size() 只读文件头、不解码 —— 拿到的是素材真实尺寸，也正是 Qt 那条
+    // 上限检查用的尺寸。
     const QSize source = reader.size();
 
     QSize target;
@@ -36,7 +36,7 @@ QImage readImageDownscaled(QImageReader &reader, int maxDim)
         }
     }
 
-    // 按最宽的 RGBA8888 估所需内存（PNG 也可能是 1/2/3 字节每像素，估大不估小）。
+    // 按最宽的 RGBA8888 估所需内存(PNG 也可能 1/2/3 字节每像素，估大不估小)。
     qint64 bytes = 0;
     if (source.isValid() && !source.isEmpty()) {
         bytes = qint64(source.width()) * qint64(source.height()) * 4;
@@ -59,8 +59,8 @@ QImage readImageDownscaled(QImageReader &reader, int maxDim)
     }
 
     if (!image.isNull() && !target.isEmpty()) {
-        // 显式缩放而不是 setScaledSize：Qt 6 不允许指定自动缩放的重采样模式，
-        // 而默认那条路径在大比例缩减下会采出锯齿。
+        // 显式缩放而非 setScaledSize：Qt 6 不允许指定自动缩放的重采样模式，
+        // 默认那条路径在大比例缩减下会采出锯齿。
         image = image.scaled(target, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
     }
     return image;

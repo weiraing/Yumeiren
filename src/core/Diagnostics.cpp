@@ -26,8 +26,7 @@ QFile g_file;
 bool g_diag = false;
 constexpr qint64 kMaxLogBytes = 1024 * 1024; // 1MB 滚动
 
-// 启动分段测量(任务书 9.1)：段间一律用 QElapsedTimer 单调时钟，不用系统时间差。
-// 原点取进程创建时刻(见 processAgeMs)，因此累计值可直接和 10.1 的启动耗时对照。
+// 分段测量一律用 QElapsedTimer 单调时钟，不用系统时间差；原点取进程创建时刻。
 QElapsedTimer *g_bootClock = nullptr;
 qint64 g_processStartOffsetMs = 0;
 qint64 g_lastStageMs = 0;
@@ -43,8 +42,8 @@ QString levelTag(Level lv)
     return QStringLiteral("?");
 }
 
-// 进程已存活毫秒数(用于“进程启动→诊断初始化”这一段，此刻单调时钟尚未开始)。
-// 系统时钟在本机出现过非单调跳变，故结果不可信时直接丢弃(返回 -1)。
+// 进程已存活毫秒数(此刻单调时钟尚未开始)。系统时钟出现过非单调跳变，故结果
+// 不可信时直接丢弃(返回 -1)。
 qint64 processAgeMs()
 {
     FILETIME creation = {}, exitT = {}, kernel = {}, user = {}, now = {};
@@ -67,8 +66,7 @@ qint64 bootElapsedMs()
 
 QString logPath()
 {
-    // 诊断日志属于可重新生成的运行时数据，随缓存一起落在 <程序目录>/.cache/logs；
-    // 不再写 %LOCALAPPDATA%\Yumeiren\logs。
+    // 诊断日志属于可重新生成的运行时数据，随缓存落在 <程序目录>/.cache/logs。
     return QDir(CachePaths::logs()).filePath(QStringLiteral("videowallpaper.log"));
 }
 
@@ -84,7 +82,7 @@ void rotateIfNeeded()
     g_file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text);
 }
 
-// 内部写入(调用方必须已持有 g_mutex)：init 与 log 共用，避免非递归锁重入死锁
+// 调用方必须已持 g_mutex：init 与 log 共用，避免非递归锁重入死锁
 void writeLine(Level lv, const QString &module, const QString &msg)
 {
     const QString stamp =
@@ -99,7 +97,7 @@ void writeLine(Level lv, const QString &module, const QString &msg)
     rotateIfNeeded();
 }
 
-// 调用方必须已持锁：记录一个启动阶段，delta 为距上一阶段的毫秒数
+// 调用方必须已持锁；delta 为距上一阶段的毫秒数
 void stageAt(Level lv, const QString &name, qint64 nowMs)
 {
     const qint64 delta = nowMs - g_lastStageMs;
@@ -133,7 +131,7 @@ int currentThreadCount()
 void init()
 {
     QMutexLocker lock(&g_mutex);
-    // 幂等：main() 与单例构造都可能触发，只初始化一次
+    // 幂等：main() 与单例构造都可能触发
     static bool inited = false;
     if (inited)
         return;
@@ -149,8 +147,7 @@ void init()
     QDir().mkpath(QFileInfo(path).absolutePath());
     g_file.setFileName(path);
     if (!g_file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-        // 主日志被其他实例占用时回退到按 PID 独立的文件——多实例场景(单实例
-        // 守卫的二次启动诊断)下不能丢日志
+        // 主日志被其他实例占用时回退到按 PID 独立的文件：二次启动诊断不能丢日志。
         path = QStringLiteral("%1.%2.log").arg(path).arg(GetCurrentProcessId());
         g_file.setFileName(path);
         g_file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text);
@@ -179,7 +176,7 @@ bool diagEnabled()
 void log(Level lv, const QString &msg, const QString &module)
 {
     QMutexLocker lock(&g_mutex);
-    // 默认 Info+Warning+Error；Debug 仅诊断模式(任务书 10.4)
+    // 默认 Info+Warning+Error；Debug 仅诊断模式
     if (lv == Level::Debug && !g_diag)
         return;
     if (!g_file.isOpen())
@@ -205,8 +202,8 @@ void logObjectEvent(const char *action, const QObject *obj, const QString &detai
 {
     if (!obj)
         return;
-    // 对象地址用于把创建/销毁两端的同一对象对上(任务书 5.3)；只记地址与类名，
-    // 不记录任何路径或用户数据。DEBUG 级：默认不写盘，不刷屏。
+    // 对象地址用于把创建/销毁两端的同一对象对上；只记地址与类名，不含路径或
+    // 用户数据。DEBUG 级：默认不写盘。
     log(Level::Debug,
         QStringLiteral("%1 %2=0x%3 %4")
             .arg(QString::fromLatin1(action),
@@ -220,8 +217,7 @@ void startDiagSampling()
 {
     if (!diagEnabled())
         return;
-    // 采样间隔由 YUMEIREN_DIAG_SAMPLE_MS 指定，默认关闭(0)；下限 1s，
-    // 高频采样会干扰播放(任务书 10.3：日志不能明显影响播放)。
+    // 间隔由 YUMEIREN_DIAG_SAMPLE_MS 指定，默认关闭(0)；下限 1s，高频采样会干扰播放。
     int intervalMs = qEnvironmentVariableIntValue("YUMEIREN_DIAG_SAMPLE_MS");
     if (intervalMs <= 0)
         return;

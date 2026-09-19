@@ -62,7 +62,7 @@ bool CubismModelImpl::ensureGl(const QSize &pixelSize, quint64 contextGeneration
         glBindTexture(GL_TEXTURE_2D, textureId);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, image.width(), image.height(), 0,
                      GL_RGBA, GL_UNSIGNED_BYTE, image.constBits());
-        // Cubism 强制使用 mipmap 采样；缺失层级会导致纹理显示为黑色。
+        // Cubism 强制 mipmap 采样；缺失层级会导致纹理显示为黑色。
         glGenerateMipmap(GL_TEXTURE_2D);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -76,10 +76,9 @@ bool CubismModelImpl::ensureGl(const QSize &pixelSize, quint64 contextGeneration
     // 上传前已在 CPU 侧乘过 alpha，这里必须如实告知，否则二次相乘会让边缘发暗。
     renderer->IsPremultipliedAlpha(true);
     m_glLive = true;
-    // 日志要报实际上传尺寸，必须在释放 CPU 位图之前取。
+    // 日志要报实际上传尺寸，必须在释放 CPU 位图之前取值。
     const QSize uploadedSize =
         m_textureImages.isEmpty() ? QSize() : m_textureImages.first().size();
-    // 上传完成后释放 CPU 位图，降低常驻内存。
     m_textureImages.clear();
     m_textureImages.squeeze();
     logInfo(QStringLiteral("纹理上传完成：%1 张，绘制面 %2x%3，上限 %4，实际 %5x%6")
@@ -106,7 +105,6 @@ void CubismModelImpl::releaseGl()
     DeleteRenderer(); // 基类实现自带空指针判定，重复调用安全
 }
 
-// 按画布和视口比例修正投影，保持等比显示。
 void CubismModelImpl::fitProjection(const QSize &pixelSize, CubismMatrix44 *out)
 {
     const float w = pixelSize.width() > 0 ? static_cast<float>(pixelSize.width()) : 1.0f;
@@ -132,7 +130,7 @@ void CubismModelImpl::draw(const QSize &pixelSize)
         return;
     }
     glViewport(0, 0, pixelSize.width(), pixelSize.height());
-    // 清成 alpha=0：透明窗口下任何非零底色的都会变成立像周围一圈脏边。
+    // 必须清成 alpha=0：透明窗口下任何非零底色都会在立像周围留一圈脏边。
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 

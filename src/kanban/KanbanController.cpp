@@ -19,15 +19,11 @@ namespace kanban {
 
 namespace {
 constexpr const char *kModule = "Kanban";
-// 等 GL 上下文的上限。超时说明这台机器/这次会话根本拿不到 GL 宿主，
-// 继续等下去就是状态机卡在 Starting —— 用户看到的正是「点了没反应」。
+// 等 GL 上下文的上限。超时即降级，否则状态机永远卡在 Starting（表现为「点了没反应」）。
 constexpr int kGlReadyTimeoutMs = 5000;
-// 挂起判定心跳。1s 足够：这两个原因都是「持续几分钟起步」的事件，
-// 而再密也只是每秒多两次窗口句柄查询。
+// 挂起判定心跳。锁屏/熄屏都是「持续几分钟起步」的事件，1s 足够。
 constexpr int kSuspendHeartbeatMs = 1000;
-// 持续挂起到「连模型带纹理一起释放」的门槛。锁屏/熄屏下画面根本不存在，
-// 且恢复必然伴随人工动作，所以尽快释放不牺牲任何可感知体验 ——
-// 与视频壁纸的 kSuspendReleaseHiddenMs 同值同理(见 VideoWallpaper.cpp)。
+// 持续挂起到释放模型与纹理的门槛（与视频壁纸 kSuspendReleaseHiddenMs 同值同理）。
 constexpr qint64 kSuspendReleaseHiddenMs = 5000;
 } // namespace
 
@@ -38,7 +34,7 @@ KanbanController::KanbanController(QObject *parent)
     connect(m_clock, &KanbanAnimationClock::tick, this, &KanbanController::onFrameTick);
     connect(m_clock, &KanbanAnimationClock::measuredFpsChanged,
             this, &KanbanController::measuredFpsChanged);
-    // 挂起心跳只在跑起来时挂着：没在跑的时候它无事可判，白留一个每秒唤醒。
+    // 挂起心跳只在跑起来时挂着，没在跑时无事可判。
     m_suspendClock = new QElapsedTimer();
     m_suspendTimer = new QTimer(this);
     m_suspendTimer->setTimerType(Qt::CoarseTimer);
@@ -49,13 +45,10 @@ KanbanController::KanbanController(QObject *parent)
 
 KanbanController::~KanbanController()
 {
-    // 析构走正常收口路径：先停时钟再释放渲染器，最后删窗口。
-    // GL 后端要求「资源在持有上下文的线程释放」，所以 shutdownForExit 里
-    // 渲染器 shutdown 必须发生在窗口 delete 之前。
+    // GL 资源必须在持有上下文的线程释放：渲染器 shutdown 要早于窗口 delete。
     shutdownForExit();
 }
 
-// —— 查询 ——
 
 bool KanbanController::isVisible() const
 {
@@ -103,12 +96,10 @@ int KanbanController::refreshModels()
     return n;
 }
 
-// —— 生命周期 ——
 
 bool KanbanController::pickRenderer()
 {
-    // 先看 Live2D，不可用即换占位：两条路径对上层完全同形，所以这里不需要
-    // 任何「是否已接入 SDK」的分支留给调用方。
+    // Live2D 不可用即换占位：两条路径对上层同形，调用方无需分支。
     if (!Live2DRenderer::sdkCompiledIn()) {
         videodiag::log(videodiag::Level::Info,
                        QStringLiteral("[Kanban] %1，改用内置占位动画")
@@ -130,10 +121,9 @@ bool KanbanController::ensureWindow()
         return true;
     }
     m_window = new KanbanWindow(nullptr);
-    // 顺序是硬要求：先给窗口一个非零尺寸，再挂视图。
-    // QOpenGLWidget 只在尺寸非零时才去创建上下文并回调 initializeGL，而窗口尺寸
-    // 此前只有 applyScaleToWindow() 会给 —— 它却挂在「等 GL 就绪」之后。
-    // 两边互等，表现就是窗口永远 0x0、桌面上什么都没有。
+    // 顺序是硬要求：先给窗口非零尺寸再挂视图 —— QOpenGLWidget 只在尺寸非零时才创建
+    // 上下文并回调 initializeGL，而给尺寸的 applyScaleToWindow() 挂在「等 GL 就绪」
+    // 之后，两边互等会让窗口永远 0x0。
     placeWindowFromConfig();
     m_window->attachRenderer(m_renderer.get());
     m_window->setAlwaysOnTop(m_alwaysOnTop);
@@ -142,7 +132,6 @@ bool KanbanController::ensureWindow()
     m_window->setOpacityPercent(m_opacityPercent);
 
     connect(m_window, &KanbanWindow::pointerEntered, this, [this] {
-        // 交互态允许被暂停/收口抢占，所以转移失败也不打断用户操作。
         if (m_machine.is(State::Idle)) {
             m_machine.transition(State::Hover, "pointerEntered");
         }
@@ -154,19 +143,14 @@ bool KanbanController::ensureWindow()
         }
     });
     connect(m_window, &KanbanWindow::hoveredAt, this, [this](const QPointF &pos) {
-        // 只在没开视线追踪时用窗口自己的 hover 坐标兜底。
-        //
-        // 开着的时候以「每帧读全局光标」(onFrameTick → feedGazeTarget) 为准：
-        // 两条路同时喂会互相覆盖，而 hover 只在鼠标位于窗口内时才有事件 ——
-        // 它会把刚由全局光标算好的「在左边」一把拽回窗口内的小范围，表现为
-        // 「鼠标一离开窗口，视线就自己收回中间」。
+        // 只在没开视线追踪时用窗口 hover 兜底：开着时以每帧读全局光标为准，否则 hover
+        // 会把全局光标算出的视线拽回窗口内小范围。
         if (m_renderer && !m_machine.isPaused() && !gazeTracking()) {
             m_renderer->pointerMove(pos);
         }
     });
     connect(m_window, &KanbanWindow::clicked, this, &KanbanController::handleClicked);
-    // 视线档位只有两条入口：设置页的四档单选框、托盘「看板娘 > 视线追踪 >」。
-    // 看板娘窗口的右键菜单刻意不带这一项(见 KanbanWindow.cpp 里的说明)。
+    // 视线档位只有两条入口：设置页四档单选框、托盘「看板娘 > 视线追踪 >」。
     connect(m_window, &KanbanWindow::dragStarted, this, [this] {
         m_machine.transition(State::Dragging, "dragStarted");
     });
@@ -177,8 +161,8 @@ bool KanbanController::ensureWindow()
         saveGeometry();
     });
     connect(m_window, &KanbanWindow::scaleStepped, this, &KanbanController::handleScaleStepped);
-    // 右键菜单的两个窗口行为开关走控制器，不走窗口自己的 setter —— 只有这条路上
-    // 会同时更新控制器成员、落盘配置键、并 emit settingsChanged() 让设置页回填。
+    // 右键菜单的窗口行为开关走控制器而非窗口 setter：只有这条路会同步成员、落盘
+    // 配置键并 emit settingsChanged()。
     connect(m_window, &KanbanWindow::mouseThroughRequested, this,
             &KanbanController::setMouseThrough);
     connect(m_window, &KanbanWindow::alwaysOnTopRequested, this,
@@ -229,17 +213,15 @@ bool KanbanController::start()
     }
 
     if (m_renderer->usesOpenGL()) {
-        // GL 资源必须在持有上下文的线程创建：先 show 触发 initializeGL，
-        // 真正的 initialize/loadModel 在 onGlContextReady 里做。
+        // GL 资源必须在持有上下文的线程创建：先 show 触发 initializeGL，真正的
+        // initialize/loadModel 在 onGlContextReady 里做。
         m_waitingGl = true;
         videodiag::log(videodiag::Level::Info,
                        QStringLiteral("[Kanban] 等待 GL 上下文就绪(后端 %1)").arg(m_backendName),
                        QLatin1String(kModule));
         m_window->show();
         publishState();
-        // 兜底：initializeGL 迟迟不来(驱动不给 3.3 上下文、远程桌面、窗口没能
-        // 真正上屏)时不能把状态机永远吊在 Starting。宁可降级成占位动画，
-        // 也不能让用户面对一个「没有任何反馈」的看板娘。
+        // 兜底：迟迟拿不到 GL 上下文时不能把状态机永远吊在 Starting，宁可降级占位。
         QTimer::singleShot(kGlReadyTimeoutMs, this, [this] {
             if (!m_waitingGl) {
                 return;
@@ -255,8 +237,7 @@ bool KanbanController::start()
         });
         return true;
     }
-    // 软件渲染后端不需要等 GL 上下文，直接初始化；成功后窗口才允许露出，
-    // 否则初始化失败会留一个透明空壳在桌面上。
+    // 软件后端不用等 GL 上下文；初始化成功才允许露窗，否则会留一个透明空壳。
     if (!initializeAndLoad() || !activateKanban()) {
         return false;
     }
@@ -274,9 +255,8 @@ void KanbanController::onGlContextReady()
     }
     m_waitingGl = false;
 
-    // 本函数由 QOpenGLWidget::initializeGL() 直接调进来，此刻正处在 Qt 的绘制
-    // 流程里，只允许做「必须有当前 GL 上下文」的事：建渲染器、解码并上传纹理。
-    // 其余收尾(改窗口尺寸、起时钟、发信号)一律排到本轮事件循环之后再跑。
+    // 本函数由 QOpenGLWidget::initializeGL() 直接调进来，正处在 Qt 绘制流程里，只
+    // 允许做「必须有当前 GL 上下文」的事；改窗口尺寸等收尾排到事件循环之后。
     if (!initializeAndLoad()) {
         QTimer::singleShot(0, this, [this] {
             if (!fallbackToPlaceholder()) {
@@ -307,8 +287,7 @@ bool KanbanController::initializeAndLoad()
         return false;
     }
 
-    // 模型装载失败不算致命：占位动画不依赖模型文件，Live2D 后端没模型时也画不出人，
-    // 但状态机仍需可用 —— 所以这里只记日志，并把「无模型」如实报给界面。
+    // 模型装载失败不算致命：状态机仍需可用，只记日志并把「无模型」如实报给界面。
     const QVector<const ModelInfo *> valid = m_models.validModels();
     if (!valid.isEmpty()) {
         const ModelInfo *chosen = m_models.byJsonPath(m_modelPath);
@@ -317,7 +296,7 @@ bool KanbanController::initializeAndLoad()
         }
         QString loadErr;
         if (m_renderer->loadModel(chosen->modelJsonPath, &loadErr)) {
-            // 装载成功即「模型又在显存里」，释放标记必须跟着复位(见 setModelPath 同名说明)。
+            // 装载成功即「模型又在显存里」，释放标记必须复位(见 setModelPath)。
             m_releasedForSuspend = false;
             m_currentModelName = chosen->name;
             m_modelPath = chosen->modelJsonPath;
@@ -342,28 +321,22 @@ bool KanbanController::initializeAndLoad()
     return true;
 }
 
-// 启动收尾：挂视图、按缩放定窗口尺寸、转 Idle、起时钟、广播状态。
-//
-// 单独成函数是为了能在「GL 上下文就绪」之外的地方跑：GL 后端的那次
-// initializeAndLoad() 是在 QOpenGLWidget::initializeGL() 里被回调的，也就是
-// Qt 的绘制流程内部，那里绝不能改窗口尺寸 —— 会在绘制途中触发 resize 与重入的
-// paintGL，Qt 的 FBO 被边画边重建，结果是桌面上一片空白。所以收尾一律排到
-// 本轮事件循环之后再执行。
+// 启动收尾：挂视图、定窗口尺寸、转 Idle、起时钟、广播状态。单独成函数是为了能在
+// 「GL 上下文就绪」之外跑：initializeGL() 里改窗口尺寸会触发重入的 paintGL 把 FBO
+// 边画边重建。
 bool KanbanController::activateKanban()
 {
     if (!m_renderer) {
         return false;
     }
     if (m_window) {
-        // 降级路径会在这里把 GL 视图换成软件视图，所以不能挪到 ensureWindow 里。
+        // 降级路径会在这里把 GL 视图换成软件视图，所以不能挪进 ensureWindow。
         m_window->attachRenderer(m_renderer.get());
     }
     applyScaleToWindow();
 
-    // 视线追踪的启用状态在这里落到渲染器上。选这里是因为它是三条路径
-    // (Live2D 成功 / 降级到占位 / 重试) 的唯一汇合点：写在 pickRenderer 里
-    // 会漏掉降级后新建的那个 PlaceholderRenderer，写在 ensureWindow 里又太早
-    // —— 那时渲染器还没 initialize()。
+    // 视线追踪状态落到渲染器上：这里是 Live2D 成功 / 降级 / 重试三条路径的唯一汇合
+    // 点（pickRenderer 会漏掉降级新建的渲染器，ensureWindow 又太早）。
     m_renderer->setGazeStrength(m_gazeStrength);
 
     if (!m_machine.transition(State::Idle, "activateKanban")) {
@@ -371,8 +344,8 @@ bool KanbanController::activateKanban()
     }
     m_clock->setTargetFps(m_targetFps);
     m_clock->start();
-    // 挂起心跳随运行状态起停。清零是必要的：本函数也是重试与降级路径的汇合点，
-    // 残留的上一轮状态会让第一次心跳把「刚起来的实例」当成「已经挂起很久」。
+    // 清零是必要的：本函数也是重试与降级的汇合点，残留状态会让第一次心跳把刚起来的
+    // 实例当成「已经挂起很久」。
     m_suspendReasons = 0;
     m_releasedForSuspend = false;
     m_suspendClock->invalidate();
@@ -415,7 +388,7 @@ void KanbanController::enterError(const QString &reason)
     m_clock->stop();
     m_suspendTimer->stop();
     m_machine.transition(State::Error, "enterError");
-    // Error 不是「在跑」：后台任务位必须清掉，否则关窗后进程被一个失败的功能吊着。
+    // Error 不是「在跑」：后台任务位必须清掉，否则进程会被一个失败的功能吊着。
     ApplicationRuntimeState::instance().setKanbanState(false, false);
     AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::Enabled), false);
     videodiag::log(videodiag::Level::Error,
@@ -434,7 +407,7 @@ void KanbanController::pauseResume()
         if (m_renderer) {
             m_renderer->resume();
         }
-        // 挂起中只恢复「暂停态」，不恢复绘制：画面此刻依然没人看得见。
+        // 挂起中只恢复「暂停态」不恢复绘制：画面此刻依然没人看得见。
         if (m_suspendReasons == 0) {
             m_clock->start();
         }
@@ -467,9 +440,8 @@ void KanbanController::stop()
         publishState();
         return;
     }
-    // 收口是幂等的：Stopping 只存活一瞬，但这期间按钮 / 托盘菜单 / 窗口事件
-    // 都可能再进来一次。第二次进来时 renderer 已经在 reset 的路上，再拆一遍
-    // 就是对着半销毁的对象动手 —— 直接返回，让第一次收口跑完。
+    // 收口是幂等的：Stopping 只存活一瞬，这期间按钮/托盘/窗口事件都可能再进来一次，
+    // 那时 renderer 已在 reset 路上，再拆一遍就是对着半销毁的对象动手。
     if (m_machine.is(State::Stopping)) {
         return;
     }
@@ -503,33 +475,25 @@ void KanbanController::destroyWindow()
         return;
     }
     saveGeometry();
-    // 三步顺序都是有理由的，别合并：
-    //  1) detachRenderer() 让视图松手。控制器在本函数之后马上 m_renderer.reset()，
-    //     而窗口只是排期删除，视图还活着 —— 不松手就是野指针。
-    //  2) hide() 立刻不可见。deleteLater() 只是排期，窗口在那之前一直可见，
-    //     期间任何一次重绘都可能落到已经被销毁的渲染器上；隐藏后窗口不再
-    //     产生绘制事件，这一条路被彻底堵死。顺带用户点「取消」也是立刻消失，
-    //     而不是等事件循环转到删除那一步。
-    //  3) 最后才排期销毁：不能在这里直接 delete —— 本函数可能是从窗口自己的
-    //     事件处理里进来的（右键菜单的「取消看板娘」），删掉 this 等于自杀。
+    // 三步顺序不可合并：1) detachRenderer 让视图松手（控制器随即 m_renderer.reset()，
+    // 而窗口只是排期删除）；2) hide 立刻不可见（deleteLater 只是排期，期间重绘可能落
+    // 到已销毁的渲染器上）；3) 最后才排期销毁，不能直接 delete。
     m_window->detachRenderer();
     m_window->hide();
     m_window->deleteLater();
     m_window = nullptr;
 }
 
-// 把已装载的窗口显示出来。**只有 start() 会调到这里**：2026-09-19 删掉「暂时
-// 隐藏」后，「先藏起来、以后再现出来」这条来回路径整个没有了，本函数只剩
-// 「软件渲染后端启动的最后一步」这一个用途(GL 后端在等上下文时就已经 show 过)。
+// 把已装载的窗口显示出来。只有 start() 会调到这里，用途是「软件渲染后端启动的最后
+// 一步」（GL 后端等上下文时已经 show 过）。
 void KanbanController::showWindow()
 {
     if (!m_window) {
         return;
     }
     m_window->show();
-    // show 期间时钟是停的(不可见即停)，这里按当前状态恢复。
-    // 挂起中例外：锁屏/熄屏时把窗口显示出来并不等于有人看得见，
-    // 起帧这件事交给心跳判定「挂起原因解除」的那一拍。
+    // show 期间时钟是停的，这里按当前状态恢复；挂起中例外 —— 起帧交给心跳判定
+    // 「挂起原因解除」的那一拍。
     if (!m_machine.isPaused() && m_machine.isRunning() && m_suspendReasons == 0) {
         m_clock->start();
     }
@@ -545,16 +509,6 @@ void KanbanController::showWindow()
     }
 }
 
-// 曾有一个 hideWindow()：把窗口藏起来但保持已装载与「运行中」的语义，由右键
-// 菜单的「暂时隐藏」触发。2026-09-19 连同菜单项一起删除 —— 它没有对应的恢复
-// 入口(见 showWindow 的说明)，用户点了就再也叫不回来。窗口要消失就整个停掉，
-// 走 stop()。注意 stop() 里的 destroyWindow() 已经承担了「立刻 hide 掉」的职责，
-// 别再以「收口时也要隐藏」为由把 hideWindow 加回来。
-
-// 曾有一个 applyMainWindowVisible(bool)：主窗口隐藏时把看板娘冻住、显示时解冻。
-// 2026-09-17 按用户要求连同「主界面隐藏时暂停动画」勾选框一起删除 —— 主界面收进托盘时
-// 看板娘还露在桌面上，冻住它只会看起来像坏了。顺带也去掉了「显示主窗口就把暂停解除」
-// 这条：暂停现在只能由用户自己发起，不该被窗口的可见性悄悄改掉。
 
 void KanbanController::shutdownForExit()
 {
@@ -591,7 +545,6 @@ void KanbanController::publishState()
     emit backendChanged(m_backendName);
 }
 
-// —— 挂起(锁屏 / 熄屏) ——
 
 void KanbanController::setMonitorOn(bool on)
 {
@@ -599,7 +552,7 @@ void KanbanController::setMonitorOn(bool on)
         return;
     }
     m_monitorOn = on;
-    // 不等下一拍心跳：电源广播本身就是准确时刻，立刻判一次。
+    // 不等下一拍心跳：电源广播本身就是准确时刻。
     evaluateSuspend();
 }
 
@@ -612,10 +565,8 @@ qint64 KanbanController::suspendReleaseThresholdMs()
     return kSuspendReleaseHiddenMs;
 }
 
-// 只喂一个假的「看不见」信号，被测的仍是它下游那一整条链：停帧 → 数到阈值 →
-// 释放模型与纹理 → 信号消失后重新装载。之所以要它：锁屏要人回来输密码，
-// 没人能在无人值守的测量脚本里替你解锁，而这条链唯一的实测证据只能在释放
-// 之后才有意义。传感器本身(锁屏/电源广播)另有实测记录，不在这里的射程内。
+// 只喂一个假的「看不见」信号，被测的仍是下游整条链：停帧 → 数到阈值 → 释放模型与
+// 纹理 → 信号消失后重新装载。锁屏需人工解锁，无人值守脚本只能这样实测。
 int KanbanController::fakeSuspendReasons()
 {
     static const int windowMs = qEnvironmentVariableIntValue("YUMEIREN_KANBAN_FAKE_SUSPEND_MS");
@@ -630,8 +581,7 @@ int KanbanController::fakeSuspendReasons()
 
 void KanbanController::evaluateSuspend()
 {
-    // Starting 期间不插手：那条路径自己会起时钟，这里停它一下就是把状态机
-    // 吊在半路上，而它正是「点了启动却没反应」的成因。
+    // Starting 期间不插手：那条路径自己会起时钟，停它会把状态机吊在半路。
     if (!m_machine.isRunning() || m_machine.is(State::Starting)) {
         return;
     }
@@ -663,8 +613,7 @@ void KanbanController::evaluateSuspend()
         return;
     }
 
-    // 原因已清零。既没挂起过也没释放过 = 什么都没发生，直接返回，
-    // 这条心跳在正常使用时是纯只读的。
+    // 既没挂起过也没释放过 = 什么都没发生；正常使用时这条心跳是纯只读的。
     if (!wasSuspended && !m_releasedForSuspend) {
         return;
     }
@@ -685,8 +634,7 @@ void KanbanController::releaseForSuspend()
     if (!m_renderer) {
         return;
     }
-    // 只拆模型与纹理，不拆渲染器与窗口：前者才是几百 MB 的那一笔，后者要重建
-    // 得等 Qt 重新给上下文，代价大得多且会留下「桌面上一个空白小窗」。
+    // 只拆模型与纹理，不拆渲染器与窗口：前者才是几百 MB 的那一笔。
     m_renderer->unloadModel();
     m_releasedForSuspend = true;
     videodiag::log(videodiag::Level::Info,
@@ -700,9 +648,8 @@ void KanbanController::releaseForSuspend()
 
 void KanbanController::restoreFromSuspend()
 {
-    // 走 initializeAndLoad 而不是只补一次 loadModel：挂起期间窗口可能被移动、
-    // 缩放甚至换过 DPI，纹理上限要按**当下**的绘制面重算 —— 这条正是启动时
-    // 走的那条路，装载失败也按同一种方式处理(记日志，画不出人但不再崩)。
+    // 走 initializeAndLoad 而非只补 loadModel：挂起期间 DPI/尺寸可能变，纹理上限要
+    // 按**当下**的绘制面重算。
     initializeAndLoad();
 }
 

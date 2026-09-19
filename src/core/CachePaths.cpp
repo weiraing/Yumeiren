@@ -11,7 +11,6 @@ namespace {
 // 只有 ".cache" 这一个目录名允许出现在这里：业务代码一律通过 CachePaths 取路径。
 constexpr char kCacheDirName[] = ".cache";
 
-// 只创建确实会被写入的子目录，不预留空目录。
 const QStringList &subDirNames()
 {
     static const QStringList dirs = {
@@ -29,14 +28,14 @@ QString probeFileName()
     return QStringLiteral("writetest-%1.tmp").arg(QCoreApplication::applicationPid());
 }
 
-// 绝对化 + 统一分隔符；QFileInfo::absoluteFilePath() 顺带折叠 "." 和多余分隔符。
+// 绝对化 + 统一分隔符。
 QString lexicalAbsolute(const QString &path)
 {
     return QDir::fromNativeSeparators(QFileInfo(path).absoluteFilePath());
 }
 
-// 解析路径中已存在的最深祖先(展开符号链接/junction)，尚未生成的尾部原样接回，
-// 顺带消掉 ".."。这样对还没创建的缓存文件也能做可靠的越界判断。
+// 解析已存在的最深祖先(展开符号链接/junction)，尾部原样接回并消掉 ".."：
+// 对还没创建的缓存文件也能做可靠的越界判断。
 QString resolvedPath(const QString &path)
 {
     QString current = lexicalAbsolute(path);
@@ -59,7 +58,6 @@ QString resolvedPath(const QString &path)
 
 bool isInside(const QString &parent, const QString &path)
 {
-    // Windows 路径不区分大小写；分隔符已在 resolvedPath 内统一为 '/'。
     const QString p = QDir::cleanPath(parent);
     const QString f = QDir::cleanPath(path);
     if (p.compare(f, Qt::CaseInsensitive) == 0)
@@ -116,7 +114,7 @@ bool CachePaths::ensureDirectories(QString *errorMessage)
             *errorMessage = QStringLiteral("无法创建缓存目录：%1").arg(root());
         return false;
     }
-    // .cache 被 junction/符号链接指到程序目录之外时，写入同样会跑出去：判失败。
+    // .cache 被 junction/符号链接指到程序目录之外时写入同样会跑出去：判失败。
     if (!isInsideProgramDir(rootDir.canonicalPath())) {
         if (errorMessage)
             *errorMessage = QStringLiteral("缓存目录 %1 指向程序目录之外，已拒绝写入。").arg(root());
@@ -146,7 +144,6 @@ bool CachePaths::isWritable(QString *errorMessage)
     if (!ensureDirectories(errorMessage))
         return false;
 
-    // 直接在根目录写探针，不再依赖 temp 子目录
     const QString probe = QDir(root()).filePath(probeFileName());
     QFile file(probe);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
@@ -159,7 +156,7 @@ bool CachePaths::isWritable(QString *errorMessage)
     }
     file.write("ok");
     file.close();
-    // 探针用完即删；删不掉只是留下一个几字节的临时文件，不代表不可写。
+    // 探针用完即删；删不掉只留下几字节临时文件，不代表不可写。
     file.remove();
     return true;
 }

@@ -119,7 +119,6 @@ bool CubismModelImpl::setup(const QString &modelJsonPath, QString *outError)
         return false;
     }
 
-    // 2) 表情
     const csmInt32 expressionCount = m_setting->GetExpressionCount();
     for (csmInt32 i = 0; i < expressionCount; ++i) {
         const csmString name = m_setting->GetExpressionName(i);
@@ -142,7 +141,6 @@ bool CubismModelImpl::setup(const QString &modelJsonPath, QString *outError)
         _updateScheduler.AddUpdatableList(CSM_NEW CubismExpressionUpdater(*_expressionManager));
     }
 
-    // 3) 物理摆动
     if (const csmChar *physicsFile = m_setting->GetPhysicsFileName(); physicsFile && *physicsFile) {
         QByteArray buffer;
         if (readFile(relativeToHome(physicsFile), &buffer, nullptr)) {
@@ -153,7 +151,6 @@ bool CubismModelImpl::setup(const QString &modelJsonPath, QString *outError)
         }
     }
 
-    // 4) 姿态(-parts 二选一)
     if (const csmChar *poseFile = m_setting->GetPoseFileName(); poseFile && *poseFile) {
         QByteArray buffer;
         if (readFile(relativeToHome(poseFile), &buffer, nullptr)) {
@@ -164,7 +161,6 @@ bool CubismModelImpl::setup(const QString &modelJsonPath, QString *outError)
         }
     }
 
-    // 5) 眨眼
     if (m_setting->GetEyeBlinkParameterCount() > 0) {
         _eyeBlink = CubismEyeBlink::Create(m_setting);
         if (_eyeBlink) {
@@ -172,7 +168,6 @@ bool CubismModelImpl::setup(const QString &modelJsonPath, QString *outError)
         }
     }
 
-    // 呼吸参数沿用官方示例。
     _breath = CubismBreath::Create();
     {
         CubismIdHandle idBreath = CubismFramework::GetIdManager()->GetId(ParamBreath);
@@ -186,7 +181,6 @@ bool CubismModelImpl::setup(const QString &modelJsonPath, QString *outError)
         _updateScheduler.AddUpdatableList(CSM_NEW CubismBreathUpdater(*_breath));
     }
 
-    // 7) 用户数据(运动事件里按名取用，缺了不致命)
     if (const csmChar *userDataFile = m_setting->GetUserDataFile(); userDataFile && *userDataFile) {
         QByteArray buffer;
         if (readFile(relativeToHome(userDataFile), &buffer, nullptr)) {
@@ -194,7 +188,7 @@ bool CubismModelImpl::setup(const QString &modelJsonPath, QString *outError)
         }
     }
 
-    // 8) 让运动知道哪些参数归眨眼/口型接管，避免运动轨迹把它们按回原位
+    // 让运动知道哪些参数归眨眼/口型接管，避免轨迹把它们按回原位。
     for (csmInt32 i = 0; i < m_setting->GetEyeBlinkParameterCount(); ++i) {
         m_eyeBlinkIds.PushBack(m_setting->GetEyeBlinkParameterId(i));
     }
@@ -202,7 +196,6 @@ bool CubismModelImpl::setup(const QString &modelJsonPath, QString *outError)
         m_lipSyncIds.PushBack(m_setting->GetLipSyncParameterId(i));
     }
 
-    // 9) 看向(头/眼跟随鼠标)：把 2D 拖动量映射回旋转参数
     _look = CubismLook::Create();
     {
         csmVector<CubismLook::LookParameterData> lookParameters;
@@ -216,22 +209,20 @@ bool CubismModelImpl::setup(const QString &modelJsonPath, QString *outError)
         _updateScheduler.AddUpdatableList(CSM_NEW CubismLookUpdater(*_look, *_dragManager));
     }
 
-    // 登记完毕后统一排序，保证看向等更新器在运动之后执行。
     _updateScheduler.SortUpdatableList();
 
-    // 10) 布局(model3.json 的 Layout 可以改宽度和锚点)
     csmMap<csmString, csmFloat32> layout;
     m_setting->GetLayoutMap(layout);
     _modelMatrix->SetupFromLayout(layout);
     _model->SaveParameters();
 
-    // 11) 纹理校验(不解出位图)：丢图、坏图要在装载这一步就报出来。
-    //     真正的解码放在 ensureGl，因为上限取决于绘制面尺寸，而那时才拿得到。
+    // 纹理校验(不解位图)：丢图/坏图要在装载这步报出来。真正解码放在 ensureGl，
+    // 因为上限取决于绘制面尺寸。
     if (!validateTextures(outError)) {
         return false;
     }
 
-    // 12) 运动全部预载：看板娘会频繁触发动作，边点边读盘会有明显卡顿
+    // 运动全部预载：边点边读盘会有明显卡顿。
     const csmInt32 groupCount = m_setting->GetMotionGroupCount();
     QVector<QVector<int>> loadedPerGroup; // 与 m_motionGroups 同序
     for (csmInt32 i = 0; i < groupCount; ++i) {
@@ -332,22 +323,15 @@ bool CubismModelImpl::decodeTextures(int windowMaxDim, QString *outError)
             continue;
         }
         QImageReader reader(path);
-        // 最终上限要同时看「窗口够用值」和「素材自身尺寸」—— 后者才是关键：
-        // 一张 16384×8192 的打包图集压到窗口够用值(1024)就是 1/16，整只角色糊掉。
-        // 判定只用 reader.size()(读文件头)，不必先解码。
+        // 上限要同时看「窗口够用值」与「素材自身尺寸」，后者才是关键：16384×8192 的打包
+        // 图集压到窗口够用值(1024) 就是 1/16，整只角色糊掉。判定只用 reader.size()。
         const int maxDim = textureMaxDimFor(windowMaxDim, reader.size());
-        // 解码缩放比例在这里定下：全尺寸位图只在 scaled 之前短暂存在，留下的
-        // 和上传的都是限幅后的那一份。0 = 原尺寸(策略关掉或绘制面未知)。
-        //
-        // 顺带处理「图太大、撞上 Qt 全局分配上限」的情况 —— 见 kanban/ImageDecode.h，
-        // 那里记着 16384x8192 图集被静默拒绝的教训。
+        // 全尺寸位图只在 scaled 之前短暂存在，0 = 原尺寸；顺带处理「图太大撞上 Qt 全局
+        // 分配上限」，详见 kanban/ImageDecode.h。
         QImage image = readImageDownscaled(reader, maxDim);
         if (image.isNull()) {
-            // 记住失败原因：ensureGl 由 30fps 的时钟驱动，逐帧重试会变成每帧
-            // 读盘 + 解码一次的风暴。
-            //
-            // 带上 Qt 自己的错误串：只说「不是 PNG 或已损坏」会把「超过分配上限」
-            // 也归到「文件坏了」里去，方向就查歪了。
+            // 记住失败原因(ensureGl 由 30fps 时钟驱动，逐帧重试会变成读盘+解码风暴)，
+            // 并带上 Qt 错误串 —— 否则「超过分配上限」会被误判成「文件坏了」。
             const QString why = reader.errorString();
             m_decodeError = QStringLiteral("%1 解码失败：%2")
                                 .arg(QFileInfo(path).fileName(),
@@ -357,7 +341,7 @@ bool CubismModelImpl::decodeTextures(int windowMaxDim, QString *outError)
             }
             return false;
         }
-        // 统一成「预乘 alpha 的 RGBA8」：GL 侧格式固定，边缘也不会有半透明的白边。
+        // 预乘 alpha 的 RGBA8：GL 侧格式固定，边缘也不会有半透明白边。
         m_textureImages << image.convertToFormat(QImage::Format_RGBA8888_Premultiplied);
     }
     m_decodeError.clear();
@@ -399,7 +383,7 @@ QVector<int> CubismModelImpl::preloadMotionGroup(const QString &group)
 
 void CubismModelImpl::releaseCpu()
 {
-    // 队列不拥有预载动作，先清除引用，再释放动作对象。
+    // 队列不拥有预载动作，先清除引用再释放动作对象。
     _motionManager->StopAllMotions();
     _expressionManager->StopAllMotions();
     // csmMap::Clear 不释放指针指向的对象。
@@ -423,7 +407,7 @@ void CubismModelImpl::releaseCpu()
     m_expressionNames.clear();
     m_expressions.Clear();
 
-    // 这几个裸指针基类析构也会删，先置空就是防止二次释放。
+    // 这几个裸指针基类析构也会删，先置空防止二次释放。
     if (_eyeBlink) {
         CubismEyeBlink::Delete(_eyeBlink);
         _eyeBlink = nullptr;

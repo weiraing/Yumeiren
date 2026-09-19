@@ -17,7 +17,7 @@ public:
     explicit KanbanAnimationClock(QObject *parent = nullptr);
     ~KanbanAnimationClock() override;
 
-    // 目标帧率(10..60)。运行中改帧率会立即生效，不重启定时器。
+    // 目标帧率(10..60)；运行中改帧率立即生效，不重启定时器。
     void setTargetFps(int fps);
     int targetFps() const { return m_targetFps; }
 
@@ -25,7 +25,7 @@ public:
     void stop();
     bool isRunning() const { return m_running; }
 
-    // 实测帧率统计(诊断面板用；不驱动任何逻辑)。
+    // 实测帧率统计(诊断面板用，不驱动任何逻辑)。
     double measuredFps() const { return m_measuredFps; }
 
 signals:

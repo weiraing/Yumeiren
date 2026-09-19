@@ -30,8 +30,7 @@ void applyLevels(QImage &img, double brightness, double contrast)
     }
 }
 
-// Separable box blur, 3 passes ~= gaussian. Operates on RGB only, so the
-// transparency of figures/stickers is preserved.
+// 可分离 box blur，3 遍近似高斯；只模糊 RGB，保留人物/贴纸的透明度。
 void boxBlur(QImage &img, int radius)
 {
     if (radius < 1 || img.isNull())
@@ -58,7 +57,6 @@ void boxBlur(QImage &img, int radius)
     }
 
     for (int pass = 0; pass < passes; ++pass) {
-        // horizontal
         for (int y = 0; y < h; ++y) {
             size_t row = size_t(y) * w;
             for (int c = 0; c < 4; ++c) {
@@ -74,7 +72,6 @@ void boxBlur(QImage &img, int radius)
                 }
             }
         }
-        // vertical
         for (int x = 0; x < w; ++x) {
             for (int c = 0; c < 4; ++c) {
                 int sum = 0;
@@ -139,7 +136,6 @@ QImage ImageProcess::mockExplorerPreview(const QImage &processed, const QSize &n
                                          qreal canvasDpr, const QSize &realWindowSize,
                                          bool darkMode)
 {
-    // 下限取小一点，避免预览框缩小时被强行撑变形(宽高比由调用方锁定为桌面比例)。
     const int W = qMax(160, canvasSize.width());
     const int H = qMax(90, canvasSize.height());
     const qreal dpr = canvasDpr > 0 ? canvasDpr : 1.0;
@@ -160,11 +156,9 @@ QImage ImageProcess::mockExplorerPreview(const QImage &processed, const QSize &n
 
     canvas.fill(toolbarBg);
 
-    // Scale factor: all UI chrome scales proportionally so the mock explorer
-    // content stays fully visible at any canvas size (ref width = 800 px).
+    // 参照宽 800px：所有 UI 装饰按比例缩放，任何画布尺寸下模拟内容都完整可见。
     const qreal s = qMax(0.4, qMin(2.0, W / 800.0));
 
-    // Toolbar: nav dots + address pill
     const int toolH = qRound(36 * s);
     const int navY  = qRound(9 * s);
     const int navS  = qRound(18 * s);
@@ -194,7 +188,6 @@ QImage ImageProcess::mockExplorerPreview(const QImage &processed, const QSize &n
     p.setPen(barLine);
     p.drawLine(0, toolH, W, toolH);
 
-    // Command bar
     const int cmdH = qRound(26 * s);
     p.setPen(textCol);
     p.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), qMax(5, qRound(7.5 * s))));
@@ -267,8 +260,8 @@ QImage ImageProcess::mockExplorerPreview(const QImage &processed, const QSize &n
     const int sideIconH = qRound(12 * s);
     const int sideTxtX  = sideIconX + sideIconW + qRound(8 * s);
     p.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), qMax(5, qRound(7.5 * s))));
-    // 字号有 5pt 下限，小画布下文字并不是按 s 等比缩小的，所以侧栏的宽度、
-    // 行高都改用真实字体度量，「主文件夹」才不会被分割线切掉。
+    // 字号有 5pt 下限，小画布下文字不按 s 等比缩小，故侧栏宽度与行高改用真实
+    // 字体度量，否则「主文件夹」会被分割线切掉。
     const QFontMetrics sideFm(p.font());
     int sideLabelW = 0;
     for (const QString &it : items)
@@ -308,7 +301,6 @@ QImage ImageProcess::mockExplorerPreview(const QImage &processed, const QSize &n
     const int folderH = qMax(6, qRound(folderW / 1.38));
     const int tabH    = qMax(2, qRound(folderH * 0.24));
     const int tabW    = qMax(3, qRound(folderW * 0.46));
-    // 文件名字号只取图标高度的约三成，用像素字号锁定，不跟着字号下限一起膨胀。
     QFont nameFont = p.font();
     nameFont.setPixelSize(qBound(6, qRound(folderH * 0.28), 11));
     p.setFont(nameFont);
@@ -336,7 +328,6 @@ QImage ImageProcess::mockExplorerPreview(const QImage &processed, const QSize &n
         }
     }
 
-    // 底部状态栏：项目数 + 视图切换按钮，补住窗口最下方那条空白。
     p.setPen(QPen(barLine, 1));
     p.setBrush(Qt::NoBrush);
     p.drawLine(0, contentBottom, W, contentBottom);

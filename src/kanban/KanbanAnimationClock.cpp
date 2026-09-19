@@ -5,15 +5,15 @@
 
 namespace kanban {
 
-// delta 上限：切窗口/系统睡眠后第一帧的实测间隔可能有几十秒，
-// 直接喂给动画参数会让呼吸和动作瞬间跳完，观感是「闪一下」。
+// delta 上限：切窗口/系统睡眠后第一帧的实测间隔可能有几十秒，直接喂给动画参数
+// 会让呼吸和动作瞬间跳完，观感是「闪一下」。
 constexpr float kMaxDeltaSeconds = 0.1f;
 
 KanbanAnimationClock::KanbanAnimationClock(QObject *parent) : QObject(parent)
 {
     m_timer = new QTimer(this);
-    // CoarseTimer：让系统把我们的 tick 与它自己的唤醒合并，省电；
-    // 动画只要求「每秒约 30 次」，不要求精确到毫秒。
+    // CoarseTimer：让系统把 tick 与它自己的唤醒合并以省电；动画只要求「每秒约
+    // 30 次」，不要求精确到毫秒。
     m_timer->setTimerType(Qt::CoarseTimer);
     connect(m_timer, &QTimer::timeout, this, &KanbanAnimationClock::onTimeout);
 }

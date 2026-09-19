@@ -18,7 +18,7 @@ namespace {
 constexpr int kMaxDepth = 4; // 模型目录最多向下找 4 层，避免误指向盘根时全树遍历
 
 // 分隔符统一为平台本地形式。等价于 QDir::fromSeparators()，但那个 API 要 Qt 6.9+，
-// 本仓库锁定的 Qt 版本没有，只能自己写；行为按 Qt 文档对齐(只替换 '/'，不动 "//" 前缀)。
+// 本仓库锁定的 Qt 版本没有；行为按 Qt 文档对齐(只替换 '/'，不动 "//" 前缀)。
 QString toNative(const QString &path)
 {
     if (QDir::separator() == QLatin1Char('/'))
@@ -33,8 +33,8 @@ QString normalized(const QString &path)
     return toNative(QDir(path).absolutePath());
 }
 
-// cubism 的 FileReferences 里路径用 '/'，Windows 上 Qt 两种分隔符都吃，
-// 但比较与拼绝对路径前先统一，避免 "textures/a.png" 与 "textures\\a.png" 判成两个。
+// cubism 的 FileReferences 里路径用 '/'，统一后再比较与拼绝对路径，避免
+// "textures/a.png" 与 "textures\\a.png" 判成两个。
 QString resolve(const QString &baseDir, const QString &relative)
 {
     return QDir(baseDir).absoluteFilePath(toNative(relative));
@@ -93,8 +93,8 @@ bool KanbanModelManager::validateModelJson(const QString &jsonPath, ModelInfo *o
     // .moc3 是 Cubism 3/4 模型的必需件；.moc(旧 Cubism 2)不支持，明确报出来。
     const QString moc = refs.value(QStringLiteral("Moc")).toString();
     if (moc.isEmpty()) {
-        // Cubism 2 的 .model.json 才用 "moc" 字段名，这里顺手把它认出来，
-        // 给用户一个可理解的报错，而不是含糊的「缺文件」。
+        // Cubism 2 的 .model.json 才用 "moc" 字段名，顺手认出来给一个可理解的报错，
+        // 而不是含糊的「缺文件」。
         const QString legacy = root.value(QStringLiteral("moc")).toString();
         out->problems << (legacy.isEmpty()
                               ? QStringLiteral("FileReferences.Moc 为空")
@@ -237,8 +237,8 @@ int KanbanModelManager::successorIndexAfterRemoval(int removedIndex, int remaini
 {
     if (remainingCount <= 0)
         return 0; // 调用方负责判空，这里只保证不越界
-    // 删掉第 i 个之后，原来的第 i+1 个补到了第 i 位 —— 所以只要 i 还在新列表的
-    // 范围内，下标 i 指的就是「下一个」。i 越界说明删的是最后一个，绕回第一个。
+    // 删掉第 i 个后原来的第 i+1 个补到第 i 位，故 i 在新列表范围内时指的就是「下一个」；
+    // i 越界说明删的是最后一个，绕回第一个。
     if (removedIndex >= 0 && removedIndex < remainingCount)
         return removedIndex;
     return 0;

@@ -22,7 +22,6 @@
 
 namespace {
 
-// 托盘菜单二级项的分组标题(§7.2 的「动态壁纸 >」「看板娘 >」)。
 QMenu *addSubmenu(QMenu *parent, const QString &title)
 {
     auto *sub = parent->addMenu(title);
@@ -69,7 +68,7 @@ bool SystemTrayController::initialize()
         return false;
     }
 
-    // §7.8 先探测再创建：不可用时只降级，不阻止启动，也不留空指针。
+    // 先探测再创建：不可用时只降级，不阻止启动。
     if (!QSystemTrayIcon::isSystemTrayAvailable()) {
         videodiag::log(videodiag::Level::Warning,
                        QStringLiteral("托盘: 系统托盘不可用，主窗口关闭将按正常退出处理"),
@@ -92,8 +91,7 @@ bool SystemTrayController::initialize()
     videodiag::log(videodiag::Level::Info, QStringLiteral("托盘: 已就绪(常驻显示)"),
                    QStringLiteral("Tray"));
 
-    // 后台状态一变，托盘菜单项同步刷新(单一订阅点，别处不直连菜单)。
-    // 2026-09-17 起可见性不再跟着后台状态走，但菜单文字与 tooltip 还要它。
+    // 单一订阅点：后台状态变化时刷菜单文字与 tooltip。
     connect(&ApplicationRuntimeState::instance(), &ApplicationRuntimeState::stateChanged, this,
             &SystemTrayController::updateRuntimeState);
 
@@ -104,24 +102,11 @@ bool SystemTrayController::initialize()
 void SystemTrayController::buildContextMenu()
 {
     m_contextMenu = new QMenu(nullptr);
-    // 菜单外框的收口不在这里做：外框改成直角后不再需要给窗口裁 region
-    // (为什么要放弃圆角见 resources/*.qss 里 QMenu 那段注释 —— region 遮罩是
-    // 1 位 alpha，圆角必然是硬台阶)。一二级菜单现在共用同一套 QSS 规则，
-    // 样式天然一致，不会再有「一级圆角、二级方角」。
-    // 状态在展开瞬间现读，避免「菜单显示的是三秒前的状态」。
+
     connect(m_contextMenu, &QMenu::aboutToShow, this, &SystemTrayController::updateMenuState);
 
-    // 菜单第一项原本是「显示窗口」，2026-09-18 按用户要求撤掉：左键单击托盘图标
-    // 就会把主窗口叫出来（见 onTrayActivated 的 Trigger/DoubleClick），再留一项
-    // 只是重复。**showMainWindow() 与 showMainWindowRequested 必须留着**，
-    // 左键与双击两条路都还在用。
-    // 注意别顺手补一条前导分隔线：菜单首行画一条横线是坏的观感。
-
     QMenu *wallMenu = addSubmenu(m_contextMenu, QStringLiteral("动态壁纸"));
-    // 「启动 / 取消」是一项双态开关，与动态壁纸页那颗「▶ 启动 / ■ 取消」按钮
-    // **同一条判据、同一组副作用**：启动失败要留日志，成功要回写 WasPlaying
-    // —— 少了这次回写，从托盘启动的壁纸下次开机不会自动恢复(启动时的自动恢复
-    // 就是读这个键，见 MainWindow.cpp 里 earlyWasPlaying 那段)。
+
     m_actWallToggle = addEntry(wallMenu, QStringLiteral("启动 / 取消"), [] {
         VideoWallpaper &wall = VideoWallpaper::instance();
         if (wall.isStarted()) {
@@ -145,16 +130,13 @@ void SystemTrayController::buildContextMenu()
         VideoWallpaper &wall = VideoWallpaper::instance();
         if (!wall.isStarted() || wall.playlist().isEmpty())
             return; // 无列表或已停止：安全返回，不新建播放器
-        // nextTrack() 是内部实现(含自动切歌语义)，托盘只做「按列表顺序环移」。
+        // nextTrack() 含自动切歌语义，托盘只做「按列表顺序环移」。
         const int next = (wall.currentIndex() + 1) % wall.playlist().size();
         wall.switchToTrack(next);
     });
 
     QMenu *kanbanMenu = addSubmenu(m_contextMenu, QStringLiteral("看板娘"));
-    // 同看板娘页的「▶ 启动 / ■ 取消」按钮：判据只看 isRunning()。
-    // Error 态也算 running(状态机把它归在 running 集合里)，所以「出错时点一下
-    // 是收口而不是重试」这条与页面一致 —— 页面上那句 `|| state()==Error`
-    // 在这里是冗余的，写了反而容易让人以为 Error 不属于 running。
+
     m_actKanbanToggle = addEntry(kanbanMenu, QStringLiteral("启动 / 取消"), [this] {
         if (!m_kanban)
             return;
@@ -179,12 +161,7 @@ void SystemTrayController::buildContextMenu()
         if (m_kanban)
             m_kanban->playNext();
     });
-    // 视线追踪四档：做成子菜单而不是一个可勾选项 —— 四档是互斥的单选语义，
-    // 挨在「看板娘」下面平铺四个菜单项会让主菜单变长且看不出互斥关系。
-    //
-    // 每项都用 setCheckable + 手动回读勾选态(见 updateMenuState)：QAction 的
-    // checkable 在子菜单里不会自动互斥，所以「唯一被勾选」这件事必须由回读保证，
-    // 权威状态在控制器那边。
+
     QMenu *gazeMenu = addSubmenu(kanbanMenu, QStringLiteral("视线追踪"));
     auto addGazeEntry = [this, gazeMenu](int strength) {
         auto *act = gazeMenu->addAction(kanban::KanbanRenderer::gazeStrengthName(strength));
@@ -219,8 +196,7 @@ void SystemTrayController::updateMenuState()
 
     const bool wallStarted = wall.isStarted();
     const bool wallHasList = !wall.playlist().isEmpty();
-    // 双态开关的可用性 = 页面 updateVideoButtons() 的 `setEnabled(!empty || started)`：
-    // 只有「没列表可播且当前没在跑」才真的没得切；在跑的时候必须可点，否则取消不掉。
+
     m_actWallToggle->setEnabled(wallStarted || wallHasList);
     m_actWallPause->setEnabled(wallStarted);
     m_actWallNext->setEnabled(wallStarted && wall.playlist().size() > 1);
@@ -228,18 +204,16 @@ void SystemTrayController::updateMenuState()
                                                   : QStringLiteral("暂停"));
 
     const bool kanbanRunning = m_kanban && m_kanban->isRunning();
-    // 同页面 updateKanbanControls()：唯一该置灰的是 Stopping 那一瞬 ——
-    // 窗口与渲染器正在拆，此时再点一次既没有可撤销的对象，也会撞上
-    // Starting->Stopping 之外的非法转移。Running 与 Error 都必须可点。
+    // 同页面 updateKanbanControls()：唯一该置灰的是 Stopping 那一瞬——窗口与渲染器
+    // 正在拆，再点一次会撞上非法状态转移。
     const bool kanbanStopping =
         m_kanban && m_kanban->state() == kanban::State::Stopping;
     m_actKanbanToggle->setEnabled(m_kanban && !kanbanStopping);
     m_actKanbanPause->setEnabled(kanbanRunning);
-    // 「播放下一个」跟随渲染器的可播动作数置灰：菜单项点了没反应，
-    // 和灰掉一样让人怀疑程序坏了，但灰掉至少不骗人。
+    // 跟随渲染器的可播动作数置灰：点了没反应比灰掉更让人怀疑程序坏了。
     m_actKanbanNext->setEnabled(kanbanRunning && m_kanban->canPlayNextMotion());
-    // 四档开关不禁用：看板娘没跑时也可以先把偏好定下来，下次启动生效。
-    // 但没注入控制器时无从读回状态，此时整组灰掉更诚实。
+    // 四档开关不禁用：没跑时也能先定偏好，下次启动生效；但没注入控制器时无从
+    // 读回状态，此时整组灰掉更诚实。
     {
         const bool gazeKnown = m_kanban != nullptr;
         QAction *gazeActs[] = {m_actGazeOff, m_actGazeWeak, m_actGazeMedium, m_actGazeStrong};
@@ -247,8 +221,7 @@ void SystemTrayController::updateMenuState()
                                      kanban::KanbanRenderer::GazeWeak,
                                      kanban::KanbanRenderer::GazeMedium,
                                      kanban::KanbanRenderer::GazeStrong};
-        // 当前档位只读一次：这一组里必须恰好有一项被勾上，逐项各读一次
-        // 万一中途被别的入口改掉，会出现两项同时勾选或一项都没勾。
+        // 当前档位只读一次：逐项各读一次的话，中途被改掉会出现两项同时勾选或都没勾。
         const int current = gazeKnown ? m_kanban->gazeStrength() : -1;
         for (int i = 0; i < 4; ++i) {
             gazeActs[i]->setEnabled(gazeKnown);
@@ -278,9 +251,7 @@ void SystemTrayController::updateRuntimeState()
     if (!m_available)
         return;
 
-    // 托盘常驻（2026-09-17 按用户要求撤掉「仅在后台任务运行时显示托盘」勾选框）：
-    // 有没有后台任务在跑都显示托盘，用户随时能从这里启停壁纸/看板娘。
-    // 仍保留这个函数与它的信号连接 —— 下面还要刷菜单文字与 tooltip。
+    // 托盘常驻(有没有后台任务都显示)，用户随时能从这里启停壁纸/看板娘。
     showTray();
     updateMenuState();
 }
@@ -322,42 +293,22 @@ void SystemTrayController::onTrayActivated(QSystemTrayIcon::ActivationReason rea
     switch (reason) {
     case QSystemTrayIcon::Trigger:
     case QSystemTrayIcon::DoubleClick:
-        // 左键单击与双击都显示窗口。Windows 上单击图标不会弹出关联菜单
-        // (那是右键的 Context)，所以这个手势是空的，正好给「打开主界面」用 ——
-        // 托盘图标最符合直觉的行为就是点一下把窗口叫出来。
-        //
-        // 「单击真的会走到 Trigger 吗」这点不显然，值得记一笔：Qt 的 Windows 后端
-        // 收到的不是 WM_LBUTTONUP，而是 Shell 的通知码 NIN_SELECT，winEvent() 里
-        // 它和 NIN_KEYSELECT 一起被映射成 activated(Trigger)
-        // (见 qtbase/src/plugins/platforms/windows/qwindowssystemtrayicon.cpp)。
-        // 双击则是 WM_LBUTTONDBLCLK → DoubleClick；双击的第二次 NIN_SELECT 会被
-        // Qt 用 m_ignoreNextMouseRelease 吞掉，所以一次双击总共触发
-        // Trigger + DoubleClick 两条 —— 都落到同一个幂等动作上，不会闪两次。
         showMainWindow();
         break;
     case QSystemTrayIcon::Context:
-        // Qt 会自行弹出关联菜单；这里只保证内容是最新的。
         updateMenuState();
         break;
     default:
-        break; // MiddleClick/Unknown：中键在 Windows 托盘上没有约定俗成的语义
+        break; // 中键/Unknown 在 Windows 托盘上没有约定俗成的语义
     }
 }
 
-// 托盘图标：与窗口图标、自绘标题栏左上角那枚小标共用同一份原画
-// （resources/icons/yumeiren-NN.png，多档编进 Qt 资源，见 tools/icongen/）。
-//
-// 早先这里是拿 QPainter 现画一朵红花金蕊 —— 那只是权宜之计：exe 里当时没有
-// .ico，托盘又必须在无外部文件时也能出图。现在图标成套了，托盘就跟主图标
-// 一致，不再各画各的。
 QIcon SystemTrayController::buildTrayIcon() const
 {
     const QIcon icon = appinfo::appIcon();
     if (!icon.isNull())
         return icon;
 
-    // 兜底：资源万一没编进来，至少留一个能看见的圆点，别让托盘空着。
-    // 正常构建走不到这里 —— 资源是编进 exe 的，不会缺。
     videodiag::log(videodiag::Level::Warning,
                    QStringLiteral("托盘: 图标资源缺失，退化成占位圆点"),
                    QStringLiteral("Tray"));

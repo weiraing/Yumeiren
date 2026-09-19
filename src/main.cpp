@@ -17,57 +17,38 @@
 
 int main(int argc, char *argv[])
 {
-    // 必须早于 QApplication 构造：Qt 的上屏路径(QRhiGles2)会初始化一个
-    // 「已编译着色器二进制磁盘缓存」(QOpenGLProgramBinaryCache)，而它的 load()
-    // 是**持锁做文件读写**的。只要那次读盘被卡住(权限受限、网络盘、杀软或沙箱的
-    // 文件拦截)，这把锁就永远不还，主线程随后在 QPlatformBackingStore::rhiFlush
-    // 里等它 —— 整个 GUI 线程死锁。
-    //
-    // 实测症状极具迷惑性：看板娘窗口的位置/尺寸都对、GL 上下文建起来了、纹理也
-    // 传上去了、首帧 paintGL 正常返回，然后事件循环再无任何响应，且一行错误日志
-    // 都没有。关掉磁盘缓存只是让 Qt 每次重新编译它自己那几个上屏着色器(毫秒级)，
-    // 换掉「桌面应用不该依赖磁盘缓存可写」这个隐患。
+    // 必须早于 QApplication 构造：上屏会初始化已编译着色器的磁盘缓存
+    // (QOpenGLProgramBinaryCache)，其 load() 持锁读盘；读盘一旦被卡(权限/网络盘/
+    // 杀软)，主线程就在 rhiFlush 里死等这把锁，GUI 线程整个死锁。关掉只是让 Qt
+    // 每次重编那几个上屏着色器(毫秒级)。
     qputenv("QT_DISABLE_SHADER_DISK_CACHE", QByteArrayLiteral("1"));
 
     QApplication app(argc, argv);
     QApplication::setOrganizationName(appinfo::id());
     QApplication::setApplicationName(appinfo::id());
     QApplication::setApplicationVersion(appinfo::version());
-    // 窗口图标：任务栏按钮、Alt-Tab、各对话框标题栏都取它。
-    // exe 内嵌的 .ico 管的是资源管理器/快捷方式那一侧，Qt 这边拿不到，要单独设。
-    // 必须在建任何窗口之前 —— 之后设只影响此后创建的窗口。
+    // exe 内嵌的 .ico 归资源管理器/快捷方式，Qt 拿不到；且必须在建任何窗口之前。
     QApplication::setWindowIcon(appinfo::appIcon());
 
-    // 缓存目录迁移：软件自身产生的缓存(缩略图/渲染背景图/诊断日志)统一写入
-    // <程序目录>/.cache，位置只取决于 exe 所在目录，与当前工作目录无关。
-    // 必须先于 videodiag::init()：诊断日志本身就写在 .cache/logs 下。
-    // 创建失败只报错，不回退 AppData，也不改任何其他数据的位置。
+    // 必须先于 videodiag::init()：诊断日志本身就写在 .cache/logs 下；创建失败只
+    // 报错，不回退 AppData。
     QString cacheError;
     const bool cacheReady = CachePaths::ensureDirectories(&cacheError);
 
-    // 单实例守卫：两个实例会各建一套解码管线并互抢 WorkerW 挂载点。
-    // Windows 上进程被强杀/崩溃后共享内存段会残留（引用计数无人递减），
-    // 导致之后永远"已经在运行"——attach+detach 清掉残段后重试一次即可自愈；
-    // 真有另一实例在跑时重试依旧失败，提示不变。
+    // 单实例守卫：两个实例会各建解码管线并互抢 WorkerW 挂载点。进程被强杀/崩溃后
+    // 共享内存段会残留(引用计数无人递减)，导致之后永远"已经在运行"——attach+
+    // detach 清掉残段后重试一次即可自愈。
     videodiag::init(); // 守卫阶段即可记录诊断(幂等)
     videodiag::stage(QStringLiteral("Qt 应用对象创建"));
     if (!cacheReady)
         videodiag::log(videodiag::Level::Error, cacheError, QStringLiteral("Cache"));
 
-    // —— 隐藏的「生成模型预览图」模式 ——
+    // 隐藏的「生成模型预览图」模式：由本程序**再起一个自己的进程**渲染看板娘页的
+    // 静态预览图。不能在当前进程开线程——Cubism 的着色器缓存是进程级单例，存的 GL
+    // program id 只在创建它的上下文有效。详见 src/kanban/ModelThumbJob.h。
     //
-    // 看板娘页模型格子里那张静态预览图，由本程序**再起一个自己的进程**渲染。
-    // 为什么不能在当前进程里开个线程做：Cubism 的着色器缓存是进程级单例，
-    // 存的是 GL program id，而 program id 只在创建它的上下文里有效。在第二个
-    // 上下文里渲染，要么沿用主上下文编出来的 id(glUseProgram 静默失败、出空图)，
-    // 要么为了换上下文把正在跑的看板娘的着色器一起丢掉(桌面上小人当场黑掉)。
-    // 详见 src/kanban/ModelThumbJob.h 的说明。
-    //
-    // 位置的两点讲究：
-    //   · 在单实例守卫**之前** —— 这个模式不建主窗口、不挂壁纸、不碰托盘，
-    //     也不该被「虞美人已经在运行」挡住：用户开着主程序时正是最需要它的时候。
-    //   · 在 AppConfig::load() **之前** —— 生成进程不该读、更不该写用户的配置
-    //     (load() 会做目录创建/迁移/校验)，否则开一次页面就动一次设置文件。
+    // 位置：在单实例守卫**之前**(该模式不建窗口/不挂壁纸，也不该被"已经在运行"挡住)，
+    // 且在 AppConfig::load() **之前**(生成进程不该读写用户配置)。
     if (QCoreApplication::arguments().contains(QStringLiteral("--render-model-thumbs"))) {
         QString jobError;
         const int jobExit = kanban::runModelThumbJob(QCoreApplication::arguments(), &jobError);
@@ -76,13 +57,11 @@ int main(int argc, char *argv[])
         return jobExit;
     }
 
-    AppConfig::instance().load(); // 统一配置: 主窗口创建前加载(目录创建/校验/修复)
+    AppConfig::instance().load(); // 主窗口创建前加载(含目录创建/校验/修复)
     videodiag::stage(QStringLiteral("配置加载(创建/校验/修复)"));
 
-    // 资源友好模式(默认开)：限制进程到 4 个逻辑核，且优先分属 4 个不同物理核。
-    // 解码线程数跟随 QThread::idealThreadCount(受亲和性掩码影响)，实测
-    // (32核机,1080p30)内存 -27%、显存 -36%、CPU 不变。在 QApplication 构造后
-    // 立即设置，使全部后续线程继承掩码；video/affinityLimit=false 关闭。
+    // 资源友好模式(默认开)：限到 4 个逻辑核，优先分属 4 个不同物理核。必须在
+    // QApplication 构造后立即设置，使后续线程继承掩码；video/affinityLimit=false 关。
     if (AppConfig::instance()
             .value(ConfigKeys::Video::AffinityLimit, true).toBool()) {
         if (fbswin::applyProcessAffinityLimit(4)) {
@@ -96,10 +75,9 @@ int main(int argc, char *argv[])
             QStringLiteral("App"));
     }
     if (!fbswin::acquireSingleInstanceLock()) {
-        // 已有实例在运行：直接把它的主窗口调到最前，不弹窗打断；
-        // 找不到(窗口尚未建好等罕见情形)才兜底提示。
+        // 已有实例在运行：把它的主窗口调到最前，不弹窗打断。
         QString why;
-        // 唤起偶发失败(窗口枚举/前台锁的时序竞争，实测约一次性)——重试兜底
+        // 唤起偶发失败(窗口枚举/前台锁的时序竞争)——重试兜底
         bool activated = false;
         for (int attempt = 0; attempt < 3 && !activated; ++attempt) {
             if (attempt > 0) {
@@ -138,7 +116,7 @@ int main(int argc, char *argv[])
 
     videodiag::stage(QStringLiteral("单实例守卫"));
 
-    // 阶段7 诊断日志尽早初始化(幂等)：默认 Info+，诊断模式经 YUMEIREN_DIAG=1 开启
+    // 尽早初始化(幂等)：默认 Info+，诊断模式经 YUMEIREN_DIAG=1 开启
     videodiag::init();
 
     app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
@@ -153,21 +131,17 @@ int main(int argc, char *argv[])
     w.show();
     videodiag::stage(QStringLiteral("主窗口首次显示"));
 
-    // 自动化内存实验探针(第二阶段)：loadSettings 已在 MainWindow 构造中把播放列表
-    // 写入 VideoWallpaper，此处再按 YUMEIREN_PROBE_STAGE 建立受控媒体栈状态。
-    // 正常运行不设置该环境变量，本分支不执行。
+    // 内存实验探针：按 YUMEIREN_PROBE_STAGE 建立受控媒体栈状态(正常运行不设置)。
     if (const QString probeStage = qEnvironmentVariable("YUMEIREN_PROBE_STAGE");
         !probeStage.isEmpty())
         VideoWallpaper::instance().runProbeStage(probeStage);
 
     const int exitCode = app.exec();
-    // 退出收口(崩溃修复)：必须在 QApplication 析构之前、且在 MainWindow 析构之前
-    // 主动卸载视频管线。函数内静态单例的析构由 CRT atexit 链驱动，跑在 main()
-    // 返回之后，那时 ~QApplication 已经完成，任何 QWidget 调用(经 unmountWindow
-    // → winId())都会踩进 Qt6Widgets 里 qApp==nullptr 的路径 → c0000005。
-    // 详见 docs/crash_analysis.md。
-    // 退出段不用 stage()：它的差值是"距上一次分段"的时间，会把事件循环运行
-    // 时长一起算进来，读起来像 14 秒的"卸载"。这里单独量收口本身的耗时。
+    // 必须在 QApplication 与 MainWindow 析构之前主动卸载视频管线：函数内静态单例的
+    // 析构由 CRT atexit 链驱动，跑在 main() 返回之后，那时 ~QApplication 已完成，
+    // 任何 QWidget 调用(经 unmountWindow → winId())都会踩进 qApp==nullptr →
+    // c0000005。详见 docs/crash_analysis.md。
+    // 退出段不用 stage()：其差值是距上一次分段的时间，会把事件循环时长一起算进来。
     const qint64 shutdownBegin = videodiag::elapsedMs();
     VideoWallpaper::shutdown();
     videodiag::log(videodiag::Level::Info,

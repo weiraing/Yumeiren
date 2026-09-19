@@ -135,10 +135,8 @@ void releaseCubismFileBytes(csmByte *byteData)
 
 void resetGlobalGlState()
 {
-    // 仅在缓存已存在时调用，避免 GetInstance 意外创建并编译着色器。
-    // 1. 先清除 CPU 侧记录，防止析构时向已销毁的上下文发送 glDeleteProgram。
+    // 仅在缓存已存在时调用，避免 GetInstance 意外创建并编译着色器。顺序硬要求：先清 CPU 侧记录(否则析构会向已销毁的上下文发 glDeleteProgram)，再销毁单例并重置 GL 入口。
     CubismShader_OpenGLES2::GetInstance()->ReleaseInvalidShaderProgram();
-    // 2. 再销毁单例并重置 GL 入口，下次创建渲染器时重新解析函数指针。
     CubismRenderer::StaticRelease();
 }
 
@@ -189,7 +187,7 @@ void syncShaderCache(quint64 generation)
     if (generation == 0) {
         return;
     }
-    // 着色器是进程级单例，但 program id 属于上下文；换代后必须重建。
+    // 着色器是进程级单例，但 program id 属于上下文：换代后必须重建。
     if (g_shaderCacheGeneration != 0 && g_shaderCacheGeneration != generation) {
         logInfo(QStringLiteral("GL 上下文已换代(%1 → %2)，丢弃 Cubism 着色器缓存并重建")
                     .arg(g_shaderCacheGeneration)

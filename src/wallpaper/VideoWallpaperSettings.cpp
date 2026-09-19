@@ -1,4 +1,4 @@
-// VideoWallpaper 的设置读写与配置同步（播放模式、音量、屏幕模式等）。
+// VideoWallpaper 的设置读写与配置同步(播放模式、音量、屏幕模式等)。
 #include "VideoWallpaper.h"
 
 #include "config/AppConfig.h"
@@ -39,15 +39,14 @@ void VideoWallpaper::setScreenMode(int mode)
     const int prev = m_screenMode;
     m_screenMode = qBound(0, mode, 2);
     if (m_screenMode == prev)
-        return; // 值未变时不重建：启动时 loadSettings 会对已运行的管线重复调用，
-                // 重建会短暂保留上一代窗口，平白多出一份渲染表面
+        return; // 值未变不重建：启动时 loadSettings 会对已运行的管线重复调用
     videodiag::log(videodiag::Level::Info,
         QStringLiteral("显示模式切换: %1→%2 outputs=%3")
             .arg(screenModeName(prev)).arg(screenModeName(m_screenMode))
             .arg(m_outputs.size()));
     if (!m_outputs.isEmpty()) {
         layoutOutputs();
-        // 重建后恢复播放(状态机会在全屏等挂起原因下保持暂停)
+        // 重建后恢复播放(挂起原因存在时由状态机保持暂停)
         if (m_started && !m_manualPaused && !m_playlist.isEmpty()) {
             playIndex(qMax(0, m_index));
             evaluateSuspend();
@@ -73,16 +72,16 @@ void VideoWallpaper::setMonitorOn(bool on)
 }
 int VideoWallpaper::effectiveTargetFps() const
 {
-    // 手动设置优先；用户没设过(跟随视频)时才用「素材像素高于屏幕」触发的自动值。
+    // 手动设置优先；未设置过(跟随视频)时才用自动值
     return m_targetFps > 0 ? m_targetFps : m_autoFps;
 }
 void VideoWallpaper::setTargetFps(int fps)
 {
     const int bounded = qBound(0, fps, 240);
     if (bounded == m_targetFps)
-        return; // 值未变时不重算：启动时 loadSettings 会重复回填一次
+        return; // 值未变不重算：启动时 loadSettings 会重复回填
     m_targetFps = bounded;
-    resetFramePacing(); // 换目标帧率要立刻生效，不能沿用旧节拍的下一个截止时刻
+    resetFramePacing(); // 立刻生效，不沿用旧节拍的下一个截止时刻
     for (const VideoOutput &out : std::as_const(m_outputs))
         if (isLiveOutput(out))
             applyPlaybackRate(out.player);
@@ -103,8 +102,7 @@ void VideoWallpaper::applyPlaybackRate(QMediaPlayer *player)
         return;
     double rate = 1.0;
     const int fps = effectiveTargetFps();
-    // 保速档必须恒为 1.0：限帧由 forwardFrame 丢帧完成，这里再放慢就成了两头都限，
-    // 画面既丢帧又变慢。只有慢动作档才把播放速率本身当作限帧手段。
+    // 保速档必须恒为 1.0(限帧由 forwardFrame 丢帧完成，再放慢会两头都限)；只有慢动作档才用速率限帧
     if (!m_keepSpeed && fps > 0) {
         const double src = player->metaData()
                                .value(QMediaMetaData::VideoFrameRate)
@@ -127,7 +125,7 @@ void VideoWallpaper::setVolume(int percent)
         out.audio->setMuted(!first);
         out.audio->setVolume(m_volume / 100.0);
         if (first)
-            applyAudioPolicy(out, true); // 音量归零时连音频轨一起停掉
+            applyAudioPolicy(out, true); // 音量归零时连音频轨一并停掉
         first = false;
     }
 }
@@ -156,13 +154,11 @@ void VideoWallpaper::setPlayMode(int mode)
     if (bounded == m_mode)
         return;
     m_mode = bounded;
-    // 无缝循环与列表推进的分界由循环策略决定，改模式必须对现役播放器重新断言；
-    // 列表从 1 条变成多条(或反过来)时也依赖这里把 setLoops 纠正回来。
+    // 循环策略决定无缝循环与列表推进的分界，改模式必须对现役播放器重新断言
     for (const VideoOutput &out : std::as_const(m_outputs))
         if (isLiveOutput(out))
             applyLoopPolicy(out.player);
-    // 停在"播放结束"时用户换了模式：三种模式都会继续转，立刻从当前曲目续播，
-    // 不能只改策略让桌面继续黑着/定格着(心跳的恢复分支被 m_playbackFinished 拦着)。
+    // 停在"播放结束"时换模式：三种模式都会继续转，须立刻从当前曲目续播，否则桌面继续定格
     if (m_playbackFinished && m_started && !m_playlist.isEmpty())
         playIndex(m_index >= 0 ? m_index : 0);
 }

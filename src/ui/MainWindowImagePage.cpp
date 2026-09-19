@@ -50,7 +50,6 @@ public:
         painter->setFont(opt.font);
         style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, widget);
 
-        // Reserve the footer before fitting the image, including while its icon is loading.
         const QRect card = option.rect.adjusted(4, 4, -4, -4);
         const int footerHeight = qMax(28, opt.fontMetrics.height() + 8);
         const int dividerY = card.bottom() - footerHeight;
@@ -118,7 +117,6 @@ QWidget *MainWindow::buildImagePage()
     lay->setContentsMargins(18, 16, 18, 16);
     lay->setSpacing(14);
 
-    // ---- left: preset gallery ----
     auto *leftCard = new QFrame(page);
     leftCard->setObjectName(QStringLiteral("PageCard"));
     leftCard->setMinimumWidth(350); // 保证图片浏览三列网格的空间
@@ -150,11 +148,9 @@ QWidget *MainWindow::buildImagePage()
         if (row >= 0)
             selectPreset(row);
     });
-    // 预设图库固定双栏(见 eventFilter)；预览区尺寸变化时按比例重绘
     gallery->viewport()->installEventFilter(this);
     leftLay->addWidget(gallery, 1);
 
-    // custom image buttons
     auto *folderRow = new QHBoxLayout();
     auto *folderBtn = new QPushButton(QStringLiteral("📁 选择文件夹"), leftCard);
     folderBtn->setObjectName(QStringLiteral("PrimaryButton"));
@@ -181,7 +177,6 @@ QWidget *MainWindow::buildImagePage()
 
     lay->addWidget(leftCard, 6);
 
-    // ---- right: preview + adjustments ----
     auto *rightCard = new QFrame(page);
     rightCard->setObjectName(QStringLiteral("PageCard"));
     auto *rightLay = new QVBoxLayout(rightCard);
@@ -257,7 +252,7 @@ QWidget *MainWindow::buildImagePage()
     addRow(5, QStringLiteral("转动角度"), m_rotate, m_rotateVal);
     rightLay->addLayout(grid2);
 
-    // 显示位置：3×3 方位网格 + 填充/拉伸模式(背景组件仅支持四角/居中/拉伸/填充)
+    // 背景组件仅支持四角/居中/拉伸/填充
     auto *posLabel = new QLabel(QStringLiteral("显示位置"), rightCard);
     posLabel->setObjectName(QStringLiteral("FieldLabel"));
     rightLay->addWidget(posLabel);
@@ -307,8 +302,6 @@ QWidget *MainWindow::buildImagePage()
     m_folderExt = new QCheckBox(QStringLiteral("同时应用到文件打开/保存对话框"), rightCard);
     rightLay->addWidget(m_folderExt);
 
-    // 模式行：单图 / 随机(互斥单选，默认单图)。两个单选框同属 rightCard，
-    // Qt 自动互斥，与视频壁纸页的播放模式行同一写法。
     auto *imgModeRow = new QHBoxLayout();
     imgModeRow->setSpacing(6);
     imgModeRow->addWidget(new QLabel(QStringLiteral("模式"), rightCard));
@@ -362,8 +355,7 @@ QString MainWindow::galleryThumbPath(const QString &image) const
                         QString::number(fi.lastModified().toMSecsSinceEpoch());
     const QString hash = QString::fromLatin1(
         QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Md5).toHex());
-    // v2: PNG 保留透明通道(旧 JPEG 缩略图作废)
-    // 图库缩略图缓存统一落在 <程序目录>/.cache/gallery-thumbs(见 CachePaths)。
+
     CachePaths::ensureDirectories();
     return QDir(CachePaths::galleryThumbs())
         .filePath(hash + QStringLiteral("_v2.png"));
@@ -371,8 +363,6 @@ QString MainWindow::galleryThumbPath(const QString &image) const
 
 void MainWindow::rebuildGallery()
 {
-    // 图片浏览：内容全部来自当前浏览目录(启动时默认 软件目录/data/image)，
-    // 目录为空则图库留空；不再包含任何内置预设图片。
     m_presets.clear();
     if (!m_presetDir.isEmpty() && QDir(m_presetDir).exists()) {
         const QStringList nameFilters = {QStringLiteral("*.png"), QStringLiteral("*.jpg"),
@@ -395,8 +385,6 @@ void MainWindow::rebuildGallery()
     if (!m_galleryList)
         return;
 
-    // Lazy population: QListWidget paints only visible items, and each icon
-    // comes from the disk thumbnail cache (generated in worker threads).
     m_galleryList->blockSignals(true);
     m_galleryList->clear();
     for (int i = 0; i < m_presets.size(); ++i) {
@@ -409,8 +397,8 @@ void MainWindow::rebuildGallery()
         if (QFileInfo::exists(thumb)) {
             item->setIcon(QIcon(thumb));
         } else {
-            // 后台线程只做“解码+缩放+落盘”，不触碰任何 UI 对象；回到 GUI 线程的
-            // 回调必须先过存活闸门(见 m_thumbTasksLive / ~MainWindow)。
+            // 后台线程只做解码+缩放+落盘，不触碰 UI；回到 GUI 线程的回调必须先过
+            // 存活闸门(见 m_thumbTasksLive / ~MainWindow)。
             QThreadPool::globalInstance()->start([this, res, thumb] {
                 QImage img(res);
                 if (img.isNull())
@@ -424,7 +412,6 @@ void MainWindow::rebuildGallery()
                 QMetaObject::invokeMethod(this, [this, res, thumb] {
                     if (!m_galleryList)
                         return;
-                    // find the row by path; ignore if the list was rebuilt
                     for (int r = 0; r < m_presets.size() && r < m_galleryList->count(); ++r) {
                         if (m_presets[r].res == res)
                             m_galleryList->item(r)->setIcon(QIcon(thumb));
@@ -450,7 +437,7 @@ void MainWindow::rebuildGallery()
 
 void MainWindow::pickPresetFolder()
 {
-    // 默认从当前浏览目录开始选择；选中后持久化到配置
+    // 默认从当前浏览目录开始选择，选中后持久化到配置
     QString dir = QFileDialog::getExistingDirectory(
         this, QStringLiteral("选择图片文件夹(其中图片将展示到图库)"), m_presetDir);
     if (dir.isEmpty())
@@ -474,8 +461,7 @@ void MainWindow::selectPreset(int index)
     updateImagePreview();
 }
 
-// 预览框宽高比锁死为主屏(桌面)比例：宽度由右侧卡片决定，高度按比例反算，
-// 这样预览里的模拟资源管理器窗口和真实桌面是同一种形状，所见即所得。
+// 预览框宽高比锁死为主屏(桌面)比例，高度按宽度反算，使预览与真实桌面同形。
 void MainWindow::updatePreviewAspect()
 {
     if (!m_previewFrame)
@@ -490,15 +476,14 @@ void MainWindow::updatePreviewAspect()
             aspect = qreal(sg.width()) / sg.height();
     }
     const int want = qMax(90, qRound(frameW / aspect));
-    // 迟滞 3px：滚动条/网格的 1~2px 宽度抖动不值得改高度，
-    // 否则「高度→滚动条→宽度→高度」会锁死在两个状态之间来回翻转。
+    // 迟滞 3px：否则「高度→滚动条→宽度→高度」会锁死在两个状态之间来回翻转。
     if (qAbs(want - m_previewFrame->height()) >= 3)
         m_previewFrame->setFixedHeight(want);
 }
 
 void MainWindow::updateImagePreview()
 {
-    if (!m_previewLabel || !m_brightness)  // still constructing the page
+    if (!m_previewLabel || !m_brightness)
         return;
     QString path;
     if (m_selectedPreset >= 0 && m_selectedPreset < m_presets.size())
@@ -523,12 +508,11 @@ void MainWindow::updateImagePreview()
                                             m_contrast->value() / 100.0, m_blur->value());
     processed = ImageProcess::rotateAroundY(processed, m_rotate->value());
 
-    // 尺寸调节：原尺寸(居中/四角)模式下按比例放大/缩小，与真实写入的图片一致；
-    // 填充/拉伸模式下宽高比不变，预览结果不受影响，与真实行为一致。
+    // 尺寸调节只对原尺寸(居中/四角)模式有效，填充/拉伸下宽高比不变。
     const double pct = m_scale ? m_scale->value() / 100.0 : 1.0;
     const QSize effNative(qRound(native.width() * pct), qRound(native.height() * pct));
 
-    // 真实参照：主屏(物理像素)，用来把图片按真实比例画进预览。
+    // 真实参照：主屏物理像素，用来把图片按真实比例画进预览。
     QSize realWin(1920, 1080);
     if (const QScreen *screen = QGuiApplication::primaryScreen()) {
         const QRect sg = screen->geometry();
@@ -536,8 +520,7 @@ void MainWindow::updateImagePreview()
         realWin = QSize(int(sg.width() * sdpr), int(sg.height() * sdpr));
     }
 
-    // 画布铺满整个预览框。预览框本身已被 updatePreviewAspect() 锁成桌面宽高比，
-    // 所以这里不再需要居中留白，也不会出现上下两条灰底。
+    // 画布铺满整个预览框 —— 框本身已被 updatePreviewAspect() 锁成桌面宽高比。
     const QSize labelSize = m_previewLabel->size();
     const QSize mock(qMax(160, labelSize.width()), qMax(90, labelSize.height()));
     m_previewRenderSize = labelSize;
@@ -614,8 +597,7 @@ void MainWindow::applyImage()
     QString err;
     Engine::instance().ensureDataDirs();
 
-    // DLL 只扫描 folder 目录里的 *.png / *.jpg：单图指向单张成品图所在目录，
-    // 随机指向图片池目录，两者互不串台。
+    // DLL 只扫描 folder 目录里的 *.png / *.jpg：单图指向成品图目录，随机指向图片池目录。
     QString imageDir;
     if (randomMode) {
         int count = 0;
@@ -658,7 +640,7 @@ void MainWindow::applyImage()
     setLog(QStringLiteral("正在注册 DLL(需要管理员权限)…"), false);
     QCoreApplication::processEvents();
 
-    // 只动图片 Hook：特效 Hook 的注册状态与配置原样保留，两页互不影响。
+    // 只动图片 Hook：特效 Hook 的注册状态与配置原样保留。
     saveImageSettings();
     if (!Engine::instance().registerImageDll(&err)) {
         setLog(err, true);
@@ -687,8 +669,7 @@ QImage MainWindow::applyImageParams(const QImage &src) const
     QImage processed = ImageProcess::adjust(src, m_brightness->value() / 100.0,
                                             m_contrast->value() / 100.0, m_blur->value());
     processed = ImageProcess::rotateAroundY(processed, m_rotate->value());
-    // 尺寸调节：DLL 没有缩放参数，通过缩放实际写入的图片改变其在
-    // 资源管理器中的相对大小(仅原尺寸模式；填充/拉伸始终铺满窗口)。
+    // DLL 没有缩放参数，只能缩放实际写入的图片(仅原尺寸模式；填充/拉伸始终铺满窗口)。
     const double pct = m_scale->value() / 100.0;
     const int uiPos = qBound(0, m_posMode, 6);
     if (qAbs(pct - 1.0) > 1e-3 && uiPos != 0 && uiPos != 2) {

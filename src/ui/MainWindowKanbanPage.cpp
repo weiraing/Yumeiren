@@ -13,7 +13,6 @@
 #include "app/ApplicationShutdown.h"
 #include "kanban/KanbanController.h"
 #include "kanban/KanbanModelManager.h"
-// 视线档位枚举(GazeOff/Weak/Medium/Strong)与它的译名函数。
 #include "kanban/KanbanRenderer.h"
 #include "tray/SystemTrayController.h"
 #include "wallpaper/VideoWallpaper.h"
@@ -24,8 +23,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
-// QDir 是给下面的 QDir::toNativeSeparators 用的，**不是**给已删掉的「打开模型目录」
-// 按钮用的 —— 删按钮时别顺手把这个 include 一起删掉。
+// QDir 是给 QDir::toNativeSeparators 用的，别当成遗留 include 删掉。
 #include <QDir>
 #include <QFileInfo>
 #include <QFrame>
@@ -49,18 +47,13 @@
 
 namespace {
 
-// —— 模型网格的格子尺寸 ——
-//
-// 格子是**竖的**(宽:高 ≈ 1:1.65)，不是图片浏览页那种正方形：模型预览图是
-// 320×480 的竖图，塞进正方形格子只能缩成一小条，「能看清全貌」就无从谈起。
-// 宽度 121 时，三列正好落在右列(约 377px 可用宽)里。
+// 格子取竖形(≈1:1.65)以适配 320×480 的预览图；宽 121 让三列正好落在右列(~377px)。
 constexpr int kModelCellWidth = 121;
 constexpr int kModelCellHeight = 201;
 constexpr int kModelIconWidth = 105;
 constexpr int kModelIconHeight = 157;
 
-// 「模型」卡片右上角那颗问号徽标的边长(逻辑像素)。QSS 里 #HelpBadge 的
-// border-radius 取它的一半即正圆，改这里要同步改 QSS(两个主题各一处)。
+// 问号徽标边长。QSS #HelpBadge 的 border-radius 取一半即正圆，改这里要同步改 QSS。
 constexpr int kHelpBadgeSize = 22;
 
 class ModelCardDelegate final : public QStyledItemDelegate
@@ -84,7 +77,6 @@ public:
         painter->setFont(opt.font);
         style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, widget);
 
-        // Fixed image and footer regions keep every name on the same baseline.
         const QRect card = option.rect.adjusted(4, 4, -4, -4);
         const int footerHeight = 28;
         const int dividerY = card.bottom() - footerHeight;
@@ -94,7 +86,6 @@ public:
         painter->setPen(QColor(128, 128, 128, 65));
         painter->drawLine(card.left(), dividerY, card.right(), dividerY);
 
-        // Let QSS supply the theme's text color, but draw only the footer label.
         opt.rect = QRect(card.left() + 4, dividerY + 1, card.width() - 8, footerHeight - 1);
         opt.text = opt.fontMetrics.elidedText(name, Qt::ElideRight, opt.rect.width());
         opt.displayAlignment = Qt::AlignCenter;
@@ -104,10 +95,7 @@ public:
     }
 };
 
-// 还没出图的格子用什么占位。
-//
-// 用**半透明**灰而不是某个具体颜色：这套界面有浅色/深色两套主题，写死任何一种
-// 颜色都会在另一套上显得脏。半透明灰在两套底色上都读作「这里是空的」。
+// 用半透明灰而非具体颜色：两套主题下写死任何一色都会在另一套上显脏。
 QPixmap kanbanThumbPlaceholder(const QSize &size)
 {
     QPixmap pm(size);
@@ -122,10 +110,7 @@ QPixmap kanbanThumbPlaceholder(const QSize &size)
     return pm;
 }
 
-// 按缓存给一个格子贴图标。缓存里没有就贴占位图。
-//
-// 抽成自由函数是因为它有两条调用路径：整体重贴(reloadKanbanModelIcons)与
-// 单张出图后即时贴(applyKanbanModelThumb)，两处必须给出完全一致的结果。
+// 按缓存给格子贴图标，没有就贴占位图；两条路径共用，保证结果一致。
 void applyKanbanThumbIcon(QListWidgetItem *item, const QSize &iconSize)
 {
     if (!item)
@@ -133,11 +118,7 @@ void applyKanbanThumbIcon(QListWidgetItem *item, const QSize &iconSize)
     const QString id = item->data(Qt::UserRole + 1).toString();
     const QString path = kanban::ModelThumbCache::pathFor(id);
 
-    // 缩放要按**设备**像素算，不是逻辑像素。
-    // iconSize 是逻辑尺寸，本机 150% 缩放意味着屏幕上的图标实际有 158×236 个物理
-    // 像素；只缩到 105×157 再交给 QIcon，Qt 还得把它放大 1.5 倍填满，
-    // 结果是白糊一道 —— 截图里看得很清楚。缩到物理尺寸并告知 dpr，
-    // Qt 就一比一贴上去，不再有二次重采样。
+    // 必须缩到**设备**像素并告知 dpr：只缩到逻辑尺寸，Qt 会再放大 dpr 倍填满，糊成一片。
     qreal dpr = 1.0;
     if (QWidget *view = item->listWidget())
         dpr = view->devicePixelRatioF();
@@ -145,9 +126,7 @@ void applyKanbanThumbIcon(QListWidgetItem *item, const QSize &iconSize)
                           int(qRound(iconSize.height() * dpr)));
 
     QPixmap thumb;
-    // 先缩到格子要显示的大小再交给 QIcon：原图是 320×480，16 个模型全按原尺寸
-    // 留在内存里要占近 10MB，而格子里只显示 105×157(物理 158×236)。
-    // 用户明确要求省资源。
+    // 先缩到格子大小再交给 QIcon：原图 320×480，全按原尺寸留在内存要占近 10MB。
     if (!path.isEmpty() && kanban::ModelThumbCache::has(id) && thumb.load(path)) {
         QPixmap scaled =
             thumb.scaled(pixelSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
@@ -175,12 +154,8 @@ QWidget *MainWindow::buildKanbanPage()
     lay->setContentsMargins(18, 16, 18, 16);
     lay->setSpacing(14);
 
-    // ---- 左：运行控制 + 状态，以及「显示与互动 / 开机与托盘」参数 ----
-    //
-    // 左列整体定宽、装两张卡片，与动态壁纸页同一套写法（见 MainWindowVideoPage
-    // 里那段注释）：列宽固定不参与拉伸，窗口变宽时多出来的空间全给右侧；
-    // 卡片高度随内容收缩，空白集中到列尾 —— 所以**卡内不要 addStretch**，
-    // 否则卡片会被撑成一大片空框（这正是本次改动前左卡的样子）。
+    // 左列定宽装两张卡(与动态壁纸页同一套写法)：多出的宽度全给右侧，卡片随内容收缩、
+    // 空白集中列尾 —— 所以**卡内不要 addStretch**，否则撑成一大片空框。
     auto *leftCol = new QWidget(page);
     leftCol->setFixedWidth(uimetrics::kPageLeftColWidth);
     auto *leftColLay = new QVBoxLayout(leftCol);
@@ -245,28 +220,19 @@ QWidget *MainWindow::buildKanbanPage()
     leftLay->addLayout(btnRow);
     leftLay->addWidget(m_kanbanNextBtn);
     leftLay->addWidget(m_kanbanExprBtn);
-    // 运行状态原本在这里单独占一行(夹在按钮与日志之间)。2026-09-19 按用户要求
-    // 搬到右卡底部的模型信息栏里合并显示 —— 它报的是「后端是谁、模型是谁」，
-    // 与模型栏说的是同一件事，一屏说两遍；夹在按钮和日志之间还让用户看状态
-    // 要来回扫。现在整页只有底部那一条，见 updateKanbanStatus()。
+    // 运行状态与模型信息合并显示在右卡底部那一条，见 updateKanbanStatus()。
     m_kanbanLog = new QLabel(QStringLiteral("就绪。"), leftCard);
     m_kanbanLog->setObjectName(QStringLiteral("LogLabel"));
     m_kanbanLog->setWordWrap(true);
     leftLay->addWidget(m_kanbanLog);
 
     leftColLay->addWidget(leftCard);
-    // 「显示与互动 / 开机与托盘」原本在右列，2026-09-17 按用户要求移到左列。
-    // 左卡本来就有一大片空底，参数放这里正好填上；右列只剩模型卡。
     leftColLay->addWidget(buildKanbanParamCard(leftCol));
     leftColLay->addStretch(1);
     lay->addWidget(leftCol);
 
-    // ---- 右：模型 ----
-    //
-    // 与左列相反，这一列唯一的卡片要**占满高度**(addWidget 带 stretch=1、列尾不留
-    // stretch)：卡里是一面网格墙，高度不够时该由网格自己滚动，而不是让卡片缩成
-    // 几行、下面留一大片空白。左列那种「卡片收缩、空白集中到列尾」的写法在这里
-    // 恰好是反的。
+    // 与左列相反，右卡要**占满高度**(带 stretch=1、列尾不留 stretch)：卡里是网格墙，
+    // 高度不够时该由网格自己滚动，而不是卡片缩成几行、下面留一大片空白。
     auto *right = new QWidget(page);
     auto *rightLay = new QVBoxLayout(right);
     rightLay->setContentsMargins(0, 0, 0, 0);
@@ -300,25 +266,18 @@ QWidget *MainWindow::buildKanbanModelCard(QWidget *parent)
                        "换过贴图或动作的模型靠这个更新封面")));
     connect(refreshBtn, &QPushButton::clicked, this, [this] {
         refreshKanbanModels();
-        // 刷新 = 重扫 + **强制**重出图。缓存只按名字找、刻意不做失效判断
-        // (见 ModelThumbCache 的说明)，所以「素材换过了」这件事只能由用户
-        // 显式点一下来传达。
+        // 刷新 = 重扫 + **强制**重出图：缓存只按名字找、刻意不做失效判断，所以
+        // 「素材换过了」只能由用户显式点一下来传达。
         ensureKanbanModelThumbs(true);
         setKanbanLog(QStringLiteral("已重新扫描模型目录。"), false);
     });
     row->addWidget(refreshBtn);
 
-    // 2026-09-18 按用户要求撤掉「📂 打开模型目录」按钮：模型目录是固定的
-    // <程序目录>\data\models，不需要再给一个「跳过去」的入口。
-    // 代价是界面上再没有指出目录在哪的地方，所以这段说明改挂在下面那颗问号上。
+    // 模型目录的位置说明挂在下面那颗问号上。
     row->addStretch(1);
 
-    // 问号徽标（外圈内问号），鼠标悬停出提示。
-    //
-    // 用 QLabel 而不是 QPushButton：它没有任何点击行为，做成按钮会误导用户去点，
-    // 还要额外去覆盖 QPushButton 那条通用的 padding: 8px 16px / border-radius: 9px
-    // （见 resources/*.qss 的 QPushButton 段），得不偿失。
-    // 尺寸由 setFixedSize 定死，QSS 里 border-radius 取一半即得正圆。
+    // 问号徽标，悬停出提示。用 QLabel 而非 QPushButton：它没有点击行为，做成按钮会误导
+    // 用户去点，还得覆盖 QPushButton 的通用样式。尺寸 setFixedSize 定死。
     auto *helpBadge = new QLabel(QStringLiteral("?"), card);
     helpBadge->setObjectName(QStringLiteral("HelpBadge"));
     helpBadge->setFixedSize(kHelpBadgeSize, kHelpBadgeSize);
@@ -332,14 +291,10 @@ QWidget *MainWindow::buildKanbanModelCard(QWidget *parent)
     row->addWidget(helpBadge);
     lay->addLayout(row);
 
-    // —— 模型网格：一格一个模型，格子里是它的静态效果图 ——
-    //
-    // 2026-09-17 按用户要求，由「下拉框选模型」改成图片浏览那样的网格墙：
-    // 每个模型一张能看清全貌的静态预览图，不播动作。
+    // 网格墙：每个模型一张静态预览图，不播动作。
     m_kanbanModelGrid = new QListWidget(card);
     auto *grid = m_kanbanModelGrid;
-    // 复用图库浏览那套 objectName：格子卡片(圆角/描边/悬停/选中)直接继承
-    // 文件夹美化页「图片浏览」的样式，浅色深色两套主题都不必再写一遍 QSS。
+    // 复用图库浏览的 objectName：格子卡片直接继承「图片浏览」样式，两套主题不必再写 QSS。
     grid->setObjectName(QStringLiteral("GalleryList"));
     grid->setProperty("modelCards", true);
     grid->setItemDelegate(new ModelCardDelegate(grid));
@@ -355,21 +310,14 @@ QWidget *MainWindow::buildKanbanModelCard(QWidget *parent)
     grid->setUniformItemSizes(true);
     grid->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     grid->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
-    // 横向 sizeHint 不参与布局分配：否则会形成「宽度→列数→sizeHint→宽度」的自激环，
-    // 拖动窗口边框时界面无限重排直至未响应。与图片浏览页同一处理。
+    // 横向 sizeHint 不参与布局分配：否则形成「宽度→列数→sizeHint→宽度」自激环，拖窗口
+    // 时无限重排直至未响应。与图片浏览页同一处理。
     grid->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
     grid->setMinimumHeight(240);
     grid->setSelectionMode(QAbstractItemView::SingleSelection);
-    // 右键卡片弹菜单（目前只有「删除模型」）。
-    //
-    // **策略必须装在 grid（QAbstractScrollArea）上，不能装在它的 viewport 上。**
-    // QAbstractScrollArea 给 viewport 装了事件过滤器，ContextMenu 事件会被它先
-    // 截下来转给 viewportEvent()，viewport 自己的 contextMenuPolicy 根本轮不到 ——
-    // 现象就是「右键卡片毫无反应」，而且一点日志都不打（槽函数压根没被调用）。
-    // 这是 Qt 里 QListWidget/QTreeView 的通行写法，用 viewport 是错的。
-    //
-    // 槽里拿到的 pos 是**视口坐标**，与 itemAt() 同一套；菜单定位再用 viewport
-    // 换算到屏幕，保持一致。
+    // **策略必须装在 grid(QAbstractScrollArea)上，不能装 viewport 上**：前者给 viewport
+    // 装了事件过滤器，ContextMenu 会被它截走转给 viewportEvent()，现象是「右键毫无反应」
+    // 且不打日志。槽里拿到的 pos 与 itemAt() 同一套视口坐标。
     grid->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(grid, &QWidget::customContextMenuRequested, this,
             &MainWindow::showKanbanModelMenu);
@@ -377,8 +325,7 @@ QWidget *MainWindow::buildKanbanModelCard(QWidget *parent)
             [this](QListWidgetItem *item, QListWidgetItem *) {
                 if (m_kanbanSyncing || !item)
                     return;
-                // 路径存在条目里而不是按下标回查：网格顺序由扫描结果决定，
-                // 将来一加排序，按下标就会切错模型。
+                // 路径存在条目里而不是按下标回查：将来一加排序，按下标就会切错模型。
                 const QString jsonPath = item->data(Qt::UserRole).toString();
                 if (jsonPath.isEmpty() || jsonPath == m_kanban->modelPath())
                     return;
@@ -392,9 +339,7 @@ QWidget *MainWindow::buildKanbanModelCard(QWidget *parent)
     m_kanbanModelInfo->setWordWrap(true);
     lay->addWidget(m_kanbanModelInfo);
 
-    // 「把 Cubism3/4 模型整个文件夹放进 <程序目录>\data\models…」那段常驻说明文字
-    // 已撤掉(2026-09-18)，内容移进刷新行右端那颗 #HelpBadge 的悬浮提示 ——
-    // 这是一次性说明，不该长期占版面；实测它占掉卡片底部整整两行。
+    // 常驻说明塞进刷新行右端的 #HelpBadge 提示里：一次性说明不该长期占版面(实测两行)。
     return card;
 }
 
@@ -410,7 +355,7 @@ QWidget *MainWindow::buildKanbanParamCard(QWidget *parent)
     t->setObjectName(QStringLiteral("GroupTitle"));
     lay->addWidget(t);
 
-    // 三行滑块统一用「标签 | 滑块 | 数值」的网格，数值列等宽，来回拉动时不抖版。
+    // 三行滑块用「标签 | 滑块 | 数值」的网格，数值列等宽，来回拉动时不抖版。
     auto *grid = new QGridLayout();
     grid->setContentsMargins(0, 0, 0, 0);
     grid->setHorizontalSpacing(10);
@@ -454,17 +399,7 @@ QWidget *MainWindow::buildKanbanParamCard(QWidget *parent)
     grid->setColumnStretch(1, 1);
     lay->addLayout(grid);
 
-    // 互动三项：置顶与穿透互相独立(置顶只管层级，穿透只管鼠标)，所以用复选框而非单选。
-    //
-    // **三项各占一行**（2026-09-18 用户要求）。左列卡片内宽只有 ~272（列宽 300 减左右
-    // 各 14 内边距），三项并排约需 275 逻辑像素，硬挤一行会把「允许点击互动」压成省略号；
-    // 而两两并排也总要挑一个「落单」的，不如干脆全部拆开 —— 三项的后果差别很大
-    // （置顶只改层级、互动改点击能不能落到小人身上、穿透连鼠标都收不到），
-    // 一行一项正好让每一项都读得完整。
-    //
-    // 每项仍套一层 QHBoxLayout + 尾部 stretch：QCheckBox 直接塞进 QVBoxLayout 会被
-    // 拉成整行宽，于是**点这一行的空白处也会切换**；套一层后控件保持 sizeHint 宽度，
-    // 只有点在方块或文字上才算数（与前两项原来的写法一致）。
+
     auto addCheckRow = [lay, card](QCheckBox *box) {
         auto *row = new QHBoxLayout();
         row->setSpacing(14);
@@ -503,11 +438,6 @@ QWidget *MainWindow::buildKanbanParamCard(QWidget *parent)
     });
     addCheckRow(m_kanbanThroughBox);
 
-    // 视线追踪单独占一行，四档互斥。
-    //
-    // 为什么不是复选框：用户要的是「多明显」这个刻度，而不是「开/关」。做成四个
-    // 选项后，「关掉」和「调强弱」合成同一个动作 —— 不会出现「勾着开关却看不出
-    // 任何变化」(因为默认档太弱)这种要来回试的困惑。
     auto *gazeRow = new QHBoxLayout();
     gazeRow->setSpacing(10);
     auto *gazeLbl = new QLabel(QStringLiteral("视线追踪"), card);
@@ -534,7 +464,7 @@ QWidget *MainWindow::buildKanbanParamCard(QWidget *parent)
         QStringLiteral("强"), kanban::KanbanRenderer::GazeStrong,
         QStringLiteral("追得最紧：鼠标稍动即大幅转头，存在感最强"));
 
-    // id 直接用档位值：槽里拿到的就是能交给控制器的数，不用再映射一次。
+    // id 直接用档位值：槽里拿到的就能交给控制器，不用再映射一次。
     m_kanbanGazeGroup = new QButtonGroup(this);
     m_kanbanGazeGroup->setExclusive(true);
     m_kanbanGazeGroup->addButton(m_kanbanGazeOff, kanban::KanbanRenderer::GazeOff);
@@ -542,8 +472,6 @@ QWidget *MainWindow::buildKanbanParamCard(QWidget *parent)
     m_kanbanGazeGroup->addButton(m_kanbanGazeMedium, kanban::KanbanRenderer::GazeMedium);
     m_kanbanGazeGroup->addButton(m_kanbanGazeStrong, kanban::KanbanRenderer::GazeStrong);
     connect(m_kanbanGazeGroup, &QButtonGroup::idClicked, this, [this](int strength) {
-        // idClicked 只在用户点击时发出(不是回填)，所以这里不必再查 m_kanbanSyncing
-        // —— 回填走的是 setChecked()，不触发这个信号。与视频页播放模式同一写法。
         m_kanban->setGazeStrength(strength);
     });
     gazeRow->addStretch(1);
@@ -558,12 +486,6 @@ QWidget *MainWindow::buildKanbanParamCard(QWidget *parent)
     trayTitle->setObjectName(QStringLiteral("GroupTitle"));
     lay->addWidget(trayTitle);
 
-    // 这一节原有四个勾选框，2026-09-17 按用户要求删掉三个，只剩托盘那一条：
-    //   「主界面隐藏时暂停动画」—— 开关本身说不通：主界面收进托盘时看板娘还露在
-    //     桌面上，把它冻住只会看起来像坏了。`applyMainWindowVisible` 一并撤掉。
-    //   「程序启动时自动运行看板娘」—— 换成「记住上次状态」，见 wasRunningLastTime()
-    //     与 setupKanbanAndTray() 里的自动拉起；`kanban/autoStart` 键一并撤掉。
-    //   「仅在后台任务运行时显示托盘」—— 托盘现在常驻，有没有后台任务都看得见它。
     auto *trayRow = new QHBoxLayout();
     trayRow->setSpacing(14);
     m_trayMinimizeBox = new QCheckBox(QStringLiteral("关闭主窗口时收进托盘(需有后台任务)"), card);
@@ -585,11 +507,7 @@ void MainWindow::setupKanbanAndTray()
 
     connect(&kan, &kanban::KanbanController::measuredFpsChanged,
             this, &MainWindow::updateKanbanStatus);
-    // 设置项的实时回填。这条连接**必须存在**：右键菜单（鼠标穿透/窗口置顶）与
-    // 托盘改的都是控制器，控制器改了状态只发这一个信号 —— 不接的话设置页的
-    // 复选框就停在旧状态上（用户实测报的正是「右键勾了穿透、设置页没跟着勾」）。
-    // updateKanbanControls() 用 m_kanbanSyncing 把回填期间的程序性 setChecked
-    // 屏蔽掉，所以不会反过来再触发一次控制器，不会成环。
+
     connect(&kan, &kanban::KanbanController::settingsChanged,
             this, &MainWindow::updateKanbanControls);
     connect(&kan, &kanban::KanbanController::runningChanged, this,
@@ -611,23 +529,13 @@ void MainWindow::setupKanbanAndTray()
                 if (text == QStringLiteral("启动失败"))
                     setKanbanLog(m_kanban->lastError(), true);
             });
-    // 下面这两个「状态类」信号只刷界面，**都不写日志行**。
-    //
-    // 它们报的都是「现在是谁」—— 后端是谁、当前模型是谁，而这两件事已经常驻在
-    // 底部状态栏里(见 updateKanbanStatus)，本来就在眼前。写进日志行只会：
-    //   · 把真正有用的消息冲走：backendChanged 由控制器的 publishState() 在**每次
-    //     状态变化**时都发一遍，于是用户每点一次暂停/继续，日志就被重写成
-    //     「渲染后端：X」，启动失败、预览图结果、删了哪个模型这些全被顶掉；
-    //   · 在同一屏上把同一句话印两遍：「当前模型：X」与状态栏的「当前：X」。
-    // 日志行留给**用户动作的结果**与**错误** —— 那才是翻回去还值得看的东西。
+
     connect(&kan, &kanban::KanbanController::backendChanged, this,
             [this](const QString &) { updateKanbanControls(); });
     connect(&kan, &kanban::KanbanController::currentModelChanged, this,
             [this](const QString &name) {
                 updateKanbanControls();
-                // 唯一的例外：**没装载成功**时留一条。那时状态栏报的是网格上选中的
-                // 那个模型（不是画面上真正在跑的东西），只有这句话说明了「看到的是
-                // 占位形象」。它是一条警告，不是「现在是谁」的陈述。
+                // 唯一例外：**没装载成功**时留一条 —— 那时只有这句话说明「看到的是占位形象」。
                 if (name.isEmpty())
                     setKanbanLog(QStringLiteral("未装载模型，使用内置占位形象。"), false);
             });
@@ -640,8 +548,8 @@ void MainWindow::setupKanbanAndTray()
     refreshKanbanModels();
     updateKanbanControls();
 
-    // 构造函数开头就恢复了上次的视频壁纸，那时 playbackStateChanged 还没接上，
-    // 聚合器里会是「没在跑」；托盘初始化依赖这个事实，先补一次。
+    // 构造开头恢复视频壁纸时 playbackStateChanged 还没接上，聚合器里会是「没在跑」；
+    // 托盘初始化依赖这个事实，先补一次。
     {
         VideoWallpaper &video = VideoWallpaper::instance();
         ApplicationRuntimeState::instance().setWallpaperState(
@@ -656,8 +564,8 @@ void MainWindow::setupKanbanAndTray()
                 &MainWindow::showFromTray);
         connect(m_tray, &SystemTrayController::quitRequested, this,
                 &MainWindow::onTrayQuitRequested);
-        // 托盘在的时候进程归托盘管：主窗口是最后一个可见窗口，
-        // 若沿用 Qt 默认策略，隐藏主窗口就会顺手把进程结束掉。
+        // 托盘在时进程归托盘管：主窗口是最后一个可见窗口，沿用 Qt 默认策略的话隐藏它会
+        // 顺手把进程结束掉。
         QApplication::setQuitOnLastWindowClosed(false);
     }
 
@@ -674,17 +582,8 @@ void MainWindow::setupKanbanAndTray()
             m_tray->hideTray();
     });
 
-    // 自动拉起：**记住上次状态**（2026-09-17 按用户要求改）。
-    //
-    // 判据是 `kanban/enabled` —— 由 publishState() 实时维护、stop()/enterError()
-    // 会清掉、而 shutdownForExit() **不碰**，所以它恰好等于「上次退出时在不在跑」。
-    // 首次安装没有这个键 → 默认 false → 不启动。
-    //
-    // 以前读的是设置页那个独立的「程序启动时自动运行看板娘」勾选框，于是出现
-    // 「明明关了它，下次启动又自己冒出来」：退出走的是 shutdownForExit()，
-    // 它根本不改那个键。勾选框已删除。
-    //
-    // 等事件循环转起来再拉起，避免在构造函数里 show 一个顶层窗口。
+    // 自动拉起判据是 `kanban/enabled`：publishState() 实时维护、stop()/enterError() 会清、
+    // shutdownForExit() **不碰**，故恰好等于「上次退出时在不在跑」；无此键则默认不启动。
     if (m_kanban->wasRunningLastTime()) {
         QMetaObject::invokeMethod(
             this,
@@ -697,7 +596,7 @@ void MainWindow::setupKanbanAndTray()
     }
 }
 
-// 重扫模型目录并重建模型网格，尽量保住用户当前选中的那一项。
+// 重扫模型目录并重建网格，尽量保住用户当前选中的那一项。
 void MainWindow::refreshKanbanModels()
 {
     if (!m_kanbanModelGrid)
@@ -713,8 +612,8 @@ void MainWindow::refreshKanbanModels()
         const kanban::ModelInfo &model = models.at(i);
         auto *item = new QListWidgetItem(m_kanbanModelGrid);
         item->setText(model.id);
-        // UserRole   = .model3.json 绝对路径：点击时直接拿它切模型
-        // UserRole+1 = 模型文件夹名：预览图的文件名就是它
+        // UserRole   = .model3.json 绝对路径，点击时直接拿它切模型
+        // UserRole+1 = 模型文件夹名，也是预览图的文件名
         // UserRole+2 = 该格子的图是不是真预览图(占位图时为 false)，用于 tooltip
         item->setData(Qt::UserRole, model.modelJsonPath);
         item->setData(Qt::UserRole + 1, model.id);
@@ -731,28 +630,19 @@ void MainWindow::refreshKanbanModels()
     reloadKanbanModelIcons();
 }
 
-// 模型卡片右键菜单。
-//
-// 目前只有「删除模型」一项。之所以还要弹个菜单而不是右键即删：右键本身没有任何
-// 破坏性含义，用户需要一次明确的「我要对这张卡片做点什么」。
+
 void MainWindow::showKanbanModelMenu(const QPoint &viewportPos)
 {
     if (!m_kanbanModelGrid)
         return;
     QListWidgetItem *item = m_kanbanModelGrid->itemAt(viewportPos);
     if (!item)
-        return; // 空白处不弹：没有「对谁操作」这个前提，菜单项就没有意义
+        return;
 
-    // 菜单刻意不给父对象。与 KanbanWindow 的右键菜单同一讲究：菜单进了 Qt 的
-    // 对象树之后，exec() 期间触发的动作若导致父对象被销毁，返回时菜单自己就
-    // 成了野指针。这里当前不会销毁任何东西，但没必要留这个隐患。
     QMenu menu;
-    // 不写「删除模型…」：省略号在 Qt/Windows 惯例里表示「点了还会弹对话框」，
-    // 而现在点了就删（见 deleteKanbanModel 的说明）。
     QAction *deleteAction = menu.addAction(QStringLiteral("删除模型"));
 
-    // 用 exec() 的返回值判断点了哪一项，而不是在触发槽里直接干活：这样「菜单已关」
-    // 与「动作执行」在时间上分开，执行期间不会还有菜单挂在屏幕上。
+    // 用 exec() 的返回值判断点了哪一项：这样「菜单已关」与「动作执行」在时间上分开。
     QAction *chosen = menu.exec(m_kanbanModelGrid->viewport()->mapToGlobal(viewportPos));
     if (chosen == deleteAction)
         deleteKanbanModel(item);
@@ -764,36 +654,23 @@ void MainWindow::deleteKanbanModel(QListWidgetItem *item)
     if (!item || !m_kanban)
         return;
 
-    // 先把要用的东西全部取出来。下面的 refreshKanbanModels() 会 clear() 整个网格，
-    // item 随即失效 —— 之后再碰 item->text() 就是 use-after-free。
+    // 先取出要用的东西：下面的 refreshKanbanModels() 会 clear() 整个网格，item 随即失效，
+    // 之后再碰就是 use-after-free。
     const QString modelName = item->text();
     const QString jsonPath = item->data(Qt::UserRole).toString();
     const QString modelId = item->data(Qt::UserRole + 1).toString();
     if (jsonPath.isEmpty() || modelId.isEmpty())
         return;
 
-    // 模型文件夹 = .model3.json 所在目录。不另外存一份路径：网格条目里的就是扫描
-    // 出来的 modelJsonPath，目录由它推出来，不可能和实际情况不一致。
+    // 模型文件夹 = .model3.json 所在目录，由它推出来，不另外存一份。
     const QString dirPath = QFileInfo(jsonPath).absolutePath();
 
-    // **不弹确认框，点「删除模型…」即删**（2026-09-18 用户明确要求）。
-    //
-    // 敢这么做的前提是删除**走回收站**（见 fbswin::moveToRecycleBin），误删能还原 ——
-    // 撤销路径在回收站里，而不是在一个「确定吗」的弹窗里。而且右键 → 选菜单项本身
-    // 已经是两步刻意操作，不是一点就中的。
-    //
-    // 代价是删错了不会有第二次机会提示。所以删除结果必须**看得见**：下面无论成功
-    // 失败都写一行界面提示 + 一条落盘日志（含被删目录），别把反馈一起省掉。
-    //
-    // 别再把这个确认框加回来：它是用户主动要求去掉的。
+    // **不弹确认框，点菜单项即删**：前提是删除**走回收站**(见 fbswin::moveToRecycleBin)，
+    // 撤销路径在回收站里。代价是没有第二次机会，故无论成败都要写界面提示 + 落盘日志。
     QString error;
     if (!fbswin::moveToRecycleBin(dirPath, &error)) {
-        // 失败就到此为止，**绝不退化成永久删除**：用户以为东西进了回收站、实际被
-        // 永久抹掉，是最不能接受的一种「成功」。
-        //
-        // 措辞上不能说「模型文件未被改动」：本函数重试过之后仍失败时，最可能的情形
-        // 恰恰是「文件已经全进回收站了，只剩一个空目录删不掉」（见 shellfileops.cpp
-        // 里的实测记录）。拿「未被改动」去安抚用户，等于骗一个模型已经被毁掉的人。
+        // 失败到此为止，**绝不退化成永久删除**。措辞不能说「模型文件未被改动」：重试仍
+        // 失败时最可能恰恰是「文件已全进回收站，只剩空目录删不掉」(见 shellfileops.cpp)。
         videodiag::log(videodiag::Level::Warning,
                        QStringLiteral("删除模型「%1」失败: %2 (目录 %3)")
                            .arg(modelName, error, QDir::toNativeSeparators(dirPath)),
@@ -807,15 +684,13 @@ void MainWindow::deleteKanbanModel(QListWidgetItem *item)
         return;
     }
 
-    // 缓存图是可再生的，直接永久删掉，不必占回收站。
+    // 缓存图可再生，直接永久删掉，不占回收站。
     const bool thumbRemoved = kanban::ModelThumbCache::remove(modelId);
 
     const bool wasCurrent = (m_kanban->modelPath() == jsonPath);
 
-    // 删掉的是当前模型时要换成「它的下一个」，所以**必须在刷新前**把这个模型在
-    // 列表里的下标记下来。刷新后它就不在列表里了，再按路径去找是找不到的 ——
-    // 按「找不到就从 0 开始找下一个」去算，会得到第 2 个而不是第 1 个（
-    // nextValidAfter() 就是那个口径，它假定当前模型仍在列表里）。
+    // 删的是当前模型时要换成「它的下一个」，故**必须在刷新前**记下它的下标：刷新后它
+    // 就不在列表里，按路径找不到时 nextValidAfter() 会算错。
     int removedIndex = -1;
     if (wasCurrent) {
         const QVector<kanban::ModelInfo> before = m_kanban->validModelList();
@@ -829,17 +704,6 @@ void MainWindow::deleteKanbanModel(QListWidgetItem *item)
 
     refreshKanbanModels(); // 重扫目录 + 重建网格（此刻 item 已失效，别再用）
 
-    // 删掉的正好是当前模型时要换一个：否则控制器里的 modelPath 会指向一个已经
-    // 不存在的文件，网格高亮、「下一个模型」这些以它为基准的地方都会落空。
-    //
-    // 换成「下一个」而不是列表第一个：删掉第 i 个之后，原来的第 i+1 个会补到第 i 位，
-    // 所以「下一个」在新列表里正好还在下标 i —— 用户看到的是下面那张卡片顶上来，
-    // 而不是画面跳到列表开头。它本来就是最后一个时绕回第一个，与 nextValidAfter()
-    // 的环形口径一致（那里是 (pos + 1) % size）。下标换算见
-    // KanbanModelManager::successorIndexAfterRemoval()，那里有单元测试。
-    //
-    // 一个可用模型都不剩时不做处理 —— 界面会显示「可用模型 0 个」，看板娘仍用
-    // 内存里已装载的形象继续跑，下次启动自然回落到占位形象。
     const QVector<kanban::ModelInfo> left = m_kanban->validModelList();
     if (wasCurrent && !left.isEmpty()) {
         const int next = kanban::KanbanModelManager::successorIndexAfterRemoval(
@@ -849,8 +713,6 @@ void MainWindow::deleteKanbanModel(QListWidgetItem *item)
 
     updateKanbanControls();
 
-    // 没有确认框之后，这行提示就是唯一的当场反馈 —— 必须说清「删了哪个」和
-    // 「去哪了」（回收站），用户才知道怎么反悔。
     QString log = QStringLiteral("已删除模型「%1」%2，已移入回收站。剩余可用模型 %3 个。")
                       .arg(modelName,
                            thumbRemoved ? QStringLiteral("及预览图") : QString(),
@@ -859,8 +721,6 @@ void MainWindow::deleteKanbanModel(QListWidgetItem *item)
         log += QStringLiteral(" 放进新模型后点「↻ 刷新」即可。");
     setKanbanLog(log, left.isEmpty());
 
-    // 界面上那行字只活在当前会话里，翻篇就没了；删除是不可逆的破坏性操作，
-    // 日志里留一条才能事后追溯（谁在什么时候删了哪个目录）。
     videodiag::log(videodiag::Level::Info,
                    QStringLiteral("已删除模型「%1」: 目录 %2 已移入回收站，"
                                   "预览图缓存 %3，剩余可用模型 %4 个")
@@ -871,8 +731,7 @@ void MainWindow::deleteKanbanModel(QListWidgetItem *item)
                    QStringLiteral("Kanban"));
 }
 
-// 按当前缓存重贴全部格子图标。
-// 缺图的贴占位图 —— 生成是异步的，每张图落地后会再叫一次 applyKanbanModelThumb。
+
 void MainWindow::reloadKanbanModelIcons()
 {
     if (!m_kanbanModelGrid)
@@ -894,7 +753,7 @@ void MainWindow::reloadKanbanModelIcons()
     }
 }
 
-// 单个模型出图后即时贴图：不必整面墙重贴，用户能看着格子一个个亮起来。
+// 单个模型出图后即时贴图：不必整面墙重贴。
 void MainWindow::applyKanbanModelThumb(const QString &modelId)
 {
     if (!m_kanbanModelGrid || modelId.isEmpty())
@@ -911,24 +770,18 @@ void MainWindow::applyKanbanModelThumb(const QString &modelId)
     }
 }
 
-// 发现缺图就起一个生成进程。
-//
-// 整条链路只有「本程序再起一个自己」这一步，没有线程、没有共享 GL 上下文 ——
-// 原因见 src/kanban/ModelThumbJob.h(Cubism 的着色器缓存是进程级单例，
-// 在第二个上下文里渲染要么出空图、要么把桌面上正在跑的看板娘搞黑)。
+// 发现缺图就起一个生成进程：整条链路只有「本程序再起一个自己」，无线程、无共享 GL 上下文
+// —— 原因见 src/kanban/ModelThumbJob.h。
 void MainWindow::ensureKanbanModelThumbs(bool force)
 {
     if (!m_kanbanModelGrid)
         return;
-    // m_kanbanThumbJob 非空即「正在生成」，这是唯一的重入闸门。
     if (m_kanbanThumbJob)
         return;
-    // 没有 Live2D 后端就没有离屏渲染，起了也是白起(它只会回一句「本构建无 Live2D」)。
     if (!m_kanban->live2dAvailable())
         return;
 
-    // 先算清楚缺几张。全都在缓存里就什么都不做 —— 这是绝大多数启动的情形，
-    // 也是「省资源」的关键：只有第一次进这个页面才真的会跑渲染。
+    // 全都在缓存里就什么都不做 —— 这是绝大多数启动的情形，也是「省资源」的关键。
     QStringList missing;
     for (int i = 0; i < m_kanbanModelGrid->count(); ++i) {
         const QListWidgetItem *item = m_kanbanModelGrid->item(i);
@@ -943,8 +796,7 @@ void MainWindow::ensureKanbanModelThumbs(bool force)
     if (missing.isEmpty())
         return;
 
-    // 走到这里说明确实要出图了，也说明此刻没有别的生成进程在跑(上面那道闸门)。
-    // 顺手清掉上次被杀留下的 .tmp —— 用户被告知过这个目录在哪，别让他看到垃圾。
+    // 顺手清掉上次被杀留下的 .tmp —— 用户知道这个目录在哪，别让他看到垃圾。
     kanban::ModelThumbCache::sweepTempFiles();
 
     auto *job = new QProcess(this);
@@ -952,16 +804,13 @@ void MainWindow::ensureKanbanModelThumbs(bool force)
     args << QStringLiteral("--render-model-thumbs");
     if (force)
         args << QStringLiteral("--force");
-    // 用本程序自己的 exe：渲染代码与应用绝对同版本，不必额外发布一个生成器，
-    // 也不用担心它跟主程序版本漂移。正式版是 requireAdministrator 清单，
-    // 但父进程已经提权，子进程直接继承令牌，不会弹 UAC。
+    // 用本程序自己的 exe：渲染代码绝对同版本。正式版是 requireAdministrator 清单，但父
+    // 进程已提权，子进程继承令牌，不会弹 UAC。
     job->setProgram(QCoreApplication::applicationFilePath());
     job->setArguments(args);
 
     m_kanbanThumbJob = job;
 
-    // 记下基线：任务开始前每张图是什么样。之后「修改时间变了」= 这张图刚生成好。
-    // 这个哈希同时充当「还没出图的待办清单」—— 谁完成就从里面摘掉。
     m_kanbanThumbBaseline.clear();
     for (const QString &id : missing) {
         const QString path = kanban::ModelThumbCache::pathFor(id);
@@ -973,8 +822,7 @@ void MainWindow::ensureKanbanModelThumbs(bool force)
     connect(job, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
             [this](int exitCode, QProcess::ExitStatus) { onKanbanThumbFinished(exitCode); });
     connect(job, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
-        // 只有「压根没起来」需要在这里收尾 —— FailedToStart 不会再有 finished 信号。
-        // 其余错误(崩溃等)随后一定有 finished，交给它统一收口。
+
         if (error != QProcess::FailedToStart)
             return;
         const QString reason = m_kanbanThumbJob ? m_kanbanThumbJob->errorString() : QString();
@@ -984,8 +832,7 @@ void MainWindow::ensureKanbanModelThumbs(bool force)
         onKanbanThumbFinished(-1);
     });
 
-    // 边生成边贴：每 250ms 看一眼缓存目录，谁先落盘谁先亮。
-    // 不读子进程的 stdout —— 见 m_kanbanThumbPoll 的说明。
+    // 边生成边贴：每 250ms 看一眼缓存目录，谁先落盘谁先亮。不读子进程的 stdout。
     if (!m_kanbanThumbPoll) {
         m_kanbanThumbPoll = new QTimer(this);
         m_kanbanThumbPoll->setInterval(250);
@@ -999,10 +846,8 @@ void MainWindow::ensureKanbanModelThumbs(bool force)
     job->start();
 }
 
-// 任务期间的轮询：已经落盘的图先贴上去。
-//
-// 判据是「文件修改时间与基线不同」，而不是「文件存在」—— 强制重建时文件本来
-// 就在，只有修改时间能说明它刚被重写过。
+// 任务期间的轮询：已落盘的图先贴上去。判据是「修改时间与基线不同」而非「文件存在」——
+// 强制重建时文件本来就在，只有修改时间能说明它刚被重写过。
 void MainWindow::pollKanbanModelThumbs()
 {
     if (m_kanbanThumbBaseline.isEmpty())
@@ -1021,9 +866,9 @@ void MainWindow::pollKanbanModelThumbs()
         const qint64 stamp = info.lastModified().toMSecsSinceEpoch();
         if (stamp == it.value()) {
             ++it;
-            continue; // 还是任务开始前那一张，没被重写
+            continue; // 还是任务开始前那一张
         }
-        // erase 已返回下一项，不能再 ++it，否则会跳项，甚至递增 end() 导致崩溃。
+        // erase 已返回下一项，不能再 ++it，否则会跳项甚至崩溃。
         applyKanbanModelThumb(it.key());
         it = m_kanbanThumbBaseline.erase(it);
     }
@@ -1041,18 +886,16 @@ void MainWindow::onKanbanThumbFinished(int exitCode)
     m_kanbanThumbJob = nullptr;
     job->deleteLater();
 
-    // 收尾时再轮询一次：进程退出与上一次定时器触发之间落盘的那几张，别漏掉。
+    // 收尾时再轮询一次：进程退出与上一次定时器触发之间落盘的那几张别漏掉。
     pollKanbanModelThumbs();
 
-    // 剩下的就是没出图的。这里不去解析子进程的标准输出 —— 完成与否只看磁盘，
-    // 因为文件一定写得出来，而 GUI 子系统进程的 stdout 不一定(见 report 的说明)。
+    // 剩下的就是没出图的。完成与否只看磁盘：文件一定写得出来，GUI 子系统进程的 stdout
+    // 不一定。
     const int failed = int(m_kanbanThumbBaseline.size());
     const int ok = m_kanbanThumbTotal - failed;
     m_kanbanThumbBaseline.clear();
     m_kanbanThumbTotal = 0;
 
-    // 整面重贴一遍兜底：万一某个文件的修改时间恰好与基线相同(同一毫秒内被
-    // 重写)，轮询会漏掉它，而这里按「有没有图」重贴一定对。
     reloadKanbanModelIcons();
 
     if (failed > 0) {
@@ -1071,17 +914,6 @@ void MainWindow::onKanbanThumbFinished(int exitCode)
     }
 }
 
-// 底部状态栏：第一行是运行状态，第二行是模型明细(由 updateKanbanControls() 写进
-// m_kanbanModelLine)。本函数挂在 measuredFpsChanged 上、每秒都要跑一次，所以只做
-// 字符串拼接 —— 模型那一行的重活(重扫结果摊开、网格选中态同步)留在
-// updateKanbanControls()，不要挪进来。
-//
-// 2026-09-19 按用户要求与模型明细合并到一处：原来它独占左卡一行，报「后端是谁、
-// 模型是谁」，而右卡底部那行说的是同一件事(「当前：Y」)，一屏说两遍。合并时顺手
-// 去掉了两处重复：
-//   · 模型名只留一次 —— 原来上面写「模型 witch X2 - free」、下面写「当前：witch X2 - free」；
-//   · 没在跑时不再写「后端 未启动」—— 前半句已经在说「未启动」了，说两遍像卡住了。
-// 分隔符沿用「 · 」，与下面那行一致。
 void MainWindow::updateKanbanStatus()
 {
     if (!m_kanban || !m_kanbanModelInfo)
@@ -1095,13 +927,13 @@ void MainWindow::updateKanbanStatus()
     else if (!m_kanban->backendText().isEmpty())
         status += QStringLiteral(" · 后端 %1").arg(m_kanban->backendText());
 
-    // 模型明细还没算过(首次进页面)时只显示状态行，别拼出一个空行。
+    // 模型明细还没算过时只显示状态行，别拼出一个空行。
     m_kanbanModelInfo->setText(m_kanbanModelLine.isEmpty()
                                    ? status
                                    : status + QLatin1Char('\n') + m_kanbanModelLine);
 }
 
-// 同步按钮、模型选中项与设置控件；帧率通知不触发整页回填。
+// 同步按钮、模型选中项与设置控件。
 void MainWindow::updateKanbanControls()
 {
     if (!m_kanban || !m_kanbanStartBtn)
@@ -1110,18 +942,12 @@ void MainWindow::updateKanbanControls()
     const bool running = m_kanban->isRunning();
     const bool paused = m_kanban->isPaused();
     const bool failed = m_kanban->state() == kanban::State::Error;
-    // Stopping 是「正在收口」的中间态：窗口与渲染器正在拆，此时再点一次既没有
-    // 可撤销的对象，也会在 stop() 里撞上 Starting->Stopping 之外的非法转移。
-    // 所以它是唯一该置灰的「在跑」状态 —— 它只存活一瞬，用户几乎撞不上。
+    // Stopping 是「正在收口」的中间态：窗口与渲染器正在拆，此时再点会在 stop() 里
+    // 撞上非法转移。它是唯一该置灰的「在跑」状态，只存活一瞬。
     const bool stopping = m_kanban->state() == kanban::State::Stopping;
 
-    // 这个按钮是**双态开关**：未启动时是「启动」，运行中(或失败待重试)时是
-    // 「取消」。两种状态都必须可点，禁用条件只能是「正在收口」这一瞬。
-    //
-    // 曾经写成 setEnabled(!running || failed)，于是 Running 时 !running=false、
-    // failed=false，按钮在变成「■ 取消」的同时被一起禁用 —— 用户看到的就是
-    // 「文字变了、颜色变灰、点不动」。enabled 与 text 必须由同一个判据驱动，
-    // 不要再各写一套。
+    // **双态开关**：「启动」/「取消」(运行中或失败待重试)。enabled 与 text 必须由同一个
+    // 判据驱动 —— 各写一套会出现「文字变了、颜色变灰、点不动」。
     const bool canToggle = !stopping;
     m_kanbanStartBtn->setEnabled(canToggle);
     m_kanbanStartBtn->setText((running || failed) ? QStringLiteral("■ 取消")
@@ -1131,9 +957,8 @@ void MainWindow::updateKanbanControls()
     m_kanbanStartBtn->style()->polish(m_kanbanStartBtn);
     m_kanbanPauseBtn->setEnabled(running);
     m_kanbanPauseBtn->setText(paused ? QStringLiteral("⏸ 继续") : QStringLiteral("⏸ 暂停"));
-    // 动作入口：可播动作不足两个就置灰，并把原因写进提示 —— 一个不解释原因的
-    // 灰按钮，用户只会当成 bug。实测 13 个模型里有 8 个可播动作不足 2 个，
-    // 所以这里灰掉是常态而不是异常，更要把原因说清楚。
+    // 可播动作不足两个就置灰并说明原因 —— 不解释原因的灰按钮用户只会当成 bug。实测
+    // 13 个模型里 8 个不到 2 个动作，灰掉是常态，更要说清楚。
     const int motionCount = m_kanban->playableMotionCount();
     const bool canPlayMotion = m_kanban->canPlayNextMotion();
     m_kanbanNextBtn->setEnabled(running && !paused && canPlayMotion);
@@ -1143,9 +968,7 @@ void MainWindow::updateKanbanControls()
                                     : (motionCount == 0
                                            ? QStringLiteral("当前模型只有待机动作，没有可播放的动作")
                                            : QStringLiteral("当前模型只有 1 个动作，没有可切换的对象")));
-    // 表情入口：当前模型/后端没有表情就置灰，并把原因写进提示 —— 一个不解释
-    // 原因的灰按钮，用户只会当成 bug；写清楚「当前模型没有表情文件」，
-    // 他就能自己换一个带表情的模型。
+    // 没有表情就置灰，并把原因写进提示，用户才能自己换一个带表情的模型。
     const int exprCount = m_kanban->expressionCount();
     m_kanbanExprBtn->setEnabled(running && !paused && exprCount > 0);
     m_kanbanExprBtn->setToolTip(exprCount > 0
@@ -1153,12 +976,6 @@ void MainWindow::updateKanbanControls()
                                           .arg(exprCount)
                                     : QStringLiteral("当前模型没有表情文件"));
 
-    // 模型明细：底部状态栏的第二行，把校验结果如实摊开，比「能不能用」四个字
-    // 有用得多。
-    //
-    // 顺带把网格的选中态同步过来。放在这里回填(而不是只在点击时设)，是为了让
-    // 「控制器里的当前模型」与「网格上高亮的那一格」不可能长期不一致 ——
-    // 托盘菜单、右键菜单、自动拉起都会换模型，它们都不经过网格。
     const QVector<kanban::ModelInfo> models = m_kanban->validModelList();
     QString info;
     int selectedRow = -1;
@@ -1176,8 +993,7 @@ void MainWindow::updateKanbanControls()
                     break;
                 }
             }
-            // 当前模型不在列表里(被删掉/被换掉)时高亮第一个，与改版前下拉框的
-            // 兜底行为一致 —— 空着不高亮会让用户以为「一个模型都没有」。
+            // 当前模型不在列表里时高亮第一个 —— 空着不高亮会让用户以为「一个都没有」。
             if (selectedRow < 0)
                 selectedRow = 0;
             m_kanbanModelGrid->setCurrentRow(selectedRow);
@@ -1195,9 +1011,7 @@ void MainWindow::updateKanbanControls()
     }
     if (!m_kanban->live2dAvailable())
         info += QStringLiteral("\n本程序未编译 Live2D 后端，模型只扫描校验，画面用内置占位形象。");
-    // 先存下来，再交给 updateKanbanStatus() 去拼第一行。分两步是有原因的：那个
-    // 函数挂在帧率信号上、每秒都要跑一次，不能让它顺带把上面这套重扫结果摊开
-    // 与网格选中态同步再跑一遍。
+
     m_kanbanModelLine = info;
     updateKanbanStatus();
 
@@ -1208,9 +1022,7 @@ void MainWindow::updateKanbanControls()
     m_kanbanTopBox->setChecked(m_kanban->alwaysOnTop());
     m_kanbanThroughBox->setChecked(m_kanban->mouseThrough());
     m_kanbanInteractBox->setChecked(m_kanban->interactionEnabled());
-    // 四选一回填：按档位选中对应的那一个。用 setChecked 而不是 group 的
-    // checkedId 设置器 —— 逐个 setChecked 时 QButtonGroup 的互斥会自动把
-    // 其他三个取消选中，不必自己写「其余置 false」那种容易漏的状态同步。
+
     switch (kanban::KanbanRenderer::clampGazeStrength(m_kanban->gazeStrength())) {
     case kanban::KanbanRenderer::GazeOff:
         m_kanbanGazeOff->setChecked(true);
@@ -1226,8 +1038,8 @@ void MainWindow::updateKanbanControls()
         m_kanbanGazeMedium->setChecked(true);
         break;
     }
-    // 托盘这项直接读配置：它不归 KanbanController 管，不回填的话
-    // 每次重绘都会显示成未勾选，用户以为设置丢了。
+    // 托盘这项直接读配置：不归 KanbanController 管，不回填的话每次重绘都显示未勾选，
+    // 用户以为设置丢了。
     auto &cfg = AppConfig::instance();
     m_trayMinimizeBox->setChecked(
         cfg.value(ConfigKeys::Tray::MinimizeToTrayOnClose, true).toBool());
@@ -1236,17 +1048,12 @@ void MainWindow::updateKanbanControls()
     if (m_tray)
         m_tray->updateRuntimeState();
 
-    // 诊断探针：把「启动/取消」按钮的可用性与位置写进日志。
-    //
-    // 起因是一个只靠读代码很难自证的问题：按钮的文字与 enabled 曾经由两套判据
-    // 驱动，点击启动后文字变成「■ 取消」却被同时禁用。自动化验证需要能**不问像素**
-    // 地拿到「这个按钮此刻可不可点、在哪」，所以在这里如实打印。
-    // 只在 YUMEIREN_DIAG=1 时落盘(Debug 级)，正常运行不多写一行。
+    // 诊断探针：把「启动/取消」按钮的可用性与位置写进日志，让自动化验证能**不问像素**地
+    // 拿到「此刻可不可点、在哪」。只在 YUMEIREN_DIAG=1 时落盘(Debug 级)。
     if (videodiag::diagEnabled()) {
         const QSize sz = m_kanbanStartBtn->size();
-        // 相对整窗的坐标才是可点的：按钮嵌在「卡片 → 滚动区 → 页 → 堆栈」里，
-        // geometry() 给的是它在**直接父容器**里的位置(实测恒为 0,0)，
-        // mapToGlobal 那时算出来的也是错的。mapTo(this) 逐级换算到主窗口客户区。
+        // 相对整窗的坐标才是可点的：geometry() 给的是它在**直接父容器**里的位置(实测恒
+        // 为 0,0)，mapTo(this) 逐级换算到主窗口客户区。
         const QPoint inWin = m_kanbanStartBtn->mapTo(this, QPoint(0, 0));
         const QPoint inWinCenter = m_kanbanStartBtn->mapTo(
             this, QPoint(sz.width() / 2, sz.height() / 2));
@@ -1263,15 +1070,6 @@ void MainWindow::updateKanbanControls()
                            .arg(m_kanban->stateText()),
                        QStringLiteral("Kanban"));
 
-        // 「暂停/继续」按钮同样打印。
-        //
-        // 起因：2026-09-17 删掉了 `applyMainWindowVisible()`（主窗口隐藏时冻结看板娘），
-        // 那个函数里也调 `m_renderer->pause()/resume()`，于是需要一条能证明
-        // **用户自己的暂停仍然好使** 的证据。走的是 `pauseResume()`，与窗口可见性无关。
-        //
-        // 坐标给**窗内中心**（`mapTo(this, ...)` = 主窗口客户区逻辑像素）：探针往顶层
-        // 窗口 PostMessage 时用的就是客户区坐标，直接拿这个值点，不必过 ClientToScreen
-        // —— 实测那条路两次运行会差 16 逻辑像素，点整排控件时会偏一格。
         if (m_kanbanPauseBtn) {
             const QSize psz = m_kanbanPauseBtn->size();
             const QPoint pc = m_kanbanPauseBtn->mapTo(
@@ -1286,12 +1084,7 @@ void MainWindow::updateKanbanControls()
                            QStringLiteral("Kanban"));
         }
 
-        // 视线四档的选中态与可点坐标。
-        //
-        // 为什么也要打印：四选一是「必须恰好选中一个」的控件，而回填走的是
-        // setChecked()、点击走的是 QButtonGroup::idClicked —— 这两条路一旦有一条
-        // 接错，表现就是「点不动」或者「显示的和存的不一样」，光看代码很难确认。
-        // 打印 checked 状态 + 窗内坐标，就能既核对互斥性、又能直接照着坐标点。
+        // 视线四档的选中态与可点坐标。回填与点击走两条路，打印 checked 状态即可核对互斥。
         {
             struct GazeRadio {
                 QRadioButton *radio;
@@ -1311,9 +1104,7 @@ void MainWindow::updateKanbanControls()
                 const QSize rsz = g.radio->size();
                 const QPoint rc = g.radio->mapTo(
                     this, QPoint(rsz.width() / 2, rsz.height() / 2));
-                // 同时给出**屏幕坐标**：自动化要照着点，而「窗内坐标」还要经过
-                // 客户区原点换算，窗口一移动/多屏/DPI 一变就容易算错。
-                // mapToGlobal 是 Qt 自己算的，拿它直接点不会错。
+
                 const QPoint rg = g.radio->mapToGlobal(QPoint(rsz.width() / 2, rsz.height() / 2));
                 parts << QStringLiteral("%1[checked=%2 中心=%3,%4 屏幕=%5,%6 %7x%8]")
                              .arg(kanban::KanbanRenderer::gazeStrengthName(g.strength))
@@ -1335,7 +1126,7 @@ void MainWindow::updateKanbanControls()
     }
 }
 
-// 看板娘页自己的日志行：主界面日志条只属于文件夹美化页，这里不借用它。
+// 看板娘页自己的日志行：主界面日志条只属于文件夹美化页，不借用它。
 void MainWindow::setKanbanLog(const QString &text, bool isError)
 {
     if (!m_kanbanLog)
@@ -1347,7 +1138,6 @@ void MainWindow::setKanbanLog(const QString &text, bool isError)
 }
 
 // 托盘图标左键单击/双击：窗口可能是 hide() 掉的，先 show 再解最小化。
-// (托盘菜单里原本还有一项「显示窗口」调到这里，2026-09-18 已撤掉，这条路只剩手势。)
 void MainWindow::showFromTray()
 {
     show();
@@ -1373,16 +1163,14 @@ void MainWindow::switchPage(int row)
     for (auto *t : m_wallTabs)
         t->setVisible(row == 1);
     m_statusBox->setVisible(row == 0);
-    // 第三页(看板娘)没有顶部门签：两个分支都要显式判断，
-    // 否则它会落进 else 去 selectWallTab，把壁纸页的门签选中态改乱。
+
     if (row == 0)
         selectHeaderTab(m_stack->currentIndex());
     else if (row == 1)
         selectWallTab(m_wallStack->currentIndex());
     else if (row == 2) {
         updateKanbanControls();
-        // 预览图**按需生成**：切到这一页才去补缺的图，而不是程序一启动就把
-        // 十几个模型全渲染一遍。缓存齐全时这一句什么都不做(见 ensureKanbanModelThumbs)。
+
         ensureKanbanModelThumbs();
     }
 }
@@ -1395,7 +1183,7 @@ void MainWindow::selectHeaderTab(int index)
         m_headerTabs[i]->setChecked(i == index);
     m_stack->setCurrentIndex(index);
     if (index == 0)
-        updateImagePreview(); // re-render preview at the new size
+        updateImagePreview();
 }
 
 void MainWindow::selectWallTab(int index)

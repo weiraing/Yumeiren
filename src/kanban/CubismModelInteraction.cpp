@@ -77,7 +77,7 @@ bool CubismModelImpl::startHitReaction(const QPointF &normalized)
         }
         const QString area = QString::fromUtf8(m_setting->GetHitAreaName(i));
 
-        // 头部优先触发表情，兼容常见的中英文命名。
+        // 头部优先触发表情，兼容中英文命名。
         const bool headLike = area.contains(QLatin1String("Head"), Qt::CaseInsensitive)
                               || area.contains(QStringLiteral("头"))
                               || area.contains(QStringLiteral("臉"))
@@ -87,7 +87,7 @@ bool CubismModelImpl::startHitReaction(const QPointF &normalized)
             return true;
         }
 
-        // 动作惯例：命中区名与运动组同名，或带 Tap 前缀，两种都认。
+        // 动作惯例：命中区名与运动组同名，或带 Tap 前缀。
         const QStringList candidates = {area, QStringLiteral("Tap%1").arg(area)};
         for (const QString &candidate : candidates) {
             for (int g = 0; g < m_motionGroups.size(); ++g) {
@@ -104,7 +104,7 @@ bool CubismModelImpl::startHitReaction(const QPointF &normalized)
             }
         }
 
-        // 无匹配动作时尝试表情反馈。
+        // 无匹配动作时退化为表情反馈。
         if (!headLike && playRandomExpression()) {
             logDebug(QStringLiteral("命中「%1」没有对应动作组 → 退化为表情反馈").arg(area));
             return true;
@@ -158,7 +158,7 @@ bool CubismModelImpl::playNextMotion()
     if (total == 0) {
         return false;
     }
-    // 顺序轮转避免重复；显式点击使用 Force，允许打断当前动作。
+    // 顺序轮转避免重复；显式点击用 Force，允许打断当前动作。
     for (int attempt = 0; attempt < total; ++attempt) {
         const int slot = m_motionCursor;
         const QPair<int, int> &motion = m_playableMotions.at(slot);
@@ -184,7 +184,7 @@ bool CubismModelImpl::startIdleMotion()
         const int index = m_deterministicIdle ? 0 : randomBelow(count);
         return startGroupMotion(m_idleGroup, index, kPriorityIdle);
     }
-    // 没有 idle 组就随便挑一组顶上，站桩不动比动作重复更难看。
+    // 没有 idle 组就随便挑一组顶上：站桩不动比动作重复更难看。
     for (int g = 0; g < m_motionGroups.size(); ++g) {
         const int n = motionCount(g);
         if (n > 0 && startGroupMotion(g, m_deterministicIdle ? 0 : randomBelow(n),
@@ -209,7 +209,7 @@ bool CubismModelImpl::setExpressionIndex(int index)
         InvalidMotionQueueEntryHandleValue) {
         return false;
     }
-    // 仅在播放成功后更新当前表情，供顺序和随机切换避重。
+    // 仅在播放成功后更新当前表情，供顺序与随机切换避重。
     m_lastExpression = index;
     return true;
 }
@@ -220,12 +220,11 @@ bool CubismModelImpl::playNextExpression()
         return false;
     }
     const int total = m_expressionNames.size();
-    // 顺序轮转而不是随机：用户点「切换表情」是想把几个表情看一遍，
-    // 随机抽样会连着撞同一个，看起来像没生效。
+    // 顺序轮转而非随机：用户点「切换表情」是想把几个表情看一遍，随机抽样会连着撞同一个。
     for (int attempt = 0; attempt < total; ++attempt) {
         const int index = m_nextExpression % total;
         m_nextExpression = (index + 1) % total;
-        // 只有一个表情的模型不跳过 —— 那一个就是它的全部，重播也算切了。
+        // 只有一个表情的模型不跳过：那一个就是它的全部，重播也算切了。
         if (total > 1 && index == m_lastExpression) {
             continue;
         }
@@ -245,7 +244,7 @@ bool CubismModelImpl::playRandomExpression()
     if (total == 1) {
         return setExpressionIndex(0);
     }
-    // 避开当前这张：摸头若有一半概率挑回同一张，用户会以为点击没生效。
+    // 避开当前这张：一半概率挑回同一张的话，用户会以为点击没生效。
     int index = m_lastExpression;
     for (int attempt = 0; attempt < 8 && index == m_lastExpression; ++attempt) {
         index = randomBelow(total);
@@ -256,7 +255,7 @@ bool CubismModelImpl::playRandomExpression()
     if (!setExpressionIndex(index)) {
         return false;
     }
-    // 同步游标，免得用户接着点「切换表情」时又绕回刚随机挑中的这张。
+    // 同步游标，免得用户接着点「切换表情」时绕回刚随机挑中的这张。
     m_nextExpression = (index + 1) % total;
     return true;
 }

@@ -43,13 +43,9 @@ class QProcess;
 /**
  * @brief 主窗口。
  *
- * 承载图片背景、效果样式、动态壁纸、看板娘和系统托盘的全部设置界面。
+ * 承载图片背景、效果样式、动态壁纸、看板娘和系统托盘的全部设置界面，
  * 采用侧边栏导航 + 多页堆栈布局，各页构建逻辑分散在 MainWindowXxxPage.cpp 中。
- *
- * 生命周期：
- * - 析构函数负责关闭图库缩略图后台任务的回调闸门；
- * - closeEvent 根据后台任务状态决定隐藏还是退出；
- * - 退出流程通过 ApplicationShutdown 统一收口。
+ * 析构函数负责关闭图库缩略图后台任务的回调闸门；退出流程通过 ApplicationShutdown 统一收口。
  */
 class MainWindow : public QMainWindow
 {
@@ -107,23 +103,21 @@ private:
     QSlider *makeSlider(int min, int max, int value, QLabel **valueLabel,
                         const QString &suffix = QString());
 
-    // helpers
+
     void updateImagePreview();
-    void scheduleImagePreview();          // 合并 resize 期间的预览重绘
-    // 预览框宽高比锁死为桌面(主屏)比例，宽度变化时按比例反算高度。
+    void scheduleImagePreview();
+
     void updatePreviewAspect();
     void updateEffectPresetSelection(int index);
     void setLog(const QString &text, bool isError);
     void setStatusChips();
-    // Hook DLL 目录迁移(<程序目录>\dll)后的启动自检：把当前注册状态记入诊断日志，
-    // 若注册表仍指向旧的 %LOCALAPPDATA% 位置，则预投放新 DLL 并提示用户重新应用。
+
     void reportDllMigration();
     void loadSettings();
     void saveImageSettings();
     void saveEffectSettings();
     void applyTheme(int mode);
-    // Shared setup for every QComboBox: names the popup view and its top-level
-    // frame, and clips that frame to the rounded panel the stylesheet paints.
+
     void styleCombo(QComboBox *combo) const;
     Engine::EffectConfig currentEffectConfig() const;
     void setImageSourceText(const QString &text);
@@ -139,7 +133,6 @@ private:
     // (Engine::imagePoolDir())。成功返回 true，count 给出池内图片数。
     bool buildRandomImagePool(int *count, QString *error);
 
-    // —— 看板娘 + 系统托盘 ——
     QWidget *buildKanbanPage();
     QWidget *buildKanbanModelCard(QWidget *parent);
     QWidget *buildKanbanParamCard(QWidget *parent);
@@ -153,12 +146,9 @@ private:
     void showFromTray();                 // 托盘图标左键单击/双击
     void onTrayQuitRequested();
 
-    // —— 模型静态预览图 ——
-    //
     // 取图逻辑：先按模型文件夹名到 .cache/model-thumbs 找同名 PNG，找不到才生成。
-    // 生成由**独立进程**(本程序自己的 --render-model-thumbs 模式)完成，原因见
-    // src/kanban/ModelThumbJob.h。这里只负责「发现缺图 → 起进程 → 盯缓存目录
-    // → 贴图标」。进度信号是**文件落盘**，不是子进程的标准输出。
+    // 生成由独立进程(本程序自己的 --render-model-thumbs 模式)完成，原因见
+    // src/kanban/ModelThumbJob.h。进度信号是文件落盘，不是子进程的标准输出。
     void ensureKanbanModelThumbs(bool force = false);
     void reloadKanbanModelIcons();       // 按当前缓存重贴全部格子图标
     void applyKanbanModelThumb(const QString &modelId); // 单个模型出图后即时贴图
@@ -178,10 +168,6 @@ private:
     QString galleryThumbPath(const QString &image) const;
     QString m_sourceText;      // “当前选择”完整文本(展示时按两行省略)
 
-    // 缩略图后台任务存活闸门(任务书 5.4 / 6.3：lambda 捕获裸 this 的悬空风险)：
-    // QThreadPool 工作线程在锁内复查标志后才向 this 投递队列回调，析构函数在同一
-    // 把锁内翻标志；互斥保证“检查通过则对象必然仍然存活”，否则退出时可能踩到
-    // 已销毁的 MainWindow。
     QMutex m_thumbTasksMutex;
     bool m_thumbTasksLive = true;
 
@@ -301,26 +287,14 @@ private:
     QPushButton *m_kanbanExprBtn = nullptr;
     QLabel *m_kanbanLog = nullptr;
     QListWidget *m_kanbanModelGrid = nullptr;
-    // 底部状态栏(右卡最下面那条)。它有两行：第一行是运行状态，由
-    // updateKanbanStatus() 每次现算；第二行是下面这个缓存下来的模型明细，
-    // 由 updateKanbanControls() 在重扫/换模型后写入 —— 分两步是为了让挂在
-    // 帧率信号上的那个函数保持廉价(见 updateKanbanStatus 的说明)。
+
     QLabel *m_kanbanModelInfo = nullptr;
     QString m_kanbanModelLine;
-    // 生成预览图的子进程。**非空即表示正在生成** —— 拿它当唯一的重入闸门，
-    // 免得再维护一个布尔量，两个状态迟早打架。
+    // 生成预览图的子进程。**非空即表示正在生成** —— 拿它当唯一的重入闸门。
     QProcess *m_kanbanThumbJob = nullptr;
-    // 任务期间轮询缓存目录的定时器：某个模型的图一落盘就贴到对应格子上。
-    //
-    // 为什么用「查文件」而不是「读子进程的 stdout」：本程序是 GUI 子系统的
-    // 可执行文件，实测它的 stdout 在 GL 上下文建立之后就写不出去了(见
-    // ModelThumbJob.cpp 里 report() 的说明)。而**文件一定写得出来** ——
-    // 图片本身就是这么落盘的。于是「缓存目录里出现了这张图」成了唯一可靠的
-    // 完成信号，也正好就是用户描述的那条取图逻辑。
+
     QTimer *m_kanbanThumbPoll = nullptr;
-    // 本次任务的基线：模型 id → 任务开始前该缓存文件的修改时间(0 = 当时没有)。
-    // 用修改时间而不是「文件在不在」判定完成，是为了让 --force(强制重建，
-    // 文件本来就在)也能被识别出来。这个哈希同时充当「还没出图的待办清单」。
+
     QHash<QString, qint64> m_kanbanThumbBaseline;
     int m_kanbanThumbTotal = 0; // 本次任务一共要出几张(收尾算成绩用)
     QSlider *m_kanbanScale = nullptr;
@@ -332,16 +306,15 @@ private:
     QCheckBox *m_kanbanTopBox = nullptr;
     QCheckBox *m_kanbanThroughBox = nullptr;
     QCheckBox *m_kanbanInteractBox = nullptr;
-    // 视线追踪是四选一(无/弱/中/强)，所以用互斥单选框而不是复选框：
-    // 「多明显」是一条一维刻度，四个选项各自可读，比「一个开关 + 一个灵敏度
-    // 滑块」更好选。id 直接用 kanban::KanbanRenderer 的档位值，见构建处。
+    // 视线追踪是四选一(无/弱/中/强)，用互斥单选框而不是复选框：这是一条一维刻度。
+    // id 直接用 kanban::KanbanRenderer 的档位值，见构建处。
     QButtonGroup *m_kanbanGazeGroup = nullptr;
     QRadioButton *m_kanbanGazeOff = nullptr;
     QRadioButton *m_kanbanGazeWeak = nullptr;
     QRadioButton *m_kanbanGazeMedium = nullptr;
     QRadioButton *m_kanbanGazeStrong = nullptr;
     QCheckBox *m_trayMinimizeBox = nullptr;
-    // 回填设置时挡住「控件变化 = 用户改动」，否则 loadSettings 会把刚读的值再写回去。
+    // 回填设置时挡住「控件变化 = 用户改动」，否则会把刚读的值再写回去。
     bool m_kanbanSyncing = false;
 };
 

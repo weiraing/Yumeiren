@@ -12,8 +12,8 @@ KanbanSoftwareView::KanbanSoftwareView(QWidget *parent)
     : QWidget(parent)
 {
     setObjectName(QStringLiteral("KanbanSoftwareView"));
-    // 视图本身也要透明：透明性由顶层窗口的 WA_TranslucentBackground 提供，
-    // 这里只要保证不画任何背景填充(默认 autoFillBackground=false 即满足)。
+    // 透明性由顶层窗口的 WA_TranslucentBackground 提供，这里只要不画背景填充
+    // (默认 autoFillBackground=false 即满足)。
     setAttribute(Qt::WA_NoSystemBackground, true);
     setAttribute(Qt::WA_TranslucentBackground, true);
 }

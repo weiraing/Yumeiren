@@ -11,9 +11,8 @@ namespace kanban {
 
 namespace {
 
-// 进程级的上下文世代发号器。刻意用单调计数而不是 context() 指针：指针会随
-// QOpenGLContext 对象释放被复用，一旦复用就等于「换了上下文却当成没换」，
-// 而那种误判的表现是「第二次启动画面空白」——偶发、且极难定位。
+// 世代发号器用单调计数而非 context() 指针：指针会随对象释放被复用，一旦复用就等于
+// 「换了上下文却当成没换」，表现为偶发的「第二次启动画面空白」，极难定位。
 quint64 nextGlContextGeneration()
 {
     static quint64 s_next = 1;
@@ -26,31 +25,26 @@ KanbanOpenGLView::KanbanOpenGLView(QWidget *parent)
     : QOpenGLWidget(parent)
 {
     setObjectName(QStringLiteral("KanbanOpenGLView"));
-    // 逐像素透明：看板娘边缘必须是真 alpha，而不是黑底/白底。
     QSurfaceFormat format = QSurfaceFormat::defaultFormat();
     format.setAlphaBufferSize(8);
     format.setSamples(0); // 多重采样与透明 FBO 在部分驱动上会退回黑边，关掉
-    // 必须点名 OpenGL 3.3(兼容剖面)：Cubism 的 Windows GL 渲染器在首次绘制前
-    // 用 wglGetProcAddress 抓 glGenFramebuffers / glBlitFramebuffer 等 3.x 入口，
-    // 抓不到就静默不画(不报错、不崩溃，只有一片空)。兼容剖面是因为它同时
-    // 用到 glUseProgram(0) 这类固定管线时代的写法；Qt 默认只请求 2.0。
+    // 必须点名 OpenGL 3.3：Cubism 的 Windows GL 渲染器用 wglGetProcAddress 抓 3.x 入口，
+    // 抓不到就静默不画(不报错、只有一片空)；Qt 默认只请求 2.0。
     format.setMajorVersion(3);
     format.setMinorVersion(3);
     format.setProfile(QSurfaceFormat::NoProfile);
     setFormat(format);
-    // GL 后端自己管 swapBuffers 上屏，不需要 Qt 再画一遍背景。
     setAttribute(Qt::WA_OpaquePaintEvent, false);
 }
 
 KanbanOpenGLView::~KanbanOpenGLView()
 {
-    // 先摘掉宿主指针再让 QOpenGLWidget 拆上下文：渲染器可能比本视图活得久
-    // (控制器降级到占位后端时不销毁渲染器)，留着就是悬空指针。
+    // 先摘宿主指针再让 QOpenGLWidget 拆上下文：渲染器可能比本视图活得久，留着就是
+    // 悬空指针。
     if (m_renderer) {
         m_renderer->setGlHost(nullptr);
     }
-    // 本析构函数体跑在 QOpenGLWidget 拆上下文之前，所以此刻 makeCurrent 仍可用，
-    // 但 GL 资源的正常释放走 KanbanController::stop()：那里先 shutdown 再删窗口。
+    // GL 资源的正常释放走 KanbanController::stop()：那里先 shutdown 再删窗口。
 }
 
 void KanbanOpenGLView::setRenderer(KanbanRenderer *renderer)
@@ -60,14 +54,10 @@ void KanbanOpenGLView::setRenderer(KanbanRenderer *renderer)
 
 void KanbanOpenGLView::initializeGL()
 {
-    // 上下文已当前化：此刻才允许创建 Cubism/纹理资源。
     makeCurrent();
-    // 先领一个新的世代号再发 contextReady：控制器是在 contextReady 里装载模型的，
-    // 而装载会建 Cubism 渲染器、进而碰那份进程级着色器缓存 —— 它必须已经能看到
-    // 新世代号，否则会把上一个上下文的死 id 当成自己的。
+    // 先领新世代号再发 contextReady：控制器在 contextReady 里装载模型，会碰那份进程级
+    // 着色器缓存，它必须已经能看到新世代号，否则会把上个上下文的死 id 当成自己的。
     m_contextGeneration = nextGlContextGeneration();
-    // 这三行日志是排查「桌面上一片空白」的第一现场：上下文有没有建起来、
-    // 拿到的是哪个 GL 版本、尺寸是不是 0，全靠它们区分。
     videodiag::log(videodiag::Level::Info,
                    QStringLiteral("[KanbanGL] initializeGL 上下文就绪：%1 / %2 / 绘制面 %3x%4")
                        .arg(QString::fromLatin1(reinterpret_cast<const char *>(
@@ -124,7 +114,6 @@ QSize KanbanOpenGLView::glPixelSize() const
 
 quint64 KanbanOpenGLView::glContextGeneration() const
 {
-    // 还没首绘时是 0，此时 context() 尚不存在，渲染器据此跳过换代判断。
     return m_contextGeneration;
 }
 
@@ -133,8 +122,7 @@ void KanbanOpenGLView::paintGL()
     const bool firstPaint = !m_firstPaintDone;
     if (firstPaint) {
         m_firstPaintDone = true;
-        // 「initializeGL 触发了」不等于「画面出来了」：中间还隔着一次 paintGL。
-        // 桌面上什么都没有时，这一行能立刻把两者分开。
+        // 「initializeGL 触发了」不等于「画面出来了」，中间还隔着一次 paintGL。
         videodiag::log(videodiag::Level::Info,
                        QStringLiteral("[KanbanGL] 首帧 paintGL(绘制面 %1x%2)")
                            .arg(glPixelSize().width())

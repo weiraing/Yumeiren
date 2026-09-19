@@ -15,17 +15,14 @@ namespace kanban {
 
 namespace {
 
-// 呼吸与摆动的角速度(弧度/秒)。取慢值：壁纸旁的常驻角色动作幅度过大会抢注意力。
+// 呼吸与摆动角速度(弧度/秒)取慢值：常驻角色动作幅度大会抢注意力。
 constexpr float kBreathOmega = 1.15f;
 constexpr float kSwayOmega = 0.55f;
 constexpr float kBlinkDuration = 0.13f;
 
-// 视线追踪调参：档位表在 KanbanRenderer.h 的 kGazeTuning，两个后端共用 ——
-// 刻意连常量都不在这里重复定义，避免「改了一个忘了另一个」。
-// 本文件只需知道「查表」这件事。
+// 视线追踪的档位表 kGazeTuning 在 KanbanRenderer.h，两个后端共用，此处不重复定义。
 
-// 一次性动作表：占位渲染器没有 motion3.json，动作是写死的三形变。
-// 名称与 Live2D 侧的 motion 语义对齐，方便接入后逐项替换。
+// 写死的三形变动作，名称与 Live2D 侧 motion 语义对齐，接入后逐项替换。
 struct MotionDef {
     const char *name;
     float duration;
@@ -37,9 +34,7 @@ const MotionDef kMotions[] = {
 };
 constexpr int kMotionCount = int(sizeof(kMotions) / sizeof(kMotions[0]));
 
-// 表情表：占位渲染器没有 exp3.json，表情是写死的脸部形变组合。
-// 命名与 Live2D 侧的语义对齐，接入 SDK 后逐项换成真表情即可。
-// 字段含义都相对「默认脸」而言，全部在 paint() 里叠加到既有形变上。
+// 写死的脸部形变组合，命名与 Live2D 侧语义对齐；各字段相对「默认脸」而言。
 struct ExpressionDef {
     const char *name;
     float eyeOpen;    // 睁眼高度倍率：0.4≈半闭、1.25≈瞪大
@@ -82,12 +77,10 @@ bool PlaceholderRenderer::loadModel(const QString &modelJsonPath, QString *outEr
             *outError = QStringLiteral("渲染器尚未初始化");
         return false;
     }
-    // 占位后端不解析模型，只记名字用于界面展示；校验由 KanbanModelManager 做过。
     m_modelName = QFileInfo(modelJsonPath).completeBaseName();
     if (m_modelName.endsWith(QStringLiteral(".model3")))
         m_modelName.chop(7);
 
-    // 尝试加载模型纹理：优先 textures/texture_00.png，其次同目录下同名 .png
     m_modelTexture = QImage();
     const QDir modelDir = QFileInfo(modelJsonPath).absoluteDir();
     const QStringList textureCandidates = {
@@ -98,22 +91,14 @@ bool PlaceholderRenderer::loadModel(const QString &modelJsonPath, QString *outEr
     for (const QString &rel : textureCandidates) {
         const QString path = modelDir.filePath(rel);
         if (QFileInfo::exists(path)) {
-            // 上限与 GPU 后端共用一份策略(见 KanbanRenderer.h)：这条路径常驻的是
-            // CPU 位图，4096² 就是 64MB，而它最终只会被画进这个窗口大小。
-            // 软件视图的 resize 来自 QWidget::resizeEvent，宽高是逻辑像素，
-            // 乘 DPR 就是设备像素，单位没有歧义。
+            // 上限与 GPU 后端共用一份策略(见 KanbanRenderer.h)：此处常驻 CPU 位图，
+            // 4096² 就是 64MB，而它最终只画进这么小的窗口。
             QImageReader reader(path);
             const int windowMaxDim = textureMaxDimFor(
                 QSize(qRound(m_width * m_dpr), qRound(m_height * m_dpr)));
-            // 再叠素材尺寸那条质量底线，与 GPU 后端同一口径 —— 否则同一个模型在
-            // 两个后端下的清晰度会不一样，降级时用户能直接看出来。
             const int maxDim = textureMaxDimFor(windowMaxDim, reader.size());
-            // 走同一个包装，理由见 kanban/ImageDecode.h：这条路径读的是和 GPU 后端
-            // 一模一样的素材，16384x8192 的图集同样会撞 Qt 的全局分配上限，
-            // 而且这里的失败是静默的 —— 只会退回默认花朵，日志里看不出原因。
             m_modelTexture = readImageDownscaled(reader, maxDim);
             if (!m_modelTexture.isNull()) {
-                // 预乘 alpha，加速后续绘制
                 m_modelTexture = m_modelTexture.convertToFormat(QImage::Format_RGBA8888_Premultiplied);
                 videodiag::log(videodiag::Level::Info,
                     QStringLiteral("[Kanban] 占位渲染器加载纹理: %1 (%2x%3, 上限 %4)")
@@ -157,7 +142,7 @@ void PlaceholderRenderer::update(float deltaSeconds)
         return;
     m_time += deltaSeconds;
 
-    // 眨眼：到点触发一次短闭眼，其余时间按剩余时长归零。
+    // 眨眼：到点触发一次短闭眼。
     m_nextBlinkIn -= deltaSeconds;
     if (m_nextBlinkIn <= 0.0f) {
         m_nextBlinkIn = 2.4f + 2.6f * (0.5f + 0.5f * qSin(m_time * 0.37f));
@@ -165,7 +150,7 @@ void PlaceholderRenderer::update(float deltaSeconds)
         m_motionActive = true;
     }
 
-    // 视线缓动：一阶低通，避免跟随鼠标时头部抖动。
+    // 视线一阶低通缓动，避免跟随鼠标时头部抖动。
     const float k = qBound(0.0f, deltaSeconds * 8.0f, 1.0f);
     m_gaze += (m_gazeTarget - m_gaze) * k;
 
@@ -183,20 +168,15 @@ void PlaceholderRenderer::pointerMove(const QPointF &pos)
     if (!gazeEnabled()) {
         return;
     }
-    // 与 Live2D 后端用同一套映射口径、同一张档位表：以窗口中心为原点、
-    // 按作用半径归一化、纵向再收一点。两份实现必须一致 —— 否则用户在降级
-    // 路径下看到的手感跟 Live2D 路径不一样，会以为「升级后变迟钝了」。
-    //
-    // 这里同样**不按半窗宽归一化**：看板娘窗口很小，鼠标几乎总在窗外，
-    // 除以半窗宽会让光标一离开窗口就瞬间饱和到 ±1，眼睛直接翻到底。
+    // 与 Live2D 后端同一套映射口径、同一张档位表，两份实现必须一致。同样**不按半窗宽
+    // 归一化** —— 窗口很小、鼠标几乎总在窗外，除半窗宽会让光标一离开就饱和到 ±1。
     const GazeTuning &tuning = kGazeTuning[clampGazeStrength(m_gazeStrength)];
     const float radiusX = qMax(m_width * tuning.radiusFactor, kGazeMinRadiusPx);
     const float radiusY = qMax(m_height * tuning.radiusFactor, kGazeMinRadiusPx);
     const float dx = static_cast<float>(pos.x()) - m_width * 0.5f;
     const float dy = static_cast<float>(pos.y()) - m_height * 0.5f;
     m_gazeTarget.setX(qBound(-1.0f, dx / radiusX, 1.0f));
-    // 符号约定与 Live2D 后端统一：+1 表示「光标在上方」。而这里的绘制坐标是
-    // 屏幕系(y 向下)，所以取负号 —— 否则鼠标往上移、眼睛反而往下看。
+    // 符号约定与 Live2D 后端统一：+1 表示光标在上方，而绘制坐标 y 向下，故取负号。
     m_gazeTarget.setY(qBound(-1.0f, -dy / radiusY * tuning.verticalScale, 1.0f));
     m_lastPointer = pos;
 }
@@ -211,12 +191,10 @@ void PlaceholderRenderer::setGazeStrength(int strength)
     m_gazeStrength = next;
 
     if (wasOn && !gazeEnabled()) {
-        // 只清目标值，让 update() 里的低通缓动把 m_gaze 平滑地带回中心 ——
-        // 直接把 m_gaze 抹零是瞬移，看着像抽了一下。
+        // 只清目标值，让低通缓动把 m_gaze 带回中心：直接抹零是瞬移。
         m_gazeTarget = QPointF(0.0, 0.0);
     } else if (gazeEnabled()) {
-        // 开起来、或在档位之间切换：按新半径立刻重算一次目标，否则要等下一次
-        // 鼠标移动才看得出差别，表现为「换了档没变化」。
+        // 开起来或切档位时按新半径立刻重算目标，否则要等下次鼠标移动才看出差别。
         if (m_lastPointer.x() >= 0.0) {
             pointerMove(m_lastPointer);
         }
@@ -240,8 +218,7 @@ bool PlaceholderRenderer::playNextMotion()
     }();
     if (!m_ready || names.isEmpty())
         return false;
-    // 游标是成员而不是函数内 static：static 会被所有实例共用、且重新初始化后
-    // 不回零，同一个进程里重建渲染器会「接着上次的序号往下走」。
+    // 游标是成员而非函数内 static：static 会被所有实例共用且重新初始化后不回零。
     const int i = m_motionIndex % names.size();
     m_motionIndex = (i + 1) % names.size();
     m_motion = {names.at(i), 0.0f, kMotions[i].duration};
@@ -264,8 +241,7 @@ bool PlaceholderRenderer::playNextExpression()
     if (!m_ready || kExpressionCount <= 0) {
         return false;
     }
-    // 顺序轮转而不是随机：用户点「切换表情」是想把几个表情看一遍，
-    // 随机抽样会连着撞同一个，看起来像没生效。
+    // 顺序轮转而非随机：随机抽样会连着撞同一个，看起来像没生效。
     m_expressionIndex = (m_expressionIndex + 1) % kExpressionCount;
     videodiag::log(videodiag::Level::Debug,
                    QStringLiteral("占位渲染器切表情：%1")
@@ -281,9 +257,7 @@ void PlaceholderRenderer::shutdown()
     unloadModel();
 }
 
-// —— 绘制 ——
-//
-// 如果已加载模型纹理则居中绘制纹理+呼吸缩放+摆动；否则绘制默认虞美人花朵。
+// 已加载模型纹理则居中绘制纹理+呼吸缩放+摆动，否则绘制默认虞美人花朵。
 void PlaceholderRenderer::paint(QPainter *painter, const QSize &logicalSize)
 {
     if (!m_ready || !painter)
@@ -296,7 +270,6 @@ void PlaceholderRenderer::paint(QPainter *painter, const QSize &logicalSize)
     const qreal h = logicalSize.height();
     const qreal t = m_time;
 
-    // 形变量：呼吸缩放、左右摆动、动作叠加的纵向位移。
     qreal breath = 0.0, sway = 0.0, hop = 0.0, squash = 1.0, wave = 0.0, mouthOpen = 0.0;
     if (!m_paused) {
         breath = qSin(t * kBreathOmega);            // -1..1
@@ -313,7 +286,6 @@ void PlaceholderRenderer::paint(QPainter *painter, const QSize &logicalSize)
             hop = -18.0 * shape;
         else if (m_motion.name == QLatin1String("wave"))
             wave = shape;
-        // 说话感的开口度：除眨眼外的一次性动作都张一下嘴。
         if (m_motion.name != QLatin1String("blink"))
             mouthOpen = shape;
     } else if (m_motion.name == QLatin1String("blink")) {
@@ -323,22 +295,18 @@ void PlaceholderRenderer::paint(QPainter *painter, const QSize &logicalSize)
     const qreal cx = w * 0.5 + sway * w * 0.012 + m_gaze.x() * w * 0.01;
     const qreal baseY = h * 0.93 + hop;
 
-    // 当前表情：只影响脸(眼/嘴)与花瓣色温，不影响姿态 —— 姿态归动作与呼吸，
-    // 两者分属不同通道，才可能出现「一边蹦跳一边笑」这种自然组合。
+    // 表情只影响脸(眼/嘴)与花瓣色温，不影响姿态 —— 两者分属不同通道才能组合出
+    // 「一边蹦跳一边笑」。
     const ExpressionDef &ex = kExpressions[qBound(0, m_expressionIndex, kExpressionCount - 1)];
 
-    // —— 有纹理时：绘制纹理角色 ——
     if (!m_modelTexture.isNull()) {
         painter->save();
-        // 缩放：纹理高度占画面 75%，保持宽高比
         const qreal texScale = (h * 0.75) / m_modelTexture.height();
         const qreal drawW = m_modelTexture.width() * texScale;
         const qreal drawH = m_modelTexture.height() * texScale;
-        // 呼吸缩放 + 挤压
         const qreal breathScale = 1.0 + breath * 0.015;
         const qreal finalW = drawW * squash * breathScale;
         const qreal finalH = drawH * breathScale;
-        // 位置：底部对齐 baseY，水平居中，加摆动偏移
         const qreal dx = cx - finalW * 0.5;
         const qreal dy = baseY - finalH;
         const QRectF dst(dx, dy, finalW, finalH);
@@ -348,13 +316,11 @@ void PlaceholderRenderer::paint(QPainter *painter, const QSize &logicalSize)
         return;
     }
 
-    // —— 无纹理时：绘制默认虞美人花朵 ——
 
     const qreal bodyH = h * 0.62 * (1.0 + breath * 0.012) * squash;
     const qreal headR = qMin(w, h) * 0.19;
     const qreal headCy = baseY - bodyH - headR * 0.35;
 
-    // 茎(身体)：上窄下宽的贝塞尔轮廓
     {
         QPainterPath stem;
         const qreal shoulderY = headCy + headR * 0.75;
@@ -375,7 +341,6 @@ void PlaceholderRenderer::paint(QPainter *painter, const QSize &logicalSize)
         painter->drawPath(stem);
     }
 
-    // 叶子：左右各一片，随呼吸轻微张合
     for (int side = -1; side <= 1; side += 2) {
         painter->save();
         painter->translate(cx, baseY - bodyH * 0.32);
@@ -391,7 +356,7 @@ void PlaceholderRenderer::paint(QPainter *painter, const QSize &logicalSize)
         painter->restore();
     }
 
-    // 花瓣「头发」：四片椭圆围绕头部，随视线整体微移，做出头发跟随感
+    // 花瓣「头发」：四片椭圆围绕头部，随视线整体微移，做出头发跟随感。
     {
         static const qreal angles[] = {200.0, 250.0, 290.0, 340.0};
         static const quint8 tones[] = {0xd8, 0xc4, 0xe6, 0xb2};
@@ -413,12 +378,10 @@ void PlaceholderRenderer::paint(QPainter *painter, const QSize &logicalSize)
         }
     }
 
-    // 头部
     painter->setPen(QPen(QColor(0x5c, 0x22, 0x33, 140), 1.2));
     painter->setBrush(QColor(0xf6, 0xdf, 0xd2));
     painter->drawEllipse(QPointF(cx, headCy), headR, headR * 1.02);
 
-    // 刘海
     {
         QPainterPath fringe;
         fringe.moveTo(cx - headR * 0.98, headCy - headR * 0.10);
@@ -436,15 +399,15 @@ void PlaceholderRenderer::paint(QPainter *painter, const QSize &logicalSize)
         painter->drawPath(fringe);
     }
 
-    // 眼睛：睁开高度按 1-blink 缩放，画成短弧即得「闭眼」效果。
-    // 表情在此基础上再乘一个倍率，或直接换成上弯弧(开心脸的「^ ^」)。
+    // 睁眼高度按 1-blink 缩放，画成短弧即闭眼；表情再乘倍率或换成上弯弧(笑眼)。
     {
         const qreal eyeY = headCy + headR * 0.12;
         const qreal eyeDx = headR * 0.38;
         const qreal open = 1.0 - double(m_blinkLeft);
         const qreal eyeH = qMax(0.6, headR * 0.22 * open * double(ex.eyeOpen));
         const qreal eyeW = headR * 0.16;
-        // 眨眼到一半以下时一律退化成弧线，这样「笑眼 + 眨眼」不会互相打架。
+        // 眨眼过半时一律退化成弧线，避免「笑眼 + 眨眼」互相打架。
+        // 眨眼过半时退化成弧线，避免「笑眼 + 眨眼」互相打架。
         const bool asArc = ex.arcEyes && open > 0.55;
         painter->setPen(Qt::NoPen);
         for (int side = -1; side <= 1; side += 2) {
@@ -471,7 +434,6 @@ void PlaceholderRenderer::paint(QPainter *painter, const QSize &logicalSize)
         }
     }
 
-    // 嘴：一条小弧，动作时张开；表情决定常态开口度与嘴角朝向(正=上扬/笑)。
     {
         const qreal mouthY = headCy + headR * 0.55;
         QPainterPath mouth;
@@ -487,7 +449,6 @@ void PlaceholderRenderer::paint(QPainter *painter, const QSize &logicalSize)
         painter->drawPath(mouth);
     }
 
-    // 花蕊头饰：头部上方一小圈黄点，把「虞美人」的身份点亮出来
     {
         painter->setPen(Qt::NoPen);
         painter->setBrush(QColor(0xf2, 0xc7, 0x4b));

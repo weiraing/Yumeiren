@@ -41,7 +41,6 @@ public:
     bool live2dAvailable() const;
     QString currentModelName() const { return m_currentModelName; }
     QStringList modelNames() const;
-    // 返回后端实际支持的表情数，界面据此启用入口。
     int expressionCount() const;
     // 有效模型的完整信息，顺序与 modelNames() 一致。
     QVector<ModelInfo> validModelList() const;
@@ -55,12 +54,10 @@ public:
     void stop();        // 取消看板娘：停帧、释放模型、关窗、复位
     void playNext();    // 下一个动作；没有可播动作就到此为止(不换模型)
     void playNextExpression(); // 下一个表情；没有表情就静默返回(不换模型)
-    // 可播动作数(不含 idle)与「这个入口该不该可点」。界面拿它置灰，
-    // 判据收在渲染器基类里一处，三条入口(菜单/设置页/托盘)共用。
+    // 可播动作数(不含 idle)与「这个入口该不该可点」。界面拿它置灰。
     int playableMotionCount() const;
     bool canPlayNextMotion() const;
-    // 只有 start() 会调用(软件渲染后端启动的最后一步)；GL 后端在等上下文时
-    // 就已经 show 过窗口。曾有配对的 hideWindow()，「暂时隐藏」删除后一并去掉了。
+    // 只有 start() 会调用(软件渲染后端启动的最后一步)。
     void showWindow();
 
     // —— 设置(全部即时生效并落盘) ——
@@ -81,14 +78,13 @@ public:
     // 视线强度：0=无、1=弱、2=中、3=强；开启时每帧采样全局光标。
     void setGazeStrength(int strength);
     int gazeStrength() const { return m_gazeStrength; }
-    // 「有没有开」= 档位 > 0。做成一处判据，免得各调用点自己写 `!= 0`。
+    // 「有没有开」= 档位 > 0。
     bool gazeTracking() const { return m_gazeStrength != 0; }
     bool setModelPath(const QString &modelJsonPath);
     QString modelPath() const { return m_modelPath; }
     int refreshModels(); // 重新扫描模型目录，返回可用模型数
 
     // 显示器电源状态(由主窗口的 WM_POWERBROADCAST 投递，与视频壁纸同一个事件源)。
-    // 熄屏期间桌面上没有任何东西需要绘制，看板娘却还在按帧率整帧画进 GL。
     void setMonitorOn(bool on);
 
     void loadSettings(); // 从配置读回全部看板娘设置
@@ -113,14 +109,9 @@ private slots:
     void evaluateSuspend();
 
 private:
-    // 挂起原因位。刻意只有这两项：
-    //   · 锁屏/熄屏是**必然看不见**，且判据本机可实测(会话锁定查询 + 电源广播)；
-    //   · 「前台全屏 / 桌面被遮挡」不做：看板娘默认置顶，本来就画在全屏应用之上；
-    //     不置顶时的遮挡判定又依赖多屏语义，本机单屏验证不了(视频壁纸那边同一个
-    //     结论，见 VideoWallpaper::evaluateSuspend 的注释)。宁可不省也不猜。
-    //
-    // 也刻意**不看主窗口有没有收进托盘**：看板娘是独立的桌面窗口，主界面隐藏时它
-    // 仍露在桌面上，冻住它只会看起来像坏了(2026-09-17 已按用户要求删掉那条联动)。
+    // 挂起原因位。刻意只有这两项：锁屏/熄屏是**必然看不见**且判据本机可实测。
+    // 「前台全屏 / 桌面被遮挡」不做(看板娘默认置顶，遮挡判定又依赖多屏语义，
+    // 本机单屏验证不了)。也刻意不看主窗口有没有收进托盘(看板娘是独立桌面窗口)。
     enum SuspendReason {
         SuspendLocked = 1,
         SuspendMonitorOff = 2,
@@ -151,7 +142,6 @@ private:
     void applyScaleToWindow();
     // 视线追踪：把全局光标换算成窗口坐标交给渲染器。每帧调一次。
     void feedGazeTarget();
-
     KanbanStateMachine m_machine;
     KanbanModelManager m_models;
     std::unique_ptr<KanbanRenderer> m_renderer;
@@ -182,8 +172,7 @@ private:
     bool m_alwaysOnTop = true;
     bool m_mouseThrough = false;
     bool m_interactionEnabled = true;
-    // 视线追踪档位(0=无 1=弱 2=中 3=强)。>0 即在喂目标。
-    int m_gazeStrength = 2;
+    int m_gazeStrength = 2; // 0=无 1=弱 2=中 3=强
 };
 
 } // namespace kanban

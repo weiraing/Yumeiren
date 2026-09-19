@@ -12,9 +12,8 @@ namespace kanban {
 
 namespace {
 
-// id 必须是「一个目录叶子名」：不含分隔符、不是 . / ..、不是空。
-// 这条校验是安全边界而不是洁癖 —— id 来自磁盘上的目录名，理论上可以是任何东西，
-// 而我们会拿它拼出一个将被写入的路径。
+// id 必须是「一个目录叶子名」：不含分隔符、不是 . / ..、不是空。这是安全边界
+// 而非洁癖 —— id 来自磁盘上的目录名，而我们会拿它拼出一个将被写入的路径。
 bool isSafeModelId(const QString &id)
 {
     if (id.isEmpty() || id == QLatin1String(".") || id == QLatin1String(".."))
@@ -65,16 +64,15 @@ QString ModelThumbCache::store(const QString &modelId, const QImage &image)
     if (image.isNull())
         return QString();
 
-    // 临时名带 PID：两个生成进程同时被拉起(理论上不该，但不能靠这个前提)
-    // 也不会互相踩同一个中间文件。
+    // 临时名带 PID：两个生成进程同时被拉起也不会互相踩同一个中间文件。
     const QString temp =
         target + QStringLiteral(".%1.tmp").arg(QCoreApplication::applicationPid());
     if (!image.save(temp, "PNG")) {
         QFile::remove(temp);
         return QString();
     }
-    // QFile::rename 在 Windows 上不覆盖已存在的目标，所以先删。
-    // 删失败(比如被杀软占着)就当这次失败 —— 界面继续用旧图，好过留下坏图。
+    // QFile::rename 在 Windows 上不覆盖已存在的目标，所以先删；删失败(如被杀软占着)
+    // 就当这次失败 —— 界面继续用旧图，好过留下坏图。
     if (QFile::exists(target) && !QFile::remove(target)) {
         QFile::remove(temp);
         return QString();
@@ -91,9 +89,8 @@ bool ModelThumbCache::remove(const QString &modelId)
     const QString path = pathFor(modelId);
     if (path.isEmpty())
         return false;
-    // 只删这一张 PNG，连目录都不碰 —— 目录归 directory() 管。
-    // 「本来就没有缓存」与「删掉了」对调用方是同一个结果(缓存里没这张图了)，
-    // 所以删不到不算失败，返回值只用来决定要不要写日志。
+    // 只删这一张 PNG，目录归 directory() 管。「本来就没有缓存」与「删掉了」对调用方
+    // 是同一个结果，所以删不到不算失败，返回值只用来决定要不要写日志。
     return QFile::remove(path);
 }
 

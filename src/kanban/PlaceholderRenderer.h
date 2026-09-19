@@ -1,13 +1,9 @@
 // 占位渲染器：Live2D Cubism Native SDK 未接入时的看板娘画面。
 //
-// 为什么不是「先放一张 PNG 上去」：任务书 §5.3/§13.1 要的是可运行的动画循环、
-// 状态机、交互与降级的联调载体，静态图验证不了时钟/暂停/缩放/透明度/穿透这条链路。
-// 所以这里用 QPainter 直接画一个会呼吸、会眨眼、会跟视线的角色。
-//
-// 与任务书 §5.1 禁止项的关系：禁止的是「Live2D 渲染→截图→QImage→QPixmap→QLabel」
-// 这种每帧位图搬运。本类在 paintEvent 里用 vector 绘制，无位图、无中间图像、无拷贝；
-// 每帧只做常数次路径构造，且都落在复用窗口上(update() 走脏区重绘)。
-//
+// 为什么不用一张静态 PNG：需要的是可运行的动画循环、状态机、交互与
+// 降级的联调载体，静态图验证不了时钟/暂停/缩放/透明度/穿透这条链路。这里用 QPainter
+// 直接画一个会呼吸、会眨眼、会跟视线的角色，无位图搬运、无中间图像。
+// SDK 接入后本类整体退役，控制器换掉 m_renderer 指向即可，其它模块零改动。
 // SDK 接入后本类整体退役：KanbanController 换掉 m_renderer 指向即可，其它模块零改动。
 #ifndef KANBANPLACEHOLDERRENDERER_H
 #define KANBANPLACEHOLDERRENDERER_H
@@ -36,18 +32,15 @@ public:
     void paint(QPainter *painter, const QSize &logicalSize) override;
 
     void pointerMove(const QPointF &pos) override;
-    // 视线追踪强度(无/弱/中/强)。切到「无」时把视线平滑带回中心；
-    // 档位之间切换时按新半径立刻重算目标(见实现处的说明)。
+    // 视线追踪强度(无/弱/中/强)。切到「无」时把视线平滑带回中心。
     void setGazeStrength(int strength) override;
     void pointerClick(const QPointF &pos) override;
     bool playNextMotion() override;
-    // 占位后端有 3 个写死的动作(见 .cpp 的 kMotions)：降级路径下「播放下一个动作」
-    // 不该变成死按钮，界面行为不因后端而不同。它没有 idle 组的概念，
-    // 所以 3 个全是「可播动作」。
+    // 3 个写死的动作，无 idle 组概念，所以 3 个全是「可播动作」—— 降级路径下入口
+    // 不该变成死按钮。
     int playableMotionCount() const override;
 
-    // 占位后端也有表情(见 .cpp 的 kExpressions)：降级路径下右键菜单的
-    // 「切换表情」不该变成死按钮，界面行为不因后端而不同。
+    // 占位后端也有表情，降级路径下「切换表情」不该变成死按钮。
     int expressionCount() const override;
     bool playNextExpression() override;
 

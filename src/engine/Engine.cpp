@@ -18,7 +18,7 @@
 #include <tlhelp32.h>
 
 namespace {
-// COM CLSID of the FolderExtension implemented by each hook DLL.
+// 各 hook DLL 实现的 FolderExtension 的 COM CLSID。
 constexpr char kClsidImage[]  = "{ED15A97D-FE3E-4CDE-98FF-BC46B02896B0}"; // ExplorerBgTool.dll (explorerTool)
 constexpr char kClsidEffect[] = "{887D3A6A-502E-4AF5-9CE6-D515E12AFE89}"; // ExplorerBlurMica.dll
 
@@ -33,8 +33,8 @@ Engine &Engine::instance()
 
 QString Engine::dllRoot()
 {
-    // Hook DLL 随缓存一起搬进程序目录：便携、且不再往 %LOCALAPPDATA% 写任何东西。
-    // 位置只取 applicationDirPath()，与当前工作目录无关。
+    // Hook DLL 随缓存搬进程序目录(便携，不再往 %LOCALAPPDATA% 写)；只取
+    // applicationDirPath()，与工作目录无关。
     return QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("dll"));
 }
 
@@ -56,7 +56,7 @@ QString Engine::imagePoolDir() { return CachePaths::imagePool(); }
 
 void Engine::ensureDataDirs()
 {
-    // 渲染出的背景图是可重新生成的缓存，落在 <程序目录>/.cache/rendered-bg。
+    // 渲染背景图是可重新生成的缓存，落在 <程序目录>/.cache/rendered-bg。
     QString cacheError;
     if (!CachePaths::ensureDirectories(&cacheError))
         videodiag::log(videodiag::Level::Error, cacheError, QStringLiteral("Cache"));
@@ -81,8 +81,7 @@ bool Engine::extractDlls(QString *error)
             if (error) *error = QStringLiteral("内置资源缺失: %1").arg(e.res);
             return false;
         }
-        // A stale explorer.exe may still hold the old DLL; keep the old file
-        // in that case - config.ini changes still take effect.
+        // 旧 DLL 可能仍被 explorer.exe 占用，这时保留磁盘上那份：config.ini 改动照样生效。
         if (dst.exists() && !dst.remove())
             continue;
         if (!dst.open(QIODevice::WriteOnly)) {
@@ -107,7 +106,7 @@ ComponentStatus Engine::queryStatus(const char *clsid, const QString &ourDll)
     QSettings s(folderExtKey(clsid), QSettings::NativeFormat);
     QString path = s.value(QStringLiteral(".")).toString(); // default value
     if (path.isEmpty()) {
-        // Some versions store the path in InprocServer32 of the CLSID key.
+        // 某些版本把路径存在 CLSID 键的 InprocServer32 下。
         QSettings c(QStringLiteral("HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\")
                         + QString::fromLatin1(clsid) + QStringLiteral("\\InprocServer32"),
                     QSettings::NativeFormat);
@@ -122,8 +121,8 @@ ComponentStatus Engine::queryStatus(const char *clsid, const QString &ourDll)
     st.ours = (native == ours);
     st.foreign = !st.ours;
     st.dangling = !QFileInfo::exists(path);
-    // 路径迁移后旧注册会指向 %LOCALAPPDATA%\Yumeiren/dll：单独标出来，
-    // 免得界面把它当成"其他程序占用"，用户不知道该重新点一次应用。
+    // 旧注册会指向 %LOCALAPPDATA%\Yumeiren/dll：单独标出来，免得界面把它当成
+    // "其他程序占用"，用户不知道该重新点一次应用。
     const QString legacy = QDir::fromNativeSeparators(legacyDllRoot().toLower());
     st.stale = !st.ours
                && (native == legacy
@@ -157,7 +156,6 @@ bool Engine::runRegsvr32(const QString &dll, bool unregister, QString *error)
     const QString exe = QDir::toNativeSeparators(
         QStringLiteral("%1\\System32\\regsvr32.exe").arg(qEnvironmentVariable("SystemRoot")));
     const QString nativeDll = QDir::toNativeSeparators(dll);
-    // QProcess quotes arguments itself; do not pre-quote the path.
     QStringList args{QStringLiteral("/s")};
     if (unregister)
         args << QStringLiteral("/u");
@@ -174,7 +172,7 @@ bool Engine::runRegsvr32(const QString &dll, bool unregister, QString *error)
         return true;
     }
 
-    // Not elevated: ask via UAC.
+    // 未提权：走 UAC。
     SHELLEXECUTEINFOW sei = {};
     sei.cbSize = sizeof(sei);
     sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
@@ -205,8 +203,7 @@ bool Engine::registerDllInternal(const char *clsid, const QString &dll, QString 
         if (error) *error = QStringLiteral("DLL 不存在: %1").arg(dll);
         return false;
     }
-    // If the CLSID is registered to a missing file, remove the leftover first
-    // (regsvr32 /u cannot load a file that no longer exists).
+    // 残留注册指向已不存在的文件时必须先清键：regsvr32 /u 载不进一个不存在的 DLL。
     ComponentStatus st = queryStatus(clsid, dll);
     if (st.registered && !st.ours && st.dangling) {
         QSettings s(folderExtKey(clsid), QSettings::NativeFormat);
@@ -223,10 +220,10 @@ bool Engine::unregisterDllInternal(const char *clsid, const QString &dll, QStrin
 {
     ComponentStatus st = queryStatus(clsid, dll);
     if (!st.registered)
-        return true; // nothing to do
+        return true; // 无注册可注销
     if (st.ours && QFileInfo::exists(dll))
         return runRegsvr32(dll, true, error);
-    // Foreign or dangling registration: delete the keys directly.
+    // 外来或残留注册：直接删键。
     QSettings s(folderExtKey(clsid), QSettings::NativeFormat);
     s.clear();
     QSettings c(QStringLiteral("HKEY_LOCAL_MACHINE\\SOFTWARE\\Classes\\CLSID\\")
@@ -274,8 +271,7 @@ bool Engine::writeImageConfig(const QString &imageDir, int posType, int imgAlpha
     ensureDataDirs();
     if (!extractDlls(error))
         return false;
-    // Assembled by concatenation: user paths may contain '%' characters that
-    // QString::arg would misinterpret.
+    // 用拼接而不是 arg：用户路径里的 '%' 会被 QString::arg 误解析。
     QString ini;
     ini += QStringLiteral("[load]\r\n");
     ini += QStringLiteral("folderExt=") + boolStr(folderExt) + QStringLiteral("\r\n");
@@ -316,7 +312,6 @@ bool Engine::restartExplorer(QString *error)
     Q_UNUSED(error);
     QProcess::execute(QStringLiteral("taskkill"),
                       {QStringLiteral("/f"), QStringLiteral("/im"), QStringLiteral("explorer.exe")});
-    // Wait until the process is really gone so the restart is deterministic.
     for (int i = 0; i < 50; ++i) {
         bool alive = false;
         HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -348,7 +343,7 @@ QString Engine::windowsProductName()
     QString name = s.value(QStringLiteral("ProductName")).toString();
     if (name.isEmpty())
         name = QStringLiteral("Windows");
-    // Win11 keeps ProductName "Windows 10 ..." in the registry; go by build.
+    // Win11 在注册表里仍把 ProductName 写成 "Windows 10 ..."，只能按 build 判断。
     if (ok && build >= 22000)
         name = QStringLiteral("Windows 11");
     QString display = s.value(QStringLiteral("DisplayVersion")).toString();

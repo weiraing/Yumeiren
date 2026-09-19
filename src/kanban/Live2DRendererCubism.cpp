@@ -14,7 +14,6 @@ using cubismruntime::logDebug;
 using cubismruntime::logInfo;
 using cubismruntime::logWarn;
 
-// 门面仅管理宿主状态、模型生命周期及坐标转换。
 struct Live2DRenderer::Private
 {
     std::unique_ptr<CubismModel> model;
@@ -22,11 +21,9 @@ struct Live2DRenderer::Private
     bool glBuilt = false;
     bool glewReady = false;
     QSize pixelSize;
-    // 绘制面变大到当前纹理上限不够用时置位，由控制器在帧 tick 里消费。
     bool textureRebuildPending = false;
     float gazeX = 0.0f;
     float gazeY = 0.0f;
-    // 保留原始坐标，强度切换时按新半径重算目标。
     QPointF lastPointer{-1.0, -1.0};
     bool gazeSeen = false;
 };
@@ -38,7 +35,6 @@ bool Live2DRenderer::sdkCompiledIn()
 
 QString Live2DRenderer::unavailableReason()
 {
-    // 能走到这份实现就说明 SDK 已经链进来了，没有「不可用」可言。
     return QStringLiteral("Cubism Native SDK 已接入，无需降级");
 }
 
@@ -54,11 +50,11 @@ Live2DRenderer::~Live2DRenderer()
 
 void Live2DRenderer::setGlHost(KanbanGlHost *host)
 {
-    // 同一宿主可能重复交付，此时保留已上传的 GL 资源。
     if (host == m_d->host) {
         return;
     }
     if (m_d->model) {
+        // 换宿主即作废旧句柄，避免在别的上下文里误用。
         m_d->model->invalidateGl();
     }
     m_d->host = host;
@@ -95,10 +91,8 @@ bool Live2DRenderer::loadModel(const QString &modelJsonPath, QString *outError)
 
     auto model = createCubismModel();
     if (!model->setup(modelJsonPath, outError)) {
-        // setup 失败时还没碰过 GL，直接丢弃是安全的。
         return false;
     }
-    // 本次装载已按当前绘制面的上限上传纹理，待办到此了结。
     m_d->textureRebuildPending = false;
 
     model->setDeterministicIdle(m_deterministicIdle);
@@ -111,8 +105,7 @@ bool Live2DRenderer::loadModel(const QString &modelJsonPath, QString *outError)
                 .arg(model->playableMotionCount())
                 .arg(model->expressionCount()));
 
-    // 控制器换模型时未必在 paintGL 里，此时没有上下文是常态；
-    // 建不起来就交给第一次 render() 补，不把这一步当失败。
+    // 控制器换模型时未必在 paintGL 里；建不起来就交给第一次 render() 补，不算失败。
     if (m_d->host) {
         const GlScope scope(m_d->host, &m_d->glewReady);
         const QSize pixels = m_d->host->glPixelSize();
@@ -159,11 +152,8 @@ void Live2DRenderer::resize(int width, int height, float devicePixelRatio)
     m_height = height;
     m_dpr = devicePixelRatio;
 
-    // 纹理上限跟着绘制面走，但只在「变大到需要更细的一档」时补：缩小不必回退
-    // (省下的显存本来就没占着)，而用户来回拖缩放时不该每一步都重解一遍素材。
-    // 判据取宿主的 glPixelSize —— 那正是下一次 ensureGl 会收到的那个值，不用
-    // 再拿 resize 的宽高去猜单位。真正的重建留给帧 tick
-    // (见 KanbanRenderer::rebuildTexturesIfNeeded 的说明)。
+    // 纹理上限只在「变大到需要更细的一档」时补：缩小不回退，拖缩放时不该每步重解素材。
+    // 判据取宿主的 glPixelSize；真正的重建留给帧 tick。
     const QSize pixels = m_d->host ? m_d->host->glPixelSize() : QSize();
     if (m_modelLoaded && !pixels.isEmpty() && !m_d->pixelSize.isEmpty()
         && textureMaxDimFor(pixels) > textureMaxDimFor(m_d->pixelSize)) {
@@ -177,7 +167,6 @@ bool Live2DRenderer::rebuildTexturesIfNeeded()
         return false;
     }
     m_d->textureRebuildPending = false;
-    // 路径为空说明模型已经被 shutdown 收掉了，这里绝不能凭空路径把它装回来。
     if (m_modelPath.isEmpty()) {
         return false;
     }
@@ -189,8 +178,7 @@ bool Live2DRenderer::rebuildTexturesIfNeeded()
                     .arg(textureMaxDimFor(m_d->pixelSize)));
         return true;
     }
-    // 装载第一步就会释放旧资源，所以失败不会退回原画面，只会空着。
-    // 不逐帧重试(那是每帧读盘解码)，等用户或挂起恢复流程再装载。
+    // 失败不会退回原画面，只会空着；不逐帧重试(那是每帧读盘解码)。
     logWarn(QStringLiteral("纹理按新上限重建失败：%1").arg(err));
     return false;
 }
@@ -204,8 +192,8 @@ void Live2DRenderer::update(float deltaSeconds)
 }
 
 void Live2DRenderer::paint(QPainter *painter, const QSize &logicalSize)
+// GPU 路径由 render() 负责，本后端不存在软件绘制路径。
 {
-    // GPU 路径由 render() 负责，软件路径下本后端不存在。
     Q_UNUSED(painter)
     Q_UNUSED(logicalSize)
 }
@@ -216,7 +204,6 @@ void Live2DRenderer::render()
     if (!model || !m_d->host) {
         return;
     }
-    // GlScope 顺带保证 GLEW 函数表可用(见类注释)，不必在这里单独 glewInit。
     const GlScope scope(m_d->host, &m_d->glewReady);
     if (!scope.ok()) {
         return;
@@ -253,30 +240,26 @@ void Live2DRenderer::pointerMove(const QPointF &pos)
         return;
     }
 
-    // 光标转换为 -1..1 方向；扩大作用半径，避免小窗口过早达到幅度上限。
+    // 光标转成 -1..1 方向，并扩大作用半径避免小窗口过早饱和。
     const float w = m_width > 0 ? static_cast<float>(m_width) : 1.0f;
     const float h = m_height > 0 ? static_cast<float>(m_height) : 1.0f;
 
     const GazeTuning &tuning = kGazeTuning[clampGazeStrength(m_gazeStrength)];
-    // 半径设下限，避免缩小窗口后过于敏感。
     const float radiusX = std::max(w * tuning.radiusFactor, kGazeMinRadiusPx);
     const float radiusY = std::max(h * tuning.radiusFactor, kGazeMinRadiusPx);
 
-    // pos 可以位于窗口外，负坐标同样有效。
     const float dx = static_cast<float>(pos.x()) - w * 0.5f;
     const float dy = static_cast<float>(pos.y()) - h * 0.5f;
 
     const float nx = qBound(-1.0f, dx / radiusX, 1.0f);
-    // Qt 的 y 向下，Cubism 向上；再按档位收敛纵向幅度。
     const float ny = qBound(-1.0f, -dy / radiusY * tuning.verticalScale, 1.0f);
 
     m_d->gazeX = nx;
     m_d->gazeY = ny;
     m_d->gazeSeen = true;
-    // 存下原始坐标：档位切换时要按新半径重算，见 Private::lastPointer 的说明。
     m_d->lastPointer = pos;
-    // 这里只写目标方向，平滑过渡由模型更新器完成。
     m_d->model->setDragTarget(nx, ny);
+    // 只写目标方向，平滑过渡由模型更新器完成。
 }
 
 QString Live2DRenderer::gazeDebugText() const
@@ -305,12 +288,10 @@ void Live2DRenderer::setGazeStrength(int strength)
         return;
     }
     if (wasOn && !nowOn && m_d->gazeSeen) {
-        // 关闭时通过同一平滑通道回正。
         m_d->gazeX = 0.0f;
         m_d->gazeY = 0.0f;
         m_d->model->setDragTarget(0.0f, 0.0f);
     } else if (nowOn && m_d->gazeSeen) {
-        // gazeSeen 已保证坐标有效；窗口左侧的负坐标也要按新档位重算。
         pointerMove(m_d->lastPointer);
     }
 }
@@ -332,14 +313,11 @@ bool Live2DRenderer::playNextMotion()
 
 int Live2DRenderer::playableMotionCount() const
 {
-    // 模型没装载时答 0：界面据此把「播放下一个动作」置灰，
-    // 而不是让用户点了没反应。
     return m_d->model ? m_d->model->playableMotionCount() : 0;
 }
 
 int Live2DRenderer::expressionCount() const
 {
-    // 模型没装载时答 0：界面据此把入口置灰，而不是让用户点了没反应。
     return m_d->model ? m_d->model->expressionCount() : 0;
 }
 
@@ -364,7 +342,6 @@ void Live2DRenderer::resume()
 
 void Live2DRenderer::shutdown()
 {
-    // 框架选项和 ID 管理器与进程同寿，关闭后允许再次装载模型。
     unloadModel();
     m_ready = false;
     m_modelLoaded = false;

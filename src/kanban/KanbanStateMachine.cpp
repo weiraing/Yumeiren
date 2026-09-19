@@ -1,11 +1,7 @@
 // 看板娘状态机实现：状态转移的唯一切面。
 //
-// 设计口径：
-//   · 只允许表里列出的转移，其余一律拒绝并写日志(不静默) —— 真机跑起来时
-//     日志里出现「拒绝非法状态转移」就是逻辑漏点，必须修而不是屏蔽；
-//   · 自反转移(from == to)也拒绝，避免托盘/窗口事件重复投递被当成成功；
-//   · 交互态 Hover / Clicked / Dragging 之间必须能回到 Idle，
-//     且任何一种交互态都允许被 Paused / Stopping 抢占(用户随时能暂停或取消)。
+// 只允许表里列出的转移，其余一律拒绝并写日志(不静默)；自反转移(from == to)也拒绝，
+// 避免托盘/窗口事件重复投递被当成成功。交互态都允许被 Paused / Stopping 抢占。
 #include "kanban/KanbanStateMachine.h"
 
 #include "core/Diagnostics.h"
@@ -46,7 +42,7 @@ bool KanbanStateMachine::allowed(State from, State to)
         return to == State::Idle || to == State::Stopping || to == State::Error;
 
     case State::Stopping:
-        // 收口途中的任何事件都被丢弃，因此这里唯一出路是 Stopped。
+        // 收口途中的任何事件都被丢弃，故唯一出路是 Stopped。
         return to == State::Stopped;
 
     case State::Error:

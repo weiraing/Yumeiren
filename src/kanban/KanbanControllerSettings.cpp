@@ -83,7 +83,7 @@ void KanbanController::placeWindowFromConfig()
         return;
     }
     AppConfig &config = AppConfig::instance();
-    // 未保存位置时，由窗口选择主屏右下角。
+    // 未保存位置时(配置为 -1)，由窗口选择主屏右下角。
     const int x = config.value(QString::fromLatin1(ConfigKeys::Kanban::PosX), -1).toInt();
     const int y = config.value(QString::fromLatin1(ConfigKeys::Kanban::PosY), -1).toInt();
     const QSize size = windowSizeForScale(m_scalePercent);
@@ -203,8 +203,8 @@ bool KanbanController::setModelPath(const QString &modelJsonPath)
         return false;
     }
     m_modelPath = modelJsonPath;
-    // 挂起释放标记跟着装载结果复位：熄屏时会话仍是活跃的，用户在这期间换模型
-    // 会把刚释放掉的东西又装回显存。不复位，心跳就因为标记还挂着而再也不释放。
+    // 挂起释放标记跟着装载结果复位：熄屏时会话仍活跃，用户若在这期间换模型会把
+    // 刚释放的东西又装回显存；不复位的话心跳会因标记还挂着而再也不释放。
     m_releasedForSuspend = false;
     m_currentModelName = info->name;
     m_lastError.clear();

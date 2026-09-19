@@ -1,17 +1,13 @@
-// 看板娘窗口：无边框 + 逐像素透明的常驻小窗(任务书 §4.1 / §6)。
+// 看板娘窗口：无边框 + 逐像素透明的常驻小窗。
 //
-// 分工：本类只管「帧、原生窗口样式、用户意图」，画面由子视图承担 ——
-//   · 占位渲染器 → KanbanSoftwareView(QWidget + QPainter)
-//   · Live2D     → KanbanOpenGLView(QOpenGLWidget，需要活的 GL 上下文)
-// 两者的基类不同，没法用继承统一，所以窗口按 renderer->usesOpenGL() 选型，
-// 再用事件过滤器把鼠标交互收在一处：换后端不改交互，交互不改渲染。
+// 本类只管「帧、原生窗口样式、用户意图」，画面由子视图承担(占位渲染器 → 软件视图，
+// Live2D → OpenGL 视图)。两者基类不同，所以按 usesOpenGL() 选型，再用事件过滤器
+// 把鼠标交互收在一处：换后端不改交互。
 //
 // 三条硬约束：
-//   · 不进任务栏、不抢焦点(Qt::Tool + WA_ShowWithoutActivating)：看板娘出现在
-//     桌面上不该打断用户正在做的事；
-//   · 关不掉：closeEvent 里一律 ignore，窗口的销毁只由控制器 stop() 负责，
-//     于是反复启停不重建窗口(任务书 §13.1 对象数不增长)；
-//   · 本类不计时：动画推进由控制器把统一时钟接到视图上，窗口不参与。
+//   · 不进任务栏、不抢焦点(Qt::Tool + WA_ShowWithoutActivating)；
+//   · 关不掉：closeEvent 里一律 ignore，销毁只由控制器 stop() 负责；
+//   · 本类不计时：动画推进由控制器把统一时钟接到视图上。
 #ifndef KANBANWINDOW_H
 #define KANBANWINDOW_H
 
@@ -37,7 +33,6 @@ public:
     QWidget *viewWidget() const { return m_view; }
     bool usesOpenGLHost() const { return m_glHost; }
 
-    // 每帧标脏(控制器调用)。
     void requestFrame();
 
     void setAlwaysOnTop(bool onTop);
@@ -58,7 +53,7 @@ public:
     void setPausedVisual(bool paused);
     void setModelDisplayName(const QString &name);
 
-    // 关掉互动后仍可见可拖动，只是不再响应悬停/点击/滚轮(任务书 §6.4 的配置项)。
+    // 关掉互动后仍可见可拖动，只是不再响应悬停/点击/滚轮。
     void setInteractionEnabled(bool enabled);
     bool interactionEnabled() const { return m_interactionEnabled; }
 
@@ -75,17 +70,11 @@ signals:
     void playNextRequested();
     void nextExpressionRequested();
     void nextModelRequested();
-    // 视线追踪档位**不走这个窗口的右键菜单**(档位在设置页与托盘两处)，
-    // 所以这里没有 gazeStrengthRequested —— 别再往右键菜单里加回去。
-    // 同样地这里也没有 hideRequested：「暂时隐藏」2026-09-19 已删(隐藏后没有
-    // 恢复入口，是个单向门)，别再往右键菜单里加回去。
+    // 视线档位与「暂时隐藏」都不走本窗口的右键菜单，故无对应信号 —— 别加回去。
     void settingsRequested();
     void quitRequested();         // 「取消看板娘」
-    // 右键菜单里的两个窗口行为开关。**必须走控制器，不能直接连到本类的
-    // setMouseThrough / setAlwaysOnTop** —— 那样会绕过控制器，于是
-    //   · 控制器的 m_mouseThrough 停留在旧值；
-    //   · kanban/mouseThrough 配置键不落盘，重启后设置丢失；
-    //   · 设置页的复选框不同步（用户实测报的就是这一条）。
+    // 窗口行为开关。**必须走控制器，不能直接连到本类的 setMouseThrough /
+    // setAlwaysOnTop**，否则会绕过控制器导致配置不落盘、设置页复选框不同步。
     void mouseThroughRequested(bool through);
     void alwaysOnTopRequested(bool onTop);
     // GL 后端：上下文已在渲染线程就绪，控制器此时才能 initialize()+loadModel()。
@@ -99,8 +88,7 @@ protected:
 
 private:
     void ensureView();
-    // 让子视图把手里的渲染器指针放掉。视图是 deleteLater 的、比窗口多活一会儿，
-    // 期间任何一次绘制都会用到这个指针 —— 见实现处的说明。
+    // 让子视图把手里的渲染器指针放掉。视图是 deleteLater 的、比窗口多活一会儿。
     void releaseViewRenderer();
     void applyTopmostStyle();
     void applyMouseThroughStyle();
