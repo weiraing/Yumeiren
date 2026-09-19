@@ -9,8 +9,8 @@
 // 三条硬约束：
 //   · 不进任务栏、不抢焦点(Qt::Tool + WA_ShowWithoutActivating)：看板娘出现在
 //     桌面上不该打断用户正在做的事；
-//   · 关闭 = 隐藏：closeEvent 里 ignore 后发 hideRequested，销毁只由控制器
-//     stop() 负责，于是反复启停不重建窗口(任务书 §13.1 对象数不增长)；
+//   · 关不掉：closeEvent 里一律 ignore，窗口的销毁只由控制器 stop() 负责，
+//     于是反复启停不重建窗口(任务书 §13.1 对象数不增长)；
 //   · 本类不计时：动画推进由控制器把统一时钟接到视图上，窗口不参与。
 #ifndef KANBANWINDOW_H
 #define KANBANWINDOW_H
@@ -77,7 +77,8 @@ signals:
     void nextModelRequested();
     // 视线追踪档位**不走这个窗口的右键菜单**(档位在设置页与托盘两处)，
     // 所以这里没有 gazeStrengthRequested —— 别再往右键菜单里加回去。
-    void hideRequested();
+    // 同样地这里也没有 hideRequested：「暂时隐藏」2026-09-19 已删(隐藏后没有
+    // 恢复入口，是个单向门)，别再往右键菜单里加回去。
     void settingsRequested();
     void quitRequested();         // 「取消看板娘」
     // 右键菜单里的两个窗口行为开关。**必须走控制器，不能直接连到本类的

@@ -245,11 +245,10 @@ QWidget *MainWindow::buildKanbanPage()
     leftLay->addLayout(btnRow);
     leftLay->addWidget(m_kanbanNextBtn);
     leftLay->addWidget(m_kanbanExprBtn);
-    m_kanbanStatus = new QLabel(QStringLiteral("未启动"), leftCard);
-    m_kanbanStatus->setObjectName(QStringLiteral("HintLabel"));
-    m_kanbanStatus->setWordWrap(true);
-    leftLay->addWidget(m_kanbanStatus);
-
+    // 运行状态原本在这里单独占一行(夹在按钮与日志之间)。2026-09-19 按用户要求
+    // 搬到右卡底部的模型信息栏里合并显示 —— 它报的是「后端是谁、模型是谁」，
+    // 与模型栏说的是同一件事，一屏说两遍；夹在按钮和日志之间还让用户看状态
+    // 要来回扫。现在整页只有底部那一条，见 updateKanbanStatus()。
     m_kanbanLog = new QLabel(QStringLiteral("就绪。"), leftCard);
     m_kanbanLog->setObjectName(QStringLiteral("LogLabel"));
     m_kanbanLog->setWordWrap(true);
@@ -612,17 +611,25 @@ void MainWindow::setupKanbanAndTray()
                 if (text == QStringLiteral("启动失败"))
                     setKanbanLog(m_kanban->lastError(), true);
             });
+    // 下面这两个「状态类」信号只刷界面，**都不写日志行**。
+    //
+    // 它们报的都是「现在是谁」—— 后端是谁、当前模型是谁，而这两件事已经常驻在
+    // 底部状态栏里(见 updateKanbanStatus)，本来就在眼前。写进日志行只会：
+    //   · 把真正有用的消息冲走：backendChanged 由控制器的 publishState() 在**每次
+    //     状态变化**时都发一遍，于是用户每点一次暂停/继续，日志就被重写成
+    //     「渲染后端：X」，启动失败、预览图结果、删了哪个模型这些全被顶掉；
+    //   · 在同一屏上把同一句话印两遍：「当前模型：X」与状态栏的「当前：X」。
+    // 日志行留给**用户动作的结果**与**错误** —— 那才是翻回去还值得看的东西。
     connect(&kan, &kanban::KanbanController::backendChanged, this,
-            [this](const QString &backend) {
-                setKanbanLog(QStringLiteral("渲染后端：%1").arg(backend), false);
-                updateKanbanControls();
-            });
+            [this](const QString &) { updateKanbanControls(); });
     connect(&kan, &kanban::KanbanController::currentModelChanged, this,
             [this](const QString &name) {
                 updateKanbanControls();
-                setKanbanLog(name.isEmpty() ? QStringLiteral("未装载模型，使用内置占位形象。")
-                                            : QStringLiteral("当前模型：%1").arg(name),
-                             false);
+                // 唯一的例外：**没装载成功**时留一条。那时状态栏报的是网格上选中的
+                // 那个模型（不是画面上真正在跑的东西），只有这句话说明了「看到的是
+                // 占位形象」。它是一条警告，不是「现在是谁」的陈述。
+                if (name.isEmpty())
+                    setKanbanLog(QStringLiteral("未装载模型，使用内置占位形象。"), false);
             });
     // 右键菜单「打开主界面设置」：把主窗口捞回来并停在看板娘页。
     connect(&kan, &kanban::KanbanController::openSettingsRequested, this, [this] {
@@ -1064,23 +1071,34 @@ void MainWindow::onKanbanThumbFinished(int exitCode)
     }
 }
 
+// 底部状态栏：第一行是运行状态，第二行是模型明细(由 updateKanbanControls() 写进
+// m_kanbanModelLine)。本函数挂在 measuredFpsChanged 上、每秒都要跑一次，所以只做
+// 字符串拼接 —— 模型那一行的重活(重扫结果摊开、网格选中态同步)留在
+// updateKanbanControls()，不要挪进来。
+//
+// 2026-09-19 按用户要求与模型明细合并到一处：原来它独占左卡一行，报「后端是谁、
+// 模型是谁」，而右卡底部那行说的是同一件事(「当前：Y」)，一屏说两遍。合并时顺手
+// 去掉了两处重复：
+//   · 模型名只留一次 —— 原来上面写「模型 witch X2 - free」、下面写「当前：witch X2 - free」；
+//   · 没在跑时不再写「后端 未启动」—— 前半句已经在说「未启动」了，说两遍像卡住了。
+// 分隔符沿用「 · 」，与下面那行一致。
 void MainWindow::updateKanbanStatus()
 {
-    if (!m_kanban || !m_kanbanStatus)
+    if (!m_kanban || !m_kanbanModelInfo)
         return;
 
-    QString status = QStringLiteral("状态：%1").arg(m_kanban->stateText());
+    QString status = QStringLiteral("状态 %1").arg(m_kanban->stateText());
     if (m_kanban->isRunning())
         status += QStringLiteral(" · 后端 %1 · 实测 %2 fps")
                       .arg(m_kanban->backendText())
                       .arg(m_kanban->measuredFps());
-    else
-        status += QStringLiteral(" · 后端 %1").arg(m_kanban->backendText().isEmpty()
-                                                       ? QStringLiteral("未启动")
-                                                       : m_kanban->backendText());
-    if (!m_kanban->currentModelName().isEmpty())
-        status += QStringLiteral(" · 模型 %1").arg(m_kanban->currentModelName());
-    m_kanbanStatus->setText(status);
+    else if (!m_kanban->backendText().isEmpty())
+        status += QStringLiteral(" · 后端 %1").arg(m_kanban->backendText());
+
+    // 模型明细还没算过(首次进页面)时只显示状态行，别拼出一个空行。
+    m_kanbanModelInfo->setText(m_kanbanModelLine.isEmpty()
+                                   ? status
+                                   : status + QLatin1Char('\n') + m_kanbanModelLine);
 }
 
 // 同步按钮、模型选中项与设置控件；帧率通知不触发整页回填。
@@ -1135,9 +1153,8 @@ void MainWindow::updateKanbanControls()
                                           .arg(exprCount)
                                     : QStringLiteral("当前模型没有表情文件"));
 
-    updateKanbanStatus();
-
-    // 模型明细：把校验结果如实摊开，比「能不能用」四个字有用得多。
+    // 模型明细：底部状态栏的第二行，把校验结果如实摊开，比「能不能用」四个字
+    // 有用得多。
     //
     // 顺带把网格的选中态同步过来。放在这里回填(而不是只在点击时设)，是为了让
     // 「控制器里的当前模型」与「网格上高亮的那一格」不可能长期不一致 ——
@@ -1178,7 +1195,11 @@ void MainWindow::updateKanbanControls()
     }
     if (!m_kanban->live2dAvailable())
         info += QStringLiteral("\n本程序未编译 Live2D 后端，模型只扫描校验，画面用内置占位形象。");
-    m_kanbanModelInfo->setText(info);
+    // 先存下来，再交给 updateKanbanStatus() 去拼第一行。分两步是有原因的：那个
+    // 函数挂在帧率信号上、每秒都要跑一次，不能让它顺带把上面这套重扫结果摊开
+    // 与网格选中态同步再跑一遍。
+    m_kanbanModelLine = info;
+    updateKanbanStatus();
 
     m_kanbanSyncing = true;
     m_kanbanScale->setValue(m_kanban->scalePercent());

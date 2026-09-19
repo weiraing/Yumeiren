@@ -147,7 +147,8 @@ private:
     void setupKanbanAndTray();
     void refreshKanbanModels();          // 重扫模型目录并重建模型网格
     void updateKanbanControls();         // 按钮可用性/状态文本(单一出口，别处不直改)
-    void updateKanbanStatus();           // 低频统计只更新状态文本
+    // 只重写底部状态栏(第一行现算 + 第二行取缓存)，挂在帧率信号上每秒一次。
+    void updateKanbanStatus();
     void setKanbanLog(const QString &text, bool isError);
     void showFromTray();                 // 托盘图标左键单击/双击
     void onTrayQuitRequested();
@@ -298,10 +299,14 @@ private:
     QPushButton *m_kanbanPauseBtn = nullptr;
     QPushButton *m_kanbanNextBtn = nullptr;
     QPushButton *m_kanbanExprBtn = nullptr;
-    QLabel *m_kanbanStatus = nullptr;
     QLabel *m_kanbanLog = nullptr;
     QListWidget *m_kanbanModelGrid = nullptr;
+    // 底部状态栏(右卡最下面那条)。它有两行：第一行是运行状态，由
+    // updateKanbanStatus() 每次现算；第二行是下面这个缓存下来的模型明细，
+    // 由 updateKanbanControls() 在重扫/换模型后写入 —— 分两步是为了让挂在
+    // 帧率信号上的那个函数保持廉价(见 updateKanbanStatus 的说明)。
     QLabel *m_kanbanModelInfo = nullptr;
+    QString m_kanbanModelLine;
     // 生成预览图的子进程。**非空即表示正在生成** —— 拿它当唯一的重入闸门，
     // 免得再维护一个布尔量，两个状态迟早打架。
     QProcess *m_kanbanThumbJob = nullptr;

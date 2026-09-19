@@ -194,7 +194,6 @@ bool KanbanController::ensureWindow()
             setModelPath(next->modelJsonPath);
         }
     });
-    connect(m_window, &KanbanWindow::hideRequested, this, &KanbanController::hideWindow);
     connect(m_window, &KanbanWindow::settingsRequested, this, [this] {
         emit openSettingsRequested();
     });
@@ -519,10 +518,12 @@ void KanbanController::destroyWindow()
     m_window = nullptr;
 }
 
+// 把已装载的窗口显示出来。**只有 start() 会调到这里**：2026-09-19 删掉「暂时
+// 隐藏」后，「先藏起来、以后再现出来」这条来回路径整个没有了，本函数只剩
+// 「软件渲染后端启动的最后一步」这一个用途(GL 后端在等上下文时就已经 show 过)。
 void KanbanController::showWindow()
 {
     if (!m_window) {
-        start();
         return;
     }
     m_window->show();
@@ -544,16 +545,11 @@ void KanbanController::showWindow()
     }
 }
 
-void KanbanController::hideWindow()
-{
-    if (!m_window) {
-        return;
-    }
-    m_window->hide();
-    m_clock->stop(); // 不可见就不该继续烧 CPU/GPU
-    videodiag::log(videodiag::Level::Debug, QStringLiteral("[Kanban] 暂时隐藏，动画停摆"),
-                   QLatin1String(kModule));
-}
+// 曾有一个 hideWindow()：把窗口藏起来但保持已装载与「运行中」的语义，由右键
+// 菜单的「暂时隐藏」触发。2026-09-19 连同菜单项一起删除 —— 它没有对应的恢复
+// 入口(见 showWindow 的说明)，用户点了就再也叫不回来。窗口要消失就整个停掉，
+// 走 stop()。注意 stop() 里的 destroyWindow() 已经承担了「立刻 hide 掉」的职责，
+// 别再以「收口时也要隐藏」为由把 hideWindow 加回来。
 
 // 曾有一个 applyMainWindowVisible(bool)：主窗口隐藏时把看板娘冻住、显示时解冻。
 // 2026-09-17 按用户要求连同「主界面隐藏时暂停动画」勾选框一起删除 —— 主界面收进托盘时

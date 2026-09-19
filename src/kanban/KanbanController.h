@@ -59,8 +59,9 @@ public:
     // 判据收在渲染器基类里一处，三条入口(菜单/设置页/托盘)共用。
     int playableMotionCount() const;
     bool canPlayNextMotion() const;
-    void showWindow();  // 暂时隐藏后重新显示(不重启)
-    void hideWindow();  // 隐藏但保持已装载状态与运行语义
+    // 只有 start() 会调用(软件渲染后端启动的最后一步)；GL 后端在等上下文时
+    // 就已经 show 过窗口。曾有配对的 hideWindow()，「暂时隐藏」删除后一并去掉了。
+    void showWindow();
 
     // —— 设置(全部即时生效并落盘) ——
     void setScalePercent(int percent);

@@ -412,8 +412,10 @@ bool KanbanWindow::eventFilter(QObject *watched, QEvent *event)
         QAction *modelAct = menu.addAction(QStringLiteral("切换模型"));
         connect(modelAct, &QAction::triggered, this, &KanbanWindow::nextModelRequested);
         menu.addSeparator();
-        QAction *hideAct = menu.addAction(QStringLiteral("暂时隐藏"));
-        connect(hideAct, &QAction::triggered, this, &KanbanWindow::hideRequested);
+        // 「暂时隐藏」2026-09-19 按用户要求删除。它是个单向门：隐藏之后没有
+        // 像样的恢复入口 —— 控制器的 start() 在已运行时直接返回，不会把窗口
+        // 显示回来，用户只能先「取消看板娘」再重新启动。留着只会让人以为
+        // 程序坏了。要它离开屏幕，走「取消看板娘」。
         QAction *throughAct = menu.addAction(QStringLiteral("鼠标穿透"));
         throughAct->setCheckable(true);
         throughAct->setChecked(m_mouseThrough);
@@ -457,9 +459,12 @@ bool KanbanWindow::eventFilter(QObject *watched, QEvent *event)
 
 void KanbanWindow::closeEvent(QCloseEvent *event)
 {
-    // 关闭请求一律转成隐藏请求；真停止走控制器的 stop()(托盘/界面的「取消看板娘」)。
+    // 窗口是无边框 Qt::Tool，用户点不到关闭按钮；能走到这里的只有系统关机、
+    // 任务栏右键「关闭窗口」这类外部请求，一律吞掉。
+    // 放行的话窗口会消失，而控制器仍以为它在跑(时钟照转、GL 照画)，且窗口
+    // 自己已经没有恢复入口了 —— 与「暂时隐藏」被删掉是同一个理由。
+    // 真停止只有控制器 stop() 一条路(托盘与界面的「取消看板娘」)。
     event->ignore();
-    emit hideRequested();
 }
 
 bool KanbanWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr *result)
