@@ -124,11 +124,11 @@ private:
     enum SuspendReason
     {
         SuspendNone = 0,
-        SuspendFullscreen = 1,  // 前台全屏应用
+        SuspendFullscreen = 1,  // 有窗口全屏(不要求它是前台窗口)
         SuspendLocked = 2,      // 系统锁定
         SuspendMonitorOff = 4,  // 显示器关闭
         SuspendBattery = 8,     // 电池供电(用户开启后生效)
-        SuspendCovered = 16     // 桌面被前台窗口完全遮挡(主屏模式)
+        SuspendCovered = 16     // 桌面被应用窗口完全遮挡(主屏模式)
     };
 
     // 单个显示器的播放器+输出窗口组合。每个显示器一个 VideoOutput，

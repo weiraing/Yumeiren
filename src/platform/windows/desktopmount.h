@@ -33,15 +33,19 @@ void unmountWindow(QWidget *window);
 // current WorkerW, visible and sitting exactly at physicalRect.
 bool isWindowMounted(QWidget *window, const QRect &physicalRect);
 
-// True when the foreground window covers a screen exactly (borderless or
-// exclusive fullscreen). Comparison happens in physical pixels because
-// GetWindowRect is not DPI-scaled; QScreen::geometry() is.
-bool isForegroundFullscreen();
-// True when the foreground window fully covers the primary monitor's work area
-// (i.e. a maximized normal app): the desktop wallpaper is invisible then, so
-// playback can pause without anyone noticing. Shell/explorer windows are
-// excluded so looking AT the desktop never pauses it.
-bool isDesktopCovered();
+// 「桌面被应用窗口完全遮住」的两档判定。两条都**不再只看前台窗口**：
+// 全屏应用前面压着一个小窗口(对话框/通知/输入法候选)时桌面依然不可见，
+// 只看前台窗口会把这种情形误判成「已回到桌面」而恢复播放、白白解码。
+// 两者都遍历可见的顶层窗口，排除最小化、DWM 未合成(cloaked：别的虚拟桌面上的、
+// 被挂起的 UWP)以及自身进程与 explorer 桌面层(Progman/WorkerW/DefView 都是
+// 全屏矩形，否则「看着桌面」也会被判成被遮挡)。比较在物理像素下进行
+// (GetWindowRect 与 MONITORINFO 都不随 DPI 缩放)，留 ±2px 容差。
+//
+// 全屏档：某窗口精确铺满前台窗口所在的那块屏(borderless 或独占全屏)。
+// 只看同屏，是为了让副屏上挂着的全屏应用不至于把主屏壁纸一起停掉。
+bool isFullscreenWindowPresent();
+// 遮挡档：某窗口完全盖住主屏工作区，即最大化的普通窗口 —— 此时壁纸完全不可见。
+bool isDesktopCoveredByWindow();
 bool isWorkstationLocked();
 bool isOnBattery();
 

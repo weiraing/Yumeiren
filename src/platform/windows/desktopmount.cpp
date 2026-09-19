@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <windows.h>
+#include <dwmapi.h>
 #include <tlhelp32.h>
 
 // Desktop hosts icons inside SHELLDLL_DefView on a WorkerW window. After
@@ -180,50 +181,96 @@ bool isSelfOrShellProcess(HWND hwnd)
     return _wcsicmp(base, L"explorer.exe") == 0;
 }
 
-bool isForegroundFullscreen()
+namespace {
+
+// DWM 没在合成它 = 屏幕上根本没有这个窗口：别的虚拟桌面上的窗口、被挂起的
+// UWP 应用都会这样。不排除就会「在桌面 1 上被桌面 2 的全屏应用停掉壁纸」。
+bool isDwmCloaked(HWND hwnd)
 {
-    const HWND fg = GetForegroundWindow();
-    if (!fg || isSelfOrShellProcess(fg))
-        return false;
-    RECT r;
-    if (!GetWindowRect(fg, &r))
-        return false;
-    // GetWindowRect 是物理像素；QScreen::geometry() 是逻辑像素，必须按各屏
-    // devicePixelRatio 换算后再比较，否则在非 100% 缩放下永远不相等。
-    // 宽高即 right-left，不能 +1。比较留 ±2px 容差：DPI 不感知进程创建的
-    // 贴边窗口经虚拟化取整常有 ±1px 偏差；普通最大化窗口带 11px 隐形边框
-    // 膨胀，不会落入容差内造成误判。
-    const QRect wr(r.left, r.top, r.right - r.left, r.bottom - r.top);
-    const auto closeEnough = [](int a, int b) { return qAbs(a - b) <= 2; };
-    for (QScreen *s : QGuiApplication::screens()) {
-        const qreal dpr = s->devicePixelRatio();
-        const QRect phys(int(s->geometry().x() * dpr), int(s->geometry().y() * dpr),
-                         int(s->geometry().width() * dpr),
-                         int(s->geometry().height() * dpr));
-        if (closeEnough(wr.x(), phys.x()) && closeEnough(wr.y(), phys.y())
-            && closeEnough(wr.width(), phys.width())
-            && closeEnough(wr.height(), phys.height()))
-            return true;
-    }
-    return false;
+    BOOL cloaked = FALSE;
+    return SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked,
+                                           sizeof(cloaked)))
+           && cloaked != FALSE;
 }
 
-bool isDesktopCovered()
+// 在可见的顶层窗口里找一个把 target(物理像素)盖住的窗口。
+// exactFit=true 还要求逐边贴合(全屏)，false 只要求包含(遮挡)。
+// 判据刻意与「谁在前台」无关：全屏应用前面压一个小窗口时桌面依然不可见。
+HWND findCoveringWindow(const RECT &target, bool exactFit)
 {
-    const HWND fg = GetForegroundWindow();
-    if (!fg || isSelfOrShellProcess(fg))
-        return false;
+    struct Ctx
+    {
+        const RECT *target;
+        bool exactFit;
+        HWND hit;
+    } ctx{&target, exactFit, nullptr};
+    EnumWindows(
+        [](HWND hwnd, LPARAM lp) -> BOOL {
+            auto *c = reinterpret_cast<Ctx *>(lp);
+            // 最小化窗口在 WS_VISIBLE 意义上仍是「可见」的，先按状态剔掉
+            if (!IsWindowVisible(hwnd) || IsIconic(hwnd))
+                return TRUE;
+            RECT r;
+            if (!GetWindowRect(hwnd, &r))
+                return TRUE;
+            const RECT &t = *c->target;
+            // 注意别把这个 lambda 叫 near —— windef.h 里 near/far 是空宏
+            const auto closeEnough = [](LONG a, LONG b) {
+                return qAbs(int(a - b)) <= 2;
+            };
+            if (c->exactFit) {
+                // 宽高即 right-left，不能 +1；±2px 容差给 DPI 不感知进程的
+                // 贴边窗口(虚拟化取整常差 1px)，而最大化窗口带 11px 隐形边框
+                // 外扩，不会落进容差里被误判成全屏。
+                if (!closeEnough(r.left, t.left) || !closeEnough(r.top, t.top)
+                    || !closeEnough(r.right - r.left, t.right - t.left)
+                    || !closeEnough(r.bottom - r.top, t.bottom - t.top))
+                    return TRUE;
+            } else if (r.left > t.left || r.top > t.top || r.right < t.right
+                       || r.bottom < t.bottom) {
+                return TRUE;
+            }
+            // 矩形已经对上了才做这两项较贵的检查(OpenProcess / 问 DWM)
+            if (isSelfOrShellProcess(hwnd) || isDwmCloaked(hwnd))
+                return TRUE;
+            c->hit = hwnd;
+            return FALSE; // 找到即停
+        },
+        reinterpret_cast<LPARAM>(&ctx));
+    return ctx.hit;
+}
 
-    RECT r;
-    if (!GetWindowRect(fg, &r))
+} // namespace
+
+bool isFullscreenWindowPresent()
+{
+    // 只认前台窗口所在那块屏：用户在副屏上做事时，副屏挂着的全屏应用不该把
+    // 主屏壁纸一起停掉(本机单屏，多屏语义无法实测，故取保守口径)。
+    const HWND fg = GetForegroundWindow();
+    HMONITOR mon = fg ? MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST) : nullptr;
+    if (!mon) {
+        // 没有前台窗口(刚切到桌面/锁屏前)：退回主屏，与旧实现同口径
+        POINT origin{0, 0};
+        mon = MonitorFromPoint(origin, MONITOR_DEFAULTTOPRIMARY);
+    }
+    MONITORINFO mi{};
+    mi.cbSize = sizeof(mi);
+    if (!mon || !GetMonitorInfoW(mon, &mi))
         return false;
+    // MONITORINFO.rcMonitor 与 GetWindowRect 同为物理像素，不需要 QScreen 那套
+    // devicePixelRatio 换算，也就没有取整误差。
+    return findCoveringWindow(mi.rcMonitor, true) != nullptr;
+}
+
+bool isDesktopCoveredByWindow()
+{
     RECT wa;
     if (!SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0))
         return false;
-    // SPI_GETWORKAREA 在本进程按物理像素返回；前台窗口盖满主屏工作区即视为
-    // 桌面被完全遮挡(最大化普通窗口带边框外扩，恰好落进包含关系)
-    return r.left <= wa.left && r.top <= wa.top && r.right >= wa.right
-           && r.bottom >= wa.bottom;
+    // SPI_GETWORKAREA 在本进程按物理像素返回；窗口盖满主屏工作区即视为桌面
+    // 被完全遮挡(最大化普通窗口带边框外扩，恰好落进包含关系)。
+    // 工作区只有主屏一个，天然不存在「副屏窗口误停主屏壁纸」的问题。
+    return findCoveringWindow(wa, false) != nullptr;
 }
 
 bool isWorkstationLocked()

@@ -541,14 +541,18 @@ void VideoWallpaper::evaluateSuspend()
     }
 
     int reasons = 0;
-    if (m_pauseOnFullscreen && fbswin::isForegroundFullscreen())
+    // 判据与「谁在前台」无关：全屏应用前面压着一个小窗口(对话框/通知/输入法)
+    // 时桌面依然不可见，只看前台窗口会误判成「已回到桌面」而恢复播放、白白解码。
+    // 实现见 fbswin::isFullscreenWindowPresent()：遍历可见顶层窗口找精确铺满
+    // 前台窗口所在那块屏的窗口。
+    if (m_pauseOnFullscreen && fbswin::isFullscreenWindowPresent())
         reasons |= SuspendFullscreen;
-    // 主屏模式下，前台应用盖满主屏工作区时壁纸完全不可见，暂停白省。
+    // 主屏模式下，应用盖满主屏工作区时壁纸完全不可见，暂停白省。
     // 扩展/镜像模式**刻意不做**遮挡判定：本机单屏无法验证多屏语义，而改动它
     // 会让既有行为在无法实测的场景下漂移(实测：扩展模式会退化成每秒反复
     // 暂停/恢复)。多屏遮挡留给有第二块屏的会话再评估。
     if (m_pauseOnFullscreen && m_screenMode == PrimaryScreen
-        && fbswin::isDesktopCovered())
+        && fbswin::isDesktopCoveredByWindow())
         reasons |= SuspendCovered;
     if (fbswin::isWorkstationLocked())
         reasons |= SuspendLocked;
