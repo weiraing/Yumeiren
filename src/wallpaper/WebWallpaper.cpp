@@ -282,6 +282,8 @@ WebWallpaper::WebWallpaper(QObject *parent)
 {
 #ifdef Q_OS_WIN
     m_suspendClock = new QElapsedTimer();
+    m_mountFixClock = new QElapsedTimer();
+    m_mountFixClock->start(); // 首次挂载健康检查即刻可用
     m_heartbeat = new QTimer(this);
     m_heartbeat->setInterval(1000);
     connect(m_heartbeat, &QTimer::timeout, this, &WebWallpaper::evaluateSuspend);
@@ -413,6 +415,17 @@ bool WebWallpaper::start(QString *error, const QString &source)
 
     m_host = ensureHostWindow();
     m_host->setGeometry(QGuiApplication::primaryScreen()->geometry());
+    // 先拿到桌面挂载点再挂载：g_workerW 为空时 SetParent(hwnd,null) 会把窗口挂成
+    // 普通顶层窗口，之后心跳里的「未挂载→重挂」就变成每秒一次的 z 序搅动(桌面闪动)。
+    if (!fbswin::ensureWorker()) {
+        m_running = false;
+        AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Web::Enabled), false);
+        publishRuntimeState();
+        emit runningChanged(false);
+        if (error)
+            *error = QStringLiteral("未能获取桌面挂载点，无法挂载网页壁纸");
+        return false;
+    }
     m_host->show();
     fbswin::mountBehindIcons(m_host, m_host->geometry());
 
@@ -805,8 +818,12 @@ void WebWallpaper::evaluateSuspend()
                          int(m_host->geometry().y() * dpr),
                          int(m_host->geometry().width() * dpr),
                          int(m_host->geometry().height() * dpr));
-        if (!fbswin::isWindowMounted(m_host, phys))
+        if (!fbswin::isWindowMounted(m_host, phys)) {
+            videodiag::log(videodiag::Level::Info,
+                           QStringLiteral("网页壁纸重新挂载到桌面层"),
+                           QStringLiteral("WebWallpaper"));
             fbswin::mountBehindIcons(m_host, m_host->geometry());
+        }
     }
 
     const bool wasSuspended = m_suspendedByUs;
@@ -845,6 +862,11 @@ void WebWallpaper::evaluateSuspend()
 void WebWallpaper::applySuspend(bool suspend)
 {
 #ifdef Q_OS_WIN
+    videodiag::log(videodiag::Level::Warning,
+                   QStringLiteral("[dbg] applySuspend(%1) ctrl=%2 wv3=%3")
+                       .arg(suspend).arg(quintptr(m_controller), 0, 16)
+                       .arg(quintptr(m_webview3), 0, 16),
+                   QStringLiteral("WebWallpaper"));
     m_suspendedByUs = suspend;
     if (!m_controller)
         return;

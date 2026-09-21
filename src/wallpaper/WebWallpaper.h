@@ -136,6 +136,7 @@ private:
     QTimer *m_createWatchdog = nullptr;
     QTimer *m_snapshotTimer = nullptr;
     QElapsedTimer *m_suspendClock = nullptr;
+    QElapsedTimer *m_mountFixClock = nullptr; // 重挂节流(10s)，防心跳盲挂造成闪动
     int m_suspendReasons = 0;
     bool m_suspendedByUs = false;
     bool m_releasedForSuspend = false;
