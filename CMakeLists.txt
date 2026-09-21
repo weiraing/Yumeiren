@@ -33,24 +33,67 @@ endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets)
 
+# 把目标运行时需要的 Qt 库与插件补齐到它的输出目录。
+#
+# 挂在 ALL 上的独立 target，而不是 TARGET 的 POST_BUILD —— 理由与 data/ 完全一样：
+# POST_BUILD 只在目标真正重新链接时才跑，ninja 判 no work to do 时它根本不执行，
+# 用户删掉某个 DLL 后重编译就永远补不回来。对 ffmpegmediaplugin 尤其阴：它是插件、
+# 不在 exe 的导入表里，缺了它 exe 照样启动，只是视频壁纸「窗口挂上了却永远黑屏」，
+# 日志里 mediaStatus 一次都不出现。细节与判据见 cmake/DeployQtRuntime.cmake 文件头。
 function(yumeiren_deploy_qt_runtime target)
-    add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_RUNTIME_DLLS:${target}> "$<TARGET_FILE_DIR:${target}>"
-        COMMAND_EXPAND_LISTS
-        COMMENT "复制 ${target} 的 Qt 运行时依赖"
-        VERBATIM)
+    # 平铺到输出目录的库：$<TARGET_RUNTIME_DLLS> 只覆盖 exe 导入表里的那些。
+    set(_yumeiren_flat "$<TARGET_RUNTIME_DLLS:${target}>")
+    # 需要落进子目录的插件：<源>|<目标相对路径>。
+    set(_yumeiren_pairs "")
 
     if(TARGET Qt6::QWindowsIntegrationPlugin)
-        add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory
-                "$<TARGET_FILE_DIR:${target}>/platforms"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "$<TARGET_FILE:Qt6::QWindowsIntegrationPlugin>"
-                "$<TARGET_FILE_DIR:${target}>/platforms"
-            COMMENT "复制 Qt 平台插件"
-            VERBATIM)
+        list(APPEND _yumeiren_pairs
+            "$<TARGET_FILE:Qt6::QWindowsIntegrationPlugin>|platforms/$<TARGET_FILE_NAME:Qt6::QWindowsIntegrationPlugin>")
     endif()
+
+    foreach(mediaPlugin Qt6::QFFmpegMediaPlugin Qt6::QWindowsMediaPlugin)
+        if(TARGET ${mediaPlugin})
+            list(APPEND _yumeiren_pairs
+                "$<TARGET_FILE:${mediaPlugin}>|multimedia/$<TARGET_FILE_NAME:${mediaPlugin}>")
+        endif()
+    endforeach()
+
+    # FFmpeg 运行库：multimedia/ffmpegmediaplugin.dll 是插件，不在 $<TARGET_RUNTIME_DLLS> 的依赖图里，
+    # 而它动态依赖 Qt bin 下的 av*/sw* 这五个库。漏掉时 QLibrary 加载插件失败，Qt 只报
+    # "No QtMultimedia backends found"，QMediaPlayer 根本建不起来 —— 表现是壁纸窗口挂上了却永远黑屏，
+    # 且从带 Qt bin 的 PATH 启动就一切正常，极易被误判成渲染链路问题。
+    set(_yumeiren_qt_bin "")
+    if(TARGET Qt6::qmake)
+        get_target_property(_yumeiren_qmake Qt6::qmake IMPORTED_LOCATION)
+        if(_yumeiren_qmake)
+            get_filename_component(_yumeiren_qt_bin "${_yumeiren_qmake}" DIRECTORY)
+        endif()
+    endif()
+    if(NOT _yumeiren_qt_bin)
+        get_filename_component(_yumeiren_qt_bin "${Qt6_DIR}/../../../bin" ABSOLUTE)
+    endif()
+    file(GLOB _yumeiren_ffmpeg_dlls
+        "${_yumeiren_qt_bin}/avcodec-*.dll"
+        "${_yumeiren_qt_bin}/avformat-*.dll"
+        "${_yumeiren_qt_bin}/avutil-*.dll"
+        "${_yumeiren_qt_bin}/swresample-*.dll"
+        "${_yumeiren_qt_bin}/swscale-*.dll")
+    if(_yumeiren_ffmpeg_dlls)
+        list(APPEND _yumeiren_flat ${_yumeiren_ffmpeg_dlls})
+    else()
+        message(WARNING "未在 ${_yumeiren_qt_bin} 找到 FFmpeg 运行库，视频壁纸将无法播放")
+    endif()
+
+    add_custom_target(yumeiren_deploy_runtime_${target} ALL
+        COMMAND ${CMAKE_COMMAND}
+                "-DDST_DIR=$<TARGET_FILE_DIR:${target}>"
+                "-DFILES=${_yumeiren_flat}"
+                "-DPAIRS=${_yumeiren_pairs}"
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/DeployQtRuntime.cmake
+        COMMENT "补齐 ${target} 的 Qt 运行时依赖"
+        VERBATIM)
+    # 让「只构建这一个目标」也走到补齐：ALL 只在整目录构建时才会被带上。
+    add_dependencies(${target} yumeiren_deploy_runtime_${target})
 endfunction()
 
 set(YUMEIREN_SOURCES
@@ -179,10 +222,18 @@ set(APP_RESOURCES
     resources/icons/yumeiren-256.png
 )
 
-# 复制 data/ 目录到编译输出目录（仅当 build/data 整个不存在时触发）
-add_custom_command(TARGET Yumeiren POST_BUILD
-    COMMAND powershell -Command "if (!(Test-Path '${CMAKE_BINARY_DIR}/data')) { Copy-Item -Path '${CMAKE_SOURCE_DIR}/data' -Destination '${CMAKE_BINARY_DIR}/data' -Recurse; Write-Host 'Copied data/ to build directory' } else { Write-Host 'data/ already exists in build directory' }"
-    COMMENT "Copying data/ directory to build output if needed"
+# 复制 data/ 目录到编译输出目录。
+# 挂在 ALL 上而不是某个 target 的 POST_BUILD：POST_BUILD 只在目标真正重新链接时才跑，
+# ninja 判定 no work to do 时它根本不执行 —— 用户删掉 build/data 后重编译就永远补不回来。
+# 判据是「逐文件补齐」而非「整个 data 不存在」：别的构建步骤只要先建出 build/data/models，
+# 整目录判据就会被顶掉，结果只剩 models 一份。
+add_custom_target(yumeiren_runtime_data ALL
+    COMMAND ${CMAKE_COMMAND}
+            -DSRC_DIR=${CMAKE_CURRENT_SOURCE_DIR}/data
+            -DDST_DIR=${CMAKE_BINARY_DIR}/data
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CopyRuntimeData.cmake
+    COMMENT "补齐 data/ 到编译输出目录（已有文件不动）"
+    VERBATIM
 )
 
 qt_add_resources(Yumeiren app_res
@@ -220,9 +271,7 @@ if(YUMEIREN_WITH_LIVE2D AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/kanbanprob
     target_compile_definitions(KanbanProbe PRIVATE YUMEIREN_WITH_LIVE2D=1)
     yumeiren_deploy_cubism(KanbanProbe)
     yumeiren_deploy_qt_runtime(KanbanProbe)
-    add_custom_command(TARGET KanbanProbe POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_SOURCE_DIR}/data/models" "$<TARGET_FILE_DIR:KanbanProbe>/data/models"
-        COMMENT "复制模型目录到探针输出目录"
-        VERBATIM)
+    # 不单独复制 data/models：它与上面的 yumeiren_runtime_data 抢同一个目标目录，
+    # 先建出 build/data 就会把整份 data 的补齐判据顶掉。
+    add_dependencies(KanbanProbe yumeiren_runtime_data)
 endif()

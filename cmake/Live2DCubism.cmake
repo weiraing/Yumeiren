@@ -129,26 +129,65 @@ endfunction()
 #      "Failed to load vertex shader"，然后拿着 ShaderProgram=0 一路画下去 ——
 #      界面上什么都看不到，也不报错。
 #      官方示例 proj.win.cmake/CMakeLists.txt 里有同样的 copy_directory 步骤。
+#
+# 挂在 ALL 上的**单个**共享 target，而不是每个目标的 POST_BUILD，两个理由：
+#   1. POST_BUILD 只在目标真正重新链接时才跑 —— 用户删掉 FrameworkShaders/ 之后
+#      重编译永远补不回来，而症状正是上面说的「一片空白且不报错」。与 data/、
+#      Qt 运行库是同一类坑，用同一种解法。
+#   2. 三个 exe 的输出目录相同，各自 POST_BUILD 会**并发**往同一个
+#      FrameworkShaders/ 里 copy_directory，实测会随机报
+#      "Error copying directory from ... to ..." 把整次构建打挂。只做一次就没有这个问题。
+#
+# 前提：调用本函数的各目标输出目录一致(本仓库三个 exe 都在 build/ 根)。不一致会
+# 直接 FATAL_ERROR 报出来，而不是悄悄把库补到别人的目录里。
 function(yumeiren_deploy_cubism target)
     if(NOT YUMEIREN_CUBISM_RUNTIME_DLLS)
         return()
     endif()
-    foreach(_dll ${YUMEIREN_CUBISM_RUNTIME_DLLS})
-        add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_dll}" $<TARGET_FILE_DIR:${target}>
-            COMMENT "复制 Live2DCubismCore.dll"
-            VERBATIM)
-    endforeach()
 
-    if(YUMEIREN_CUBISM_SHADER_DIR AND EXISTS "${YUMEIREN_CUBISM_SHADER_DIR}")
-        add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${YUMEIREN_CUBISM_SHADER_DIR}" "$<TARGET_FILE_DIR:${target}>/FrameworkShaders"
-            COMMENT "复制 Cubism 运行期着色器到 FrameworkShaders/"
-            VERBATIM)
-    else()
-        message(WARNING
-            "没找到 Cubism 的 Standard 着色器目录，Live2D 会加载失败并画不出东西："
-            "${YUMEIREN_CUBISM_SHADER_DIR}")
+    get_target_property(_yumeiren_cubism_out ${target} RUNTIME_OUTPUT_DIRECTORY)
+    if(NOT _yumeiren_cubism_out)
+        set(_yumeiren_cubism_out "${CMAKE_CURRENT_BINARY_DIR}")
     endif()
+
+    get_property(_yumeiren_cubism_dir GLOBAL PROPERTY YUMEIREN_CUBISM_DEPLOY_DIR)
+    if(NOT _yumeiren_cubism_dir)
+        set_property(GLOBAL PROPERTY YUMEIREN_CUBISM_DEPLOY_DIR "${_yumeiren_cubism_out}")
+    elseif(NOT _yumeiren_cubism_dir STREQUAL _yumeiren_cubism_out)
+        message(FATAL_ERROR
+            "Cubism 运行期文件的复制只做一份，但 ${target} 的输出目录"
+            "(${_yumeiren_cubism_out})与先前目标的(${_yumeiren_cubism_dir})不同。"
+            "请给输出目录不同的目标另建一个复制 target。")
+    endif()
+
+    if(NOT TARGET yumeiren_runtime_cubism)
+        # 命令直接写进 add_custom_target：POST_BUILD 只对「有构建步骤」的目标成立，
+        # 挂在自定义 target 上永远不会执行。
+        set(_yumeiren_cubism_cmds
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_yumeiren_cubism_out}")
+
+        foreach(_dll ${YUMEIREN_CUBISM_RUNTIME_DLLS})
+            list(APPEND _yumeiren_cubism_cmds
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${_dll}" "${_yumeiren_cubism_out}")
+        endforeach()
+
+        if(YUMEIREN_CUBISM_SHADER_DIR AND EXISTS "${YUMEIREN_CUBISM_SHADER_DIR}")
+            list(APPEND _yumeiren_cubism_cmds
+                COMMAND ${CMAKE_COMMAND} -E copy_directory
+                    "${YUMEIREN_CUBISM_SHADER_DIR}"
+                    "${_yumeiren_cubism_out}/FrameworkShaders")
+        else()
+            message(WARNING
+                "没找到 Cubism 的 Standard 着色器目录，Live2D 会加载失败并画不出东西："
+                "${YUMEIREN_CUBISM_SHADER_DIR}")
+        endif()
+
+        add_custom_target(yumeiren_runtime_cubism ALL ${_yumeiren_cubism_cmds}
+            COMMENT "复制 Cubism 运行期文件(Core DLL + FrameworkShaders/)"
+            VERBATIM)
+    endif()
+
+    # 让「只构建这一个目标」也走到复制：ALL 只在整目录构建时才会被带上。
+    add_dependencies(${target} yumeiren_runtime_cubism)
 endfunction()
