@@ -66,6 +66,10 @@ public:
     bool doubleClickSwitchEnabled() const { return m_doubleClickSwitchEnabled; }
     // 只有 start() 会调用(软件渲染后端启动的最后一步)。
     void showWindow();
+    // 全局快捷键的显示/隐藏切换：没在跑就直接 start()(快捷键即「召唤」)；在跑则
+    // hide/show 窗口。隐藏时模型与位置都保留，帧时钟停掉(GPU 归零)，show 后按状态
+    // 重启 —— 与托盘的暂停不同，这里不进暂停态，托盘菜单语义不受影响。
+    void toggleVisible();
 
     // —— 设置(全部即时生效并落盘) ——
     void setScalePercent(int percent);

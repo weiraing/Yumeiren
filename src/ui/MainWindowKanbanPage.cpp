@@ -11,9 +11,11 @@
 
 #include "app/ApplicationRuntimeState.h"
 #include "app/ApplicationShutdown.h"
+#include "app/AppInfo.h"
 #include "kanban/KanbanController.h"
 #include "kanban/KanbanModelManager.h"
 #include "kanban/KanbanRenderer.h"
+#include "platform/windows/globalhotkey.h"
 #include "tray/SystemTrayController.h"
 #include "wallpaper/VideoWallpaper.h"
 
@@ -42,6 +44,7 @@
 #include <QRadioButton>
 #include <QScrollArea>
 #include <QSlider>
+#include <QKeySequenceEdit>
 #include <QStackedWidget>
 #include <QStyledItemDelegate>
 #include <QTimer>
@@ -563,9 +566,26 @@ QWidget *MainWindow::buildKanbanParamCard(QWidget *parent)
     sep->setFrameShape(QFrame::HLine);
     lay->addWidget(sep);
 
-    auto *trayTitle = new QLabel(QStringLiteral("开机与托盘"), card);
+    auto *trayTitle = new QLabel(QStringLiteral("系统与快捷键"), card);
     trayTitle->setObjectName(QStringLiteral("GroupTitle"));
     lay->addWidget(trayTitle);
+
+    // 软件自启：与壁纸页的「开机自动启动」是同一个注册表项(appinfo)，两处复选框
+    // 由 toggled 处理器互相同步，哪边勾都算数。
+    m_kanbanAutostartBox = new QCheckBox(QStringLiteral("开机自动启动"), card);
+    m_kanbanAutostartBox->setToolTip(tooltipstyle::format(
+        QStringLiteral("开机后自动运行本软件：壁纸与看板娘按上次退出时的状态恢复")));
+    m_kanbanAutostartBox->setChecked(appinfo::autostartEnabled());
+    connect(m_kanbanAutostartBox, &QCheckBox::toggled, this, [this](bool on) {
+        if (m_kanbanSyncing)
+            return;
+        appinfo::setAutostart(on);
+        if (m_autostartBox && m_autostartBox->isChecked() != on) {
+            QSignalBlocker blocker(m_autostartBox);
+            m_autostartBox->setChecked(on);
+        }
+    });
+    addCheckRow(m_kanbanAutostartBox);
 
     auto *trayRow = new QHBoxLayout();
     trayRow->setSpacing(14);
@@ -578,6 +598,45 @@ QWidget *MainWindow::buildKanbanParamCard(QWidget *parent)
     trayRow->addWidget(m_trayMinimizeBox);
     trayRow->addStretch(1);
     lay->addLayout(trayRow);
+
+    // 显示/隐藏看板娘的全局快捷键：注册在系统层，主窗口没有焦点(游戏全屏、托盘
+    // 模式)也生效。存 PortableText；清空即停用；注册不上(组合不带 Ctrl/Alt/Win、
+    // 或被别的程序占用)时回弹成停用并写日志说明原因。
+    auto *hotkeyRow = new QHBoxLayout();
+    hotkeyRow->setSpacing(14);
+    hotkeyRow->addWidget(new QLabel(QStringLiteral("显示/隐藏看板娘"), card));
+    hotkeyRow->addSpacing(4);
+    m_kanbanHotkeyEdit = new QKeySequenceEdit(card);
+    m_kanbanHotkeyEdit->setToolTip(tooltipstyle::format(
+        QStringLiteral("在键盘上按下想用的组合键(需含 Ctrl/Alt/Win)，全局生效。\n"
+                       "默认 Ctrl+Alt+K；清空输入框即停用快捷键")));
+    m_kanbanHotkeyEdit->setFixedWidth(160);
+    connect(m_kanbanHotkeyEdit, &QKeySequenceEdit::keySequenceChanged, this,
+            [this](const QKeySequence &seq) {
+        if (m_kanbanSyncing)
+            return;
+        auto *config = &AppConfig::instance();
+        const auto key = QString::fromLatin1(ConfigKeys::Kanban::ToggleHotkey);
+        if (!m_kanbanHotkey || !m_kanbanHotkey->applySequence(seq)) {
+            // 注册失败：编辑框弹回空(停用)，配置同步清掉，别留下「看着设了其实没生效」的值。
+            config->setValue(key, QString());
+            m_kanbanSyncing = true;
+            m_kanbanHotkeyEdit->setKeySequence(QKeySequence());
+            m_kanbanSyncing = false;
+            setKanbanLog(QStringLiteral("快捷键没有生效：需要 Ctrl/Alt/Win 加字母、数字或 F 键，"
+                                       "且未被其他程序占用。"), true);
+            return;
+        }
+        config->setValue(key, seq.toString(QKeySequence::PortableText));
+        setKanbanLog(seq.isEmpty()
+                         ? QStringLiteral("快捷键已停用。")
+                         : QStringLiteral("快捷键已设为 %1，立即生效。")
+                               .arg(seq.toString(QKeySequence::NativeText)),
+                     false);
+    });
+    hotkeyRow->addWidget(m_kanbanHotkeyEdit);
+    hotkeyRow->addStretch(1);
+    lay->addLayout(hotkeyRow);
 
     return card;
 }
@@ -635,6 +694,28 @@ void MainWindow::setupKanbanAndTray()
         VideoWallpaper &video = VideoWallpaper::instance();
         ApplicationRuntimeState::instance().setWallpaperState(
             video.isStarted(), video.isStarted() && !video.isPlaying());
+    }
+
+    // 全局快捷键：注册在系统层，WM_HOTKEY 由 nativeEventFilter 转成信号。设置页
+    // 改键只调 applySequence，这里只在启动时装一次初始值。
+    m_kanbanHotkey = new fbswin::GlobalHotkey(this);
+    connect(m_kanbanHotkey, &fbswin::GlobalHotkey::activated, this, [this] {
+        if (m_kanban)
+            m_kanban->toggleVisible();
+    });
+    const QString storedHotkey = AppConfig::instance().value(
+        QString::fromLatin1(ConfigKeys::Kanban::ToggleHotkey),
+        QStringLiteral("Ctrl+Alt+K")).toString();
+    const QKeySequence hotkeySeq(storedHotkey);
+    m_kanbanSyncing = true;
+    if (m_kanbanHotkeyEdit)
+        m_kanbanHotkeyEdit->setKeySequence(hotkeySeq);
+    m_kanbanSyncing = false;
+    if (!m_kanbanHotkey->applySequence(hotkeySeq)) {
+        videodiag::log(videodiag::Level::Warning,
+                       QStringLiteral("全局快捷键 %1 注册失败(被占用或组合不合法)，已停用")
+                           .arg(storedHotkey),
+                       QStringLiteral("Kanban"));
     }
 
     m_tray = new SystemTrayController(this);

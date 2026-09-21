@@ -105,6 +105,9 @@ inline constexpr auto MeshHide = "kanban/meshHide";
 // 旧版布尔开关(有则视为「开=中档」)：只在读配置时作为迁移来源，新写入一律走
 // GazeStrength —— 见 KanbanController::loadSettings 里的迁移注释。
 inline constexpr auto GazeTrackingLegacy = "kanban/gazeTracking";
+// 全局显示/隐藏看板娘的快捷键，存 QKeySequence 的 PortableText(如 "Ctrl+Alt+K")。
+// 空串 = 停用。注册失败(被占用/组合不合法)时不落盘半吊子值，见设置页接线处。
+inline constexpr auto ToggleHotkey = "kanban/toggleHotkey";
 }
 
 namespace Tray {

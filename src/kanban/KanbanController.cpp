@@ -516,6 +516,37 @@ void KanbanController::showWindow()
     }
 }
 
+void KanbanController::toggleVisible()
+{
+    // 没在跑：快捷键就是「召唤」，走完整启动路径(含后端降级)。
+    if (!m_machine.isRunning()) {
+        start();
+        return;
+    }
+    if (!m_window) {
+        return;
+    }
+    if (m_window->isVisible()) {
+        // 隐藏即停帧。onFrameTick 对隐藏窗口本就有兜底停帧，这里显式停省一拍；
+        // 模型与窗口都保留，回来不用重装载。
+        m_clock->stop();
+        m_window->hide();
+        videodiag::log(videodiag::Level::Info,
+                       QStringLiteral("[Kanban] 快捷键隐藏：帧时钟已停"),
+                       QLatin1String(kModule));
+    } else {
+        m_window->show();
+        // 挂起(锁屏/熄屏)期间不抢着起帧，交给心跳在原因解除的那一拍处理。
+        if (!m_machine.isPaused() && m_suspendReasons == 0) {
+            m_clock->start();
+        }
+        videodiag::log(videodiag::Level::Info,
+                       QStringLiteral("[Kanban] 快捷键显示：帧时钟已恢复"),
+                       QLatin1String(kModule));
+    }
+    publishState();
+}
+
 
 void KanbanController::shutdownForExit()
 {

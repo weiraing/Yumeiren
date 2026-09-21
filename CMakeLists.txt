@@ -137,6 +137,7 @@ set(YUMEIREN_SOURCES
     src/wallpaper/VideoWallpaperSettings.cpp
     # platform/ module
     src/platform/windows/desktopmount.cpp
+    src/platform/windows/globalhotkey.cpp
     src/platform/windows/shellfileops.cpp
     # tray/ module
     src/tray/SystemTrayController.cpp

@@ -333,6 +333,11 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     });
     connect(m_autostartBox, &QCheckBox::toggled, this, [this](bool on) {
         VideoWallpaper::instance().setAutostart(on);
+        // 看板娘页的同名复选框是同一个注册表项，两处勾选状态保持一致。
+        if (m_kanbanAutostartBox && m_kanbanAutostartBox->isChecked() != on) {
+            QSignalBlocker blocker(m_kanbanAutostartBox);
+            m_kanbanAutostartBox->setChecked(on);
+        }
     });
     connect(&VideoWallpaper::instance(), &VideoWallpaper::playbackStateChanged,
             this, &MainWindow::onVideoStateChanged);
