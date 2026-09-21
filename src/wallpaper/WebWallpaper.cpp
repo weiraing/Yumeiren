@@ -798,12 +798,12 @@ void WebWallpaper::onCapturePreview(HRESULT code, IStream *stream)
         emit snapshotUpdated();
     }
 
-    // 回到省电态：不可见 + 挂起(若有 _3)。拿到有效快照才藏；全黑/失败保持可见。
-    if (m_refreshMode != Realtime && m_running && !m_suspendReasons && !image.isNull() && !blank) {
-        if (m_controller)
-            m_controller->put_IsVisible(FALSE);
+    // 回到省电态：拿到有效快照后 TrySuspend —— 合成器保留最后一帧，桌面继续显示
+    // 这一帧而渲染归零。**绝不能 put_IsVisible(FALSE)**：隐藏后宿主窗口的 Qt GDI
+    // 绘制在跨进程挂载的 WorkerW 子窗口上不被 DWM 合成，桌面露出用户原来的静态
+    // 壁纸，看起来就是「壁纸退出了」(实测截图验证过)。
+    if (m_refreshMode != Realtime && m_running && !m_suspendReasons && !image.isNull() && !blank)
         suspendNoop();
-    }
 #endif
 }
 
@@ -915,8 +915,9 @@ void WebWallpaper::applySuspend(bool suspend)
     } else {
         if (m_webview3)
             static_cast<ICoreWebView2_3 *>(m_webview3)->Resume();
-        // 快照模式恢复后仍回不可见(显示的是截图)，由刷新节奏短暂唤醒。
-        m_controller->put_IsVisible(m_refreshMode == Realtime ? TRUE : FALSE);
+        // 快照模式也保持可见：TrySuspend 冻结的最后一帧由合成器继续显示，
+        // 隐藏宿主内容反而会让桌面露出用户原壁纸(见 onCapturePreview 注释)。
+        m_controller->put_IsVisible(TRUE);
     }
 #endif
 }
