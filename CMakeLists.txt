@@ -27,8 +27,22 @@ if(MSVC)
     add_compile_options(/utf-8)
 endif()
 
+# 默认 Release：CMAKE_BUILD_TYPE 为空时 GCC 一条优化开关都拿不到(等效 -O0)，视频
+# 解码回调、看板娘逐帧物理与 GL 渲染全在零优化下跑，CPU/GPU 占用与 exe 体积两头
+# 吃亏。命令行显式 -DCMAKE_BUILD_TYPE=Debug 仍然优先。
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "构建类型" FORCE)
+endif()
+
 if(MINGW)
     set(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -c 65001")
+    # Release 档的取舍：
+    #   -O2 而非 GCC Release 默认的 -O3 —— 本项目没有能吃满 O3 的纯计算热点，O3 的
+    #   激进内联只会徒增体积；
+    #   函数/数据分节 + --gc-sections —— 链接器把没被引用到的段整个丢掉；
+    #   -s —— 链接期剥离符号表，出问题靠日志排查，不靠 exe 里那几 MB 符号。
+    set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG -ffunction-sections -fdata-sections")
+    set(CMAKE_EXE_LINKER_FLAGS_RELEASE "-Wl,--gc-sections -s")
 endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets)
