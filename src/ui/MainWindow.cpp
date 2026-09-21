@@ -431,6 +431,20 @@ QWidget *MainWindow::buildHeader()
         m_wallTabs.append(b);
         lay->addWidget(b);
     }
+    lay->addSpacing(6);
+
+    // 看板娘页的页内页签：与壁纸页同一套 HeaderTab 写法，只在导航选中看板娘时出现。
+    const QStringList kanbanTabs = {QStringLiteral("看板娘"), QStringLiteral("设置")};
+    for (int i = 0; i < kanbanTabs.size(); ++i) {
+        auto *b = new QPushButton(kanbanTabs[i], header);
+        b->setObjectName(QStringLiteral("HeaderTab"));
+        b->setCheckable(true);
+        b->setVisible(false);
+        b->setCursor(Qt::PointingHandCursor);
+        connect(b, &QPushButton::clicked, this, [this, i] { selectKanbanTab(i); });
+        m_kanbanTabs.append(b);
+        lay->addWidget(b);
+    }
     lay->addStretch(1);
 
     m_statusBox = new QWidget(header);

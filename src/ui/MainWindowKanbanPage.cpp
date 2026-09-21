@@ -183,7 +183,18 @@ void applyKanbanThumbIcon(QListWidgetItem *item, const QSize &iconSize)
 } // namespace
 
 
+// 看板娘页 = 顶部页签「看板娘 / 设置」的容器。页签本体在 buildHeader() 的第三组
+// HeaderTab，切页逻辑与壁纸页的 m_wallStack 同构。
 QWidget *MainWindow::buildKanbanPage()
+{
+    m_kanbanStack = new QStackedWidget(this);
+    m_kanbanStack->addWidget(buildKanbanMainPage()); // 0
+    m_kanbanStack->addWidget(buildKanbanLabPage());  // 1
+    return m_kanbanStack;
+}
+
+// 页签 0：看板娘主体(启动控制、显示与互动、模型网格)。
+QWidget *MainWindow::buildKanbanMainPage()
 {
     auto *scroll = new QScrollArea(this);
     scroll->setWidgetResizable(true);
@@ -281,6 +292,65 @@ QWidget *MainWindow::buildKanbanPage()
 
     scroll->setWidget(page);
     return scroll;
+}
+
+// 页签 1：实验性功能的落脚点。每行都是一个**规划中**的能力，先用禁用态占位——
+// 做完一个换成一个真控件，别在这里堆假开关。
+QWidget *MainWindow::buildKanbanLabPage()
+{
+    auto *page = new QWidget(this);
+    auto *lay = new QVBoxLayout(page);
+    lay->setContentsMargins(18, 16, 18, 16);
+
+    auto *card = new QFrame(page);
+    card->setObjectName(QStringLiteral("PageCard"));
+    auto *cardLay = new QVBoxLayout(card);
+    cardLay->setContentsMargins(14, 14, 14, 14);
+    cardLay->setSpacing(10);
+
+    auto *title = new QLabel(QStringLiteral("设置"), card);
+    title->setObjectName(QStringLiteral("GroupTitle"));
+    cardLay->addWidget(title);
+
+    auto *hint = new QLabel(
+        QStringLiteral("这里是看板娘扩展功能的入口。下面每一条都在规划中、尚未实装，"
+                       "做完一个就会在这里变成真的设置项。"), card);
+    hint->setObjectName(QStringLiteral("HintLabel"));
+    hint->setWordWrap(true);
+    cardLay->addWidget(hint);
+
+    const QStringList plannedNames = {
+        QStringLiteral("悬停提示"),
+        QStringLiteral("自由走动"),
+        QStringLiteral("文件拖入"),
+        QStringLiteral("语音播报"),
+    };
+    const QStringList plannedTips = {
+        QStringLiteral("鼠标移入/移出模型主体时，在小人旁边浮现文字信息"),
+        QStringLiteral("看板娘沿桌面自行走动，而不是固定在一处"),
+        QStringLiteral("把文件拖到看板娘身上触发互动(接住、播报、打开…)"),
+        QStringLiteral("接入大模型：让看板娘开口说话、读通知、陪聊"),
+    };
+    for (int i = 0; i < plannedNames.size(); ++i) {
+        auto *row = new QHBoxLayout();
+        row->setSpacing(10);
+        auto *box = new QCheckBox(plannedNames.at(i), card);
+        box->setEnabled(false); // 占位：规划中的能力不给可点的假相
+        row->addWidget(box);
+        auto *desc = new QLabel(plannedTips.at(i), card);
+        desc->setObjectName(QStringLiteral("HintLabel"));
+        desc->setToolTip(tooltipstyle::format(
+            QStringLiteral("%1\n（规划中，尚未实现）").arg(plannedTips.at(i))));
+        row->addWidget(desc);
+        row->addStretch(1);
+        cardLay->addLayout(row);
+    }
+    cardLay->addStretch(1);
+
+    card->setFixedWidth(uimetrics::kPageLeftColWidth);
+    lay->addWidget(card, 0, Qt::AlignTop | Qt::AlignLeft);
+    lay->addStretch(1);
+    return page;
 }
 
 QWidget *MainWindow::buildKanbanModelCard(QWidget *parent)
@@ -1392,6 +1462,8 @@ void MainWindow::switchPage(int row)
         t->setVisible(row == 0);
     for (auto *t : m_wallTabs)
         t->setVisible(row == 1);
+    for (auto *t : m_kanbanTabs)
+        t->setVisible(row == 2);
     m_statusBox->setVisible(row == 0);
 
     if (row == 0)
@@ -1399,6 +1471,7 @@ void MainWindow::switchPage(int row)
     else if (row == 1)
         selectWallTab(m_wallStack->currentIndex());
     else if (row == 2) {
+        selectKanbanTab(m_kanbanStack ? m_kanbanStack->currentIndex() : 0);
         updateKanbanControls();
 
         ensureKanbanModelThumbs();
@@ -1431,4 +1504,14 @@ void MainWindow::selectWallTab(int index)
     for (int i = 0; i < m_wallTabs.size(); ++i)
         m_wallTabs[i]->setChecked(i == index);
     m_wallStack->setCurrentIndex(index);
+}
+
+void MainWindow::selectKanbanTab(int index)
+{
+    if (index < 0 || index >= m_kanbanTabs.size())
+        return;
+    for (int i = 0; i < m_kanbanTabs.size(); ++i)
+        m_kanbanTabs[i]->setChecked(i == index);
+    if (m_kanbanStack)
+        m_kanbanStack->setCurrentIndex(index);
 }

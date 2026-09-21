@@ -64,6 +64,7 @@ private slots:
     void switchPage(int row);
     void selectHeaderTab(int index);
     void selectWallTab(int index);
+    void selectKanbanTab(int index); // 看板娘页内：看板娘 / 设置(实验性功能)
     void addVideos();
     void scanVideoDir(); // 扫描软件目录 data/video 下的视频并入列表
     void removeSelectedVideos();
@@ -145,6 +146,8 @@ private:
     bool buildRandomImagePool(int *count, QString *error);
 
     QWidget *buildKanbanPage();
+    QWidget *buildKanbanMainPage();  // 页签 0：看板娘主体
+    QWidget *buildKanbanLabPage();   // 页签 1：设置(实验性功能占位)
     QWidget *buildKanbanModelCard(QWidget *parent);
     QWidget *buildKanbanParamCard(QWidget *parent);
     // 控制器 + 托盘 + 退出步骤的装配(在 UI 建好之后调用，顺序有讲究)。
@@ -277,6 +280,8 @@ private:
     QVector<QPushButton *> m_headerTabs;
     QStackedWidget *m_wallStack = nullptr;  // 视频壁纸 / 动态网页壁纸
     QVector<QPushButton *> m_wallTabs;
+    QStackedWidget *m_kanbanStack = nullptr; // 看板娘 / 设置(实验性功能)
+    QVector<QPushButton *> m_kanbanTabs;
     QWidget *m_statusBox = nullptr;         // 状态徽标(仅文件夹美化页显示)
     QLabel *m_imageChip = nullptr;
     QLabel *m_effectChip = nullptr;
