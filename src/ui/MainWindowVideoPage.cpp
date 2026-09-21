@@ -343,6 +343,9 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     });
     connect(&VideoWallpaper::instance(), &VideoWallpaper::playbackStateChanged,
             this, &MainWindow::onVideoStateChanged);
+    // 网页壁纸起停时同步锁死/解锁视频侧的启动按钮(互斥的界面反馈)
+    connect(&WebWallpaper::instance(), &WebWallpaper::runningChanged,
+            this, [this](bool) { updateVideoButtons(); });
 
     refreshVideoList();
     scroll->setWidget(page);
@@ -559,6 +562,15 @@ void MainWindow::updateWebWallpaperControls()
         return;
     auto &web = WebWallpaper::instance();
     const bool running = web.isRunning();
+    // 与视频壁纸互斥的界面侧：视频在跑时应用入口锁死并说明原因。
+    const bool videoRunning = VideoWallpaper::instance().isStarted();
+    m_webStartBtn->setEnabled(!videoRunning || running);
+    m_webStartBtn->setToolTip(videoRunning && !running
+                                  ? tooltipstyle::format(
+                                        QStringLiteral("视频壁纸运行中，两者只能应用一个。\n"
+
+                                                       "先到「视频壁纸」页取消它，再回来应用网页壁纸"))
+                                  : QString());
     m_webStartBtn->setText(running ? QStringLiteral("■ 停止网页壁纸")
                                    : QStringLiteral("▶ 应用网页壁纸"));
     if (m_webStateLabel)
@@ -779,6 +791,7 @@ void MainWindow::onVideoStateChanged(const QString &text)
     VideoWallpaper &video = VideoWallpaper::instance();
     ApplicationRuntimeState::instance().setWallpaperState(
         video.isStarted(), video.isStarted() && !video.isPlaying());
+    updateWebWallpaperControls(); // 视频起停时同步网页壁纸侧的应用入口
 }
 
 void MainWindow::updateVideoButtons()
@@ -787,8 +800,17 @@ void MainWindow::updateVideoButtons()
         return;
     const bool empty = VideoWallpaper::instance().playlist().isEmpty();
     const bool started = VideoWallpaper::instance().isStarted();
+    // 两种壁纸互斥：网页壁纸在跑时视频不可启动(底层的自动互斥只是兜底，
+    // 界面上直接把入口锁死并说明原因，用户不用猜)。
+    const bool webRunning = WebWallpaper::instance().isRunning();
 
-    m_playBtn->setEnabled(!empty || started);
+    m_playBtn->setEnabled((!empty || started) && !webRunning);
+    m_playBtn->setToolTip(webRunning && !started
+                              ? tooltipstyle::format(
+                                    QStringLiteral("动态网页壁纸运行中，两者只能应用一个。\n"
+
+                                                   "先到「动态网页壁纸」页停止它，再回来启动视频壁纸"))
+                              : QString());
     m_playBtn->setText(started ? QStringLiteral("■ 取消") : QStringLiteral("▶ 启动"));
     m_playBtn->setProperty("data-active", started ? 1 : 0);
     m_playBtn->style()->unpolish(m_playBtn);

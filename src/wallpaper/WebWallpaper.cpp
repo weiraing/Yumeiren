@@ -12,6 +12,7 @@
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QSet>
 #include <QPaintEvent>
 #include <QWidget>
 #include <QFile>
@@ -29,6 +30,9 @@
 #define NOMINMAX
 #include <windows.h>
 #include <objidl.h>
+#include <tlhelp32.h>
+#include <cwchar>
+#include <cstring>
 #include "WebView2.h"
 
 #define VW_ASSERT_GUI() Q_ASSERT(QThread::currentThread() == qApp->thread())
@@ -178,6 +182,117 @@ private:
     IID iid_;
     ULONG ref_ = 1;
 };
+
+// 浏览器启动参数：关后台联网与组件更新(壁纸不需要)，HTTP 磁盘缓存限幅 128MB
+// —— user-data 目录默认会无限涨。
+constexpr wchar_t kBrowserArguments[] =
+    L"--disable-background-networking --disable-component-update --disk-cache-size=134217728";
+// 与 vendored SDK(1.0.4191.47) 对应的兼容版本。升级 SDK 时要同步这里的值
+// (参考 third_party/webview2/include/WebView2EnvironmentOptions.h 的
+// CORE_WEBVIEW_TARGET_PRODUCT_VERSION)。
+constexpr wchar_t kTargetCompatibleVersion[] = L"152.0.4191.47";
+
+// ICoreWebView2EnvironmentOptions 的最小实现：只实现 v1 的 8 个属性(顺序必须与
+// MIDL 声明一致，乱序=虚表错位)，运行时对 Options2+ 的 QI 拿到 E_NOINTERFACE 后
+// 会退回默认值 —— 这是接口契约允许的。手写而不引入 WRL：MinGW 侧 WRL 不可靠。
+class EnvironmentOptions final : public ICoreWebView2EnvironmentOptions
+{
+public:
+    STDMETHODIMP QueryInterface(REFIID riid, void **out) override
+    {
+        if (!out)
+            return E_POINTER;
+        if (riid == IID_ICoreWebView2EnvironmentOptions || riid == IID_IUnknown) {
+            *out = static_cast<ICoreWebView2EnvironmentOptions *>(this);
+            AddRef();
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+    STDMETHODIMP_(ULONG) AddRef() override { return ++ref_; }
+    STDMETHODIMP_(ULONG) Release() override
+    {
+        const ULONG r = --ref_;
+        if (r == 0)
+            delete this;
+        return r;
+    }
+
+    STDMETHODIMP get_AdditionalBrowserArguments(LPWSTR *value) override
+    { return copyOut(kBrowserArguments, value); }
+    STDMETHODIMP put_AdditionalBrowserArguments(LPCWSTR) override { return S_OK; }
+    STDMETHODIMP get_Language(LPWSTR *value) override { return copyOut(nullptr, value); }
+    STDMETHODIMP put_Language(LPCWSTR) override { return S_OK; }
+    STDMETHODIMP get_TargetCompatibleBrowserVersion(LPWSTR *value) override
+    { return copyOut(kTargetCompatibleVersion, value); }
+    STDMETHODIMP put_TargetCompatibleBrowserVersion(LPCWSTR) override { return S_OK; }
+    STDMETHODIMP get_AllowSingleSignOnUsingOSPrimaryAccount(BOOL *allow) override
+    {
+        if (!allow)
+            return E_POINTER;
+        *allow = FALSE;
+        return S_OK;
+    }
+    STDMETHODIMP put_AllowSingleSignOnUsingOSPrimaryAccount(BOOL) override { return S_OK; }
+
+private:
+    static HRESULT copyOut(LPCWSTR src, LPWSTR *out)
+    {
+        if (!out)
+            return E_POINTER;
+        const size_t bytes = (wcslen(src) + 1) * sizeof(wchar_t);
+        *out = static_cast<LPWSTR>(CoTaskMemAlloc(bytes));
+        if (!*out)
+            return E_OUTOFMEMORY;
+        memcpy(*out, src, bytes);
+        return S_OK;
+    }
+    ULONG ref_ = 1;
+};
+
+// msedgewebview2 子进程(浏览器主进程 + 它派生的渲染/GPU 进程)全部降到「低于正常」
+// 优先级：前台应用永远优先拿 CPU，壁纸的解码/合成只能在空闲档位里跑。
+void applyWebView2ChildPriority()
+{
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE)
+        return;
+    const DWORD ourPid = GetCurrentProcessId();
+    auto isWebview = [](const wchar_t *name) {
+        return _wcsicmp(name, L"msedgewebview2.exe") == 0;
+    };
+    // 第一遍：找到属于本进程的浏览器主进程
+    QSet<quint32> browsers;
+    PROCESSENTRY32W pe{};
+    pe.dwSize = sizeof(pe);
+    if (Process32FirstW(snap, &pe)) {
+        do {
+            if (isWebview(pe.szExeFile) && pe.th32ParentProcessID == ourPid)
+                browsers.insert(pe.th32ProcessID);
+        } while (Process32NextW(snap, &pe));
+    }
+    if (browsers.isEmpty()) {
+        CloseHandle(snap);
+        return;
+    }
+    // 第二遍：主进程 + 其渲染/GPU 子进程一并降级
+    if (Process32FirstW(snap, &pe)) {
+        do {
+            if (!isWebview(pe.szExeFile))
+                continue;
+            if (browsers.contains(pe.th32ProcessID)
+                || browsers.contains(pe.th32ParentProcessID)) {
+                if (HANDLE h = OpenProcess(PROCESS_SET_INFORMATION, FALSE,
+                                           pe.th32ProcessID)) {
+                    SetPriorityClass(h, BELOW_NORMAL_PRIORITY_CLASS);
+                    CloseHandle(h);
+                }
+            }
+        } while (Process32NextW(snap, &pe));
+    }
+    CloseHandle(snap);
+}
 
 // 宿主窗口：实时渲染时被 WebView2 的子窗口盖住，paint 什么都不画也行；快照模式
 // 控制器不可见，由它把最近一次截图铺满。黑色打底而不是透明：壁纸底上透出桌面
@@ -432,14 +547,16 @@ bool WebWallpaper::start(QString *error, const QString &source)
     // 浏览器用户数据目录：登录态/缓存都落在 .cache/web-profile(清缓存可带走)。
     m_creating = true;
     m_createWatchdog->start();
+    auto *options = new EnvironmentOptions;
     const HRESULT hr = fbswin::webview2CreateEnvironment(
-        CachePaths::webProfile(), nullptr,
+        CachePaths::webProfile(), options,
         new ComHandler<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler,
                        ICoreWebView2Environment *>(
             [this](HRESULT code, ICoreWebView2Environment *env) {
                 onEnvironmentReady(code, env);
             },
             IID_ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler));
+    options->Release(); // API 已持自己的引用，调用返回即可归还我们的那份
     if (FAILED(hr)) {
         m_creating = false;
         m_createWatchdog->stop();
@@ -598,6 +715,7 @@ void WebWallpaper::attachController()
 
     m_controller->put_ZoomFactor(m_zoomPercent / 100.0);
     applyAudio();
+    applyWebView2ChildPriority();
     startSnapshotCycle();
 
     m_webview->Navigate(reinterpret_cast<LPCWSTR>(m_source.utf16()));
@@ -676,6 +794,7 @@ void WebWallpaper::onNavigationCompleted(HRESULT code)
 #ifdef Q_OS_WIN
     if (m_shuttingDown || !m_running)
         return;
+    applyWebView2ChildPriority(); // 换页会拉起新的渲染进程，再降一次级
     if (FAILED(code)) {
         setState(QStringLiteral("页面加载失败，已保持黑屏；请检查地址或网络"));
         return;
@@ -815,6 +934,12 @@ void WebWallpaper::evaluateSuspend()
 #ifdef Q_OS_WIN
     if (!m_running || m_shuttingDown || m_creating)
         return;
+
+    // 渲染进程会随页面陆续拉起，每 30s 把新出现的 webview 子进程再降一级。
+    if (++m_priorityTick >= 30) {
+        m_priorityTick = 0;
+        applyWebView2ChildPriority();
+    }
 
     int reasons = 0;
     if (fbswin::isFullscreenWindowPresent())

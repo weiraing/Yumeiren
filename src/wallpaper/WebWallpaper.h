@@ -141,6 +141,7 @@ private:
     bool m_suspendedByUs = false;
     bool m_releasedForSuspend = false;
     bool m_monitorOn = true;
+    int m_priorityTick = 0; // 心跳计数：每 30 拍补一次 webview 子进程降级
 };
 
 #endif // WEBWALLPAPER_H
