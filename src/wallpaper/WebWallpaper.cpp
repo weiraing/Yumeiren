@@ -700,6 +700,8 @@ void WebWallpaper::startSnapshotCycle()
             m_controller->put_IsVisible(TRUE);
         return;
     }
+    // 节拍在 onCapturePreview 里重排(单发定时器)：这保证「上一拍没截好」不会
+    // 堆积下一拍。这里只负责排下一拍；导航完成后的首次快照另有 2s 快路径。
     const int intervalMs = m_refreshMode == SnapshotMinute ? 60000 : 3600000;
     m_snapshotTimer->start(intervalMs);
 #endif
@@ -759,22 +761,48 @@ void WebWallpaper::onCapturePreview(HRESULT code, IStream *stream)
     stream->Release();
     if (m_shuttingDown)
         return;
-    if (!image.isNull()) {
+    // 先排下一轮，再决定要不要藏：截图失败/全黑时保持可见并等下一拍重试，
+    // 绝不把桌面留在黑屏上 —— 那会被当成「壁纸退出了」。
+    const bool rescheduled = [this]() {
+        if (m_refreshMode == Realtime || !m_running)
+            return false;
+        const int intervalMs = m_refreshMode == SnapshotMinute ? 60000 : 3600000;
+        m_snapshotTimer->start(intervalMs);
+        return true;
+    }();
+    Q_UNUSED(rescheduled)
+
+    // 全黑检测：抽样像素全 0 视为「页面还没画出首帧」，这一帧不能上墙。
+    bool blank = !image.isNull();
+    if (blank) {
+        const int step = qMax(1, qMin(image.width(), image.height()) / 16);
+        blank = true;
+        for (int y = 0; y < image.height() && blank; y += step)
+            for (int x = 0; x < image.width() && blank; x += step)
+                if (image.pixel(x, y) != 0xff000000)
+                    blank = false;
+    }
+
+    if (image.isNull()) {
+        videodiag::log(videodiag::Level::Warning,
+                       QStringLiteral("网页快照截图失败 hr=0x%1").arg(uint(code), 8, 16, QChar('0')),
+                       QStringLiteral("WebWallpaper"));
+    } else if (blank) {
+        videodiag::log(videodiag::Level::Info,
+                       QStringLiteral("网页快照是全黑(页面未出首帧)，保持实时渲染并等下一拍"),
+                       QStringLiteral("WebWallpaper"));
+    } else {
         m_snapshot = image;
         if (m_host)
             static_cast<WebHostWidget *>(m_host)->setSnapshot(image);
         emit snapshotUpdated();
-    } else {
-        videodiag::log(videodiag::Level::Warning,
-                       QStringLiteral("网页快照截图失败 hr=0x%1").arg(uint(code), 8, 16, QChar('0')),
-                       QStringLiteral("WebWallpaper"));
     }
-    // 回到省电态：不可见 + 挂起(若有 _3)。实时模式不走这条路径。
-    if (m_refreshMode != Realtime && m_running && !m_suspendReasons) {
+
+    // 回到省电态：不可见 + 挂起(若有 _3)。拿到有效快照才藏；全黑/失败保持可见。
+    if (m_refreshMode != Realtime && m_running && !m_suspendReasons && !image.isNull() && !blank) {
         if (m_controller)
             m_controller->put_IsVisible(FALSE);
-        if (m_webview3)
-            static_cast<ICoreWebView2_3 *>(m_webview3)->TrySuspend(nullptr);
+        suspendNoop();
     }
 #endif
 }
@@ -854,19 +882,29 @@ void WebWallpaper::evaluateSuspend()
                            .arg(reasons, 0, 16),
                        QStringLiteral("WebWallpaper"));
     }
-    if (!shouldSuspend)
-        m_releasedForSuspend = false;
+    if (!shouldSuspend) {
+        // 长挂起已整树销毁过：原因解除后必须重建管线，否则壁纸就此消失 ——
+        // 表现正是「挂了一会就自己没了」。节流 5s 防止原因抖动时反复重建。
+        if (m_releasedForSuspend) {
+            m_releasedForSuspend = false;
+            if (m_running && !m_creating && !m_controller
+                && (!m_suspendClock->isValid() || m_suspendClock->elapsed() >= 5000)) {
+                m_suspendClock->restart();
+                videodiag::log(videodiag::Level::Info,
+                               QStringLiteral("挂起解除，重建网页壁纸管线"),
+                               QStringLiteral("WebWallpaper"));
+                QString err;
+                start(&err);
+            }
+        }
+        m_suspendClock->invalidate();
+    }
 #endif
 }
 
 void WebWallpaper::applySuspend(bool suspend)
 {
 #ifdef Q_OS_WIN
-    videodiag::log(videodiag::Level::Warning,
-                   QStringLiteral("[dbg] applySuspend(%1) ctrl=%2 wv3=%3")
-                       .arg(suspend).arg(quintptr(m_controller), 0, 16)
-                       .arg(quintptr(m_webview3), 0, 16),
-                   QStringLiteral("WebWallpaper"));
     m_suspendedByUs = suspend;
     if (!m_controller)
         return;
