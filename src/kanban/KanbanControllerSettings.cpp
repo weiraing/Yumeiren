@@ -33,6 +33,11 @@ void KanbanController::loadSettings()
     m_alwaysOnTop = config.value(QString::fromLatin1(ConfigKeys::Kanban::AlwaysOnTop), true).toBool();
     m_mouseThrough = config.value(QString::fromLatin1(ConfigKeys::Kanban::MouseThrough), false).toBool();
     m_interactionEnabled = config.value(QString::fromLatin1(ConfigKeys::Kanban::AllowInteraction), true).toBool();
+    m_motionLoopEnabled =
+        config.value(QString::fromLatin1(ConfigKeys::Kanban::MotionLoop), true).toBool();
+    m_soundEnabled = config.value(QString::fromLatin1(ConfigKeys::Kanban::PlaySound), true).toBool();
+    m_doubleClickSwitchEnabled =
+        config.value(QString::fromLatin1(ConfigKeys::Kanban::DoubleClickSwitch), true).toBool();
 
     // 仅在新键缺失时迁移旧开关，避免覆盖用户在新版选择的档位。
     const QString strengthKey = QString::fromLatin1(ConfigKeys::Kanban::GazeStrength);
@@ -54,6 +59,10 @@ void KanbanController::loadSettings()
     // 纹理上限策略必须在任何模型装载之前定下来，所以跟着配置一起在这里落。
     setTextureDownscaleEnabled(
         config.value(QString::fromLatin1(ConfigKeys::Kanban::TextureDownscale), true).toBool());
+    // 网格隐藏清单同理，也是「装载前就得定下来」的进程级策略。默认**开**：用户把清单丢进
+    // 模型目录就是想让它生效，不该再让他去找一遍开关。没有清单的模型完全不受影响。
+    kanban::setMeshHideEnabled(
+        config.value(QString::fromLatin1(ConfigKeys::Kanban::MeshHide), true).toBool());
     m_clock->setTargetFps(m_targetFps);
     emit settingsChanged();
 }
@@ -160,6 +169,43 @@ void KanbanController::setInteractionEnabled(bool enabled)
     emit settingsChanged();
 }
 
+void KanbanController::setMotionLoopEnabled(bool enabled)
+{
+    if (m_motionLoopEnabled == enabled) {
+        return;
+    }
+    m_motionLoopEnabled = enabled;
+    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::MotionLoop), enabled);
+    if (m_renderer) {
+        m_renderer->setMotionLoopEnabled(enabled);
+    }
+    emit settingsChanged();
+}
+
+void KanbanController::setSoundEnabled(bool enabled)
+{
+    if (m_soundEnabled == enabled) {
+        return;
+    }
+    m_soundEnabled = enabled;
+    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::PlaySound), enabled);
+    if (m_renderer) {
+        m_renderer->setSoundEnabled(enabled);
+    }
+    emit settingsChanged();
+}
+
+void KanbanController::setDoubleClickSwitchEnabled(bool enabled)
+{
+    if (m_doubleClickSwitchEnabled == enabled) {
+        return;
+    }
+    m_doubleClickSwitchEnabled = enabled;
+    AppConfig::instance().setValue(
+        QString::fromLatin1(ConfigKeys::Kanban::DoubleClickSwitch), enabled);
+    emit settingsChanged();
+}
+
 void KanbanController::setGazeStrength(int strength)
 {
     const int next = KanbanRenderer::clampGazeStrength(strength);
@@ -185,7 +231,34 @@ void KanbanController::setGazeStrength(int strength)
                    QLatin1String("Kanban"));
 }
 
-bool KanbanController::setModelPath(const QString &modelJsonPath)
+bool KanbanController::meshHideEnabled() const
+{
+    // 单一来源就是那个进程级标志(与 textureDownscale 同一套)，控制器不再存一份镜像。
+    return kanban::meshHideEnabled();
+}
+
+void KanbanController::setMeshHideEnabled(bool enabled)
+{
+    if (kanban::meshHideEnabled() == enabled) {
+        return;
+    }
+    kanban::setMeshHideEnabled(enabled);
+    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::MeshHide), enabled);
+    // 暂停时动画时钟不走、update() 不会被调用 —— 不主动刷一次的话，取消勾选要等恢复动画
+    // 才生效，看起来像开关失灵。刷新完再请求一帧，让窗口真重画。
+    if (m_renderer) {
+        m_renderer->refreshMeshHide();
+    }
+    if (m_window) {
+        m_window->requestFrame();
+    }
+    emit settingsChanged();
+}
+
+QString KanbanController::meshHideText() const
+{
+    return m_renderer ? m_renderer->meshHideText() : QString();
+}bool KanbanController::setModelPath(const QString &modelJsonPath)
 {
     const ModelInfo *info = m_models.byJsonPath(modelJsonPath);
     if (!info || !info->valid) {

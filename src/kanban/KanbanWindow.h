@@ -63,6 +63,7 @@ signals:
     void pointerLeft();
     void hoveredAt(const QPointF &localPos);
     void clicked(const QPointF &localPos);
+    void doubleClicked(const QPointF &localPos);
     void dragStarted();
     void dragFinished();          // 需要持久化位置
     void scaleStepped(int steps); // 滚轮：+1 放大 / -1 缩小

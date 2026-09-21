@@ -307,7 +307,7 @@ bool KanbanWindow::eventFilter(QObject *watched, QEvent *event)
             return static_cast<const QWheelEvent *>(e)->position();
         }
         if (e->type() == QEvent::MouseButtonPress || e->type() == QEvent::MouseButtonRelease
-            || e->type() == QEvent::MouseMove) {
+            || e->type() == QEvent::MouseButtonDblClick || e->type() == QEvent::MouseMove) {
             return static_cast<const QMouseEvent *>(e)->position();
         }
         return QPointF();
@@ -359,6 +359,13 @@ bool KanbanWindow::eventFilter(QObject *watched, QEvent *event)
         }
         break;
     }
+    case QEvent::MouseButtonDblClick: {
+        auto *me = static_cast<QMouseEvent *>(event);
+        if (me->button() == Qt::LeftButton && m_interactionEnabled) {
+            emit doubleClicked(viewPos);
+        }
+        break;
+    }
     case QEvent::HoverEnter:
         if (m_interactionEnabled) {
             emit pointerEntered();
@@ -385,8 +392,8 @@ bool KanbanWindow::eventFilter(QObject *watched, QEvent *event)
         QMenu menu;
         QAction *pauseAct = menu.addAction(QStringLiteral("暂停 / 恢复"));
         connect(pauseAct, &QAction::triggered, this, &KanbanWindow::pauseResumeRequested);
-        QAction *nextAct = menu.addAction(QStringLiteral("播放下一个动作"));
-        // 可播动作不足两个就置灰：只有一个时「下一个」等于原地重播。判据收在渲染器基类。
+        QAction *nextAct = menu.addAction(QStringLiteral("切换动作"));
+        // 可播动作不足两个就置灰：只有一个时「切换」等于原地重播。判据收在渲染器基类。
         nextAct->setEnabled(m_renderer && m_renderer->canPlayNextMotion());
         connect(nextAct, &QAction::triggered, this, &KanbanWindow::playNextRequested);
         QAction *exprAct = menu.addAction(QStringLiteral("切换表情"));
@@ -411,7 +418,7 @@ bool KanbanWindow::eventFilter(QObject *watched, QEvent *event)
 
         // 视线追踪刻意不放进这个菜单：档位是「一次定好、长期不动」的偏好，已在设置页与
         // 托盘两处，再来一份只会让菜单变长还容易误点。
-        QAction *settingAct = menu.addAction(QStringLiteral("打开主界面设置"));
+        QAction *settingAct = menu.addAction(QStringLiteral("打开设置"));
         connect(settingAct, &QAction::triggered, this, &KanbanWindow::settingsRequested);
 
         // 「取消看板娘」不能直接在 exec() 里发出去：接收方会销毁本窗口，而此刻我们还在

@@ -199,11 +199,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     logBar->setObjectName(QStringLiteral("Header"));
     auto *logLayout = new QHBoxLayout(logBar);
     logLayout->setContentsMargins(18, 6, 18, 6);
-    m_logLabel = new QLabel(QStringLiteral("就绪。选择预设或自定义图片，然后点击“应用”。"), logBar);
+    m_logLabel = new QLabel(imagePageHintText(), logBar);
     m_logLabel->setObjectName(QStringLiteral("LogLabel"));
     m_logLabel->setWordWrap(true);
     logLayout->addWidget(m_logLabel, 1);
     folderLay->addWidget(logBar);
+    m_logShowsHint = true;
 
     m_topStack->addWidget(folderPage);
 
@@ -628,8 +629,29 @@ void MainWindow::changeEvent(QEvent *event)
     QMainWindow::changeEvent(event);
 }
 
+QString MainWindow::imagePageHintText()
+{
+    return QStringLiteral("就绪。选择预设或自定义图片，然后点击“应用”。");
+}
+
+QString MainWindow::effectPageHintText()
+{
+    // 与图片页那句同构，动词按效果页自己的按钮(「✓ 应用效果样式」)与
+    // 该页已有文案(「点击“应用效果”生效」)来写。
+    return QStringLiteral("就绪。选择预设或微调参数，然后点击“应用效果”。");
+}
+
+void MainWindow::setLogHint(const QString &text)
+{
+    setLog(text, false);
+    // setLog() 会把它清掉，所以放在它后面立回来。
+    m_logShowsHint = true;
+}
+
 void MainWindow::setLog(const QString &text, bool isError)
 {
+    // 任何显式消息都意味着「这行不再是一条就绪提示」—— 于是切页签时不会去覆盖它。
+    m_logShowsHint = false;
     m_logLabel->setText(text);
     m_logLabel->setProperty("data-err", isError ? 1 : 0);
     m_logLabel->style()->unpolish(m_logLabel);
@@ -658,7 +680,7 @@ void MainWindow::setStatusChips()
     m_adminLabel->style()->unpolish(m_adminLabel);
     m_adminLabel->style()->polish(m_adminLabel);
     m_osLabel->setText(Engine::windowsProductName());
-    m_versionLabel->setText(QStringLiteral("版本 ") + appinfo::version());
+    m_versionLabel->setText(QStringLiteral("version ") + appinfo::version());
 }
 
 void MainWindow::reportDllMigration()
@@ -1065,7 +1087,9 @@ void MainWindow::loadSettings()
         m_presetDir = savedDir;
     else
         m_presetDir = QCoreApplication::applicationDirPath() + QStringLiteral("/data/image");
-    QDir().mkpath(m_presetDir);
+    // 刻意不 mkpath：运行目录的 data/ 由构建期从项目目录复制而来(见 CMakeLists 的
+    // POST_BUILD 复制)，程序在这里建目录会和那份复制打架。目录不存在时图库为空，
+    // 用户用「选择文件夹」指向别的目录即可。
     rebuildGallery();
     m_selectedPreset = s.value(ConfigKeys::Image::Preset, 0).toInt();
     m_customImage = s.value(ConfigKeys::Image::CustomPath).toString();

@@ -62,7 +62,9 @@ bool PlaceholderRenderer::initialize(QString *outError)
     m_blinkLeft = 0.0f;
     m_nextBlinkIn = 2.0f;
     m_motionActive = false;
+    m_motionIsPlayable = false;
     m_motionIndex = 0;     // 与表情同理：重启后从头开始，不接着上次的序号
+    m_currentMotionOrdinal = 1;
     m_expressionIndex = 0; // 重新初始化 = 回到默认脸，免得「重启后还是上次那副表情」
     videodiag::log(videodiag::Level::Info,
                    QStringLiteral("占位渲染器初始化完成(QPainter 直绘，无位图搬运)"),
@@ -82,36 +84,12 @@ bool PlaceholderRenderer::loadModel(const QString &modelJsonPath, QString *outEr
         m_modelName.chop(7);
 
     m_modelTexture = QImage();
-    const QDir modelDir = QFileInfo(modelJsonPath).absoluteDir();
-    const QStringList textureCandidates = {
-        QStringLiteral("textures/texture_00.png"),
-        QStringLiteral("textures/texture_0.png"),
-        m_modelName + QStringLiteral(".png"),
-    };
-    for (const QString &rel : textureCandidates) {
-        const QString path = modelDir.filePath(rel);
-        if (QFileInfo::exists(path)) {
-            // 上限与 GPU 后端共用一份策略(见 KanbanRenderer.h)：此处常驻 CPU 位图，
-            // 4096² 就是 64MB，而它最终只画进这么小的窗口。
-            QImageReader reader(path);
-            const int windowMaxDim = textureMaxDimFor(
-                QSize(qRound(m_width * m_dpr), qRound(m_height * m_dpr)));
-            const int maxDim = textureMaxDimFor(windowMaxDim, reader.size());
-            m_modelTexture = readImageDownscaled(reader, maxDim);
-            if (!m_modelTexture.isNull()) {
-                m_modelTexture = m_modelTexture.convertToFormat(QImage::Format_RGBA8888_Premultiplied);
-                videodiag::log(videodiag::Level::Info,
-                    QStringLiteral("[Kanban] 占位渲染器加载纹理: %1 (%2x%3, 上限 %4)")
-                        .arg(path)
-                        .arg(m_modelTexture.width())
-                        .arg(m_modelTexture.height())
-                        .arg(maxDim > 0 ? QString::number(maxDim) : QStringLiteral("原尺寸")),
-                    QStringLiteral("Live2D"));
-                break;
-            }
-        }
-    }
-    if (m_modelTexture.isNull()) {
+    m_modelTexturePath.clear();
+    m_modelSourceSize = QSize();
+    m_modelTextureLimit = 0;
+    m_modelTextureFailedLimit = 0;
+    m_modelDir = QFileInfo(modelJsonPath).absoluteDir().absolutePath();
+    if (!decodeModelTexture(QDir(m_modelDir))) {
         videodiag::log(videodiag::Level::Warning,
             QStringLiteral("[Kanban] 占位渲染器未找到纹理，使用默认花朵: %1").arg(modelJsonPath),
             QStringLiteral("Live2D"));
@@ -122,11 +100,116 @@ bool PlaceholderRenderer::loadModel(const QString &modelJsonPath, QString *outEr
     return true;
 }
 
+bool PlaceholderRenderer::decodeModelTexture(const QDir &modelDir)
+{
+    // 按候选名在模型目录里找纹理，找到第一张能解码的就用。
+    const QStringList textureCandidates = {
+        QStringLiteral("textures/texture_00.png"),
+        QStringLiteral("textures/texture_0.png"),
+        m_modelName + QStringLiteral(".png"),
+    };
+    for (const QString &rel : textureCandidates) {
+        const QString path = modelDir.filePath(rel);
+        if (!QFileInfo::exists(path))
+            continue;
+
+        QImageReader reader(path);
+        const QSize sourceSize = reader.size();
+        // 上限与 GPU 后端共用一份策略(见 KanbanRenderer.h)：此处常驻 CPU 位图，
+        // 4096² 就是 64MB，而它最终只画进这么小的窗口。
+        const int maxDim = effectiveTextureLimit(sourceSize);
+        QImage decoded = readImageDownscaled(reader, maxDim);
+        if (decoded.isNull())
+            continue;
+        decoded = decoded.convertToFormat(QImage::Format_RGBA8888_Premultiplied);
+
+        // 成功才动成员：重解失败时保持原来那张(糊一点总比空着好)，调用方也靠
+        // 「成员没变」区分成功与失败。
+        m_modelTexture = decoded;
+        m_modelTexturePath = path;
+        m_modelSourceSize = sourceSize;
+        m_modelTextureLimit = maxDim;
+        videodiag::log(videodiag::Level::Info,
+            QStringLiteral("[Kanban] 占位渲染器加载纹理: %1 (%2x%3, 上限 %4)")
+                .arg(path)
+                .arg(m_modelTexture.width())
+                .arg(m_modelTexture.height())
+                .arg(maxDim > 0 ? QString::number(maxDim) : QStringLiteral("原尺寸")),
+            QStringLiteral("Live2D"));
+        return true;
+    }
+    return false;
+}
+
+int PlaceholderRenderer::effectiveTextureLimit(const QSize &source) const
+{
+    const QSize pixels(qRound(m_width * m_dpr), qRound(m_height * m_dpr));
+    return textureMaxDimFor(textureMaxDimFor(pixels), source);
+}
+
+bool PlaceholderRenderer::rebuildTexturesIfNeeded()
+{
+    // 本模型没解出过纹理就没有可重解的余地。
+    if (m_modelTexturePath.isEmpty())
+        return false;
+
+    // 纯算术，不读盘：源尺寸是装载时记下的。所以每帧问一次也不心疼 ——
+    // 也因此不需要 resize() 里那种 pending 标志。
+    const int target = effectiveTextureLimit(m_modelSourceSize);
+    if (target <= 0 || target <= m_modelTextureLimit)
+        return false; // 原尺寸、或手上这张已经够细
+    if (target <= m_modelTextureFailedLimit)
+        return false; // 这个上限已经试过且失败了，不再每帧读盘重试
+
+    // 候选纹理名相对**模型目录**，不是纹理文件自己所在的那层(textures/)。
+    if (!decodeModelTexture(QDir(m_modelDir))) {
+        m_modelTextureFailedLimit = target;
+        videodiag::log(videodiag::Level::Warning,
+            QStringLiteral("[Kanban] 占位渲染器按新上限 %1 重建纹理失败，保持原图").arg(target),
+            QStringLiteral("Live2D"));
+        return false;
+    }
+    videodiag::log(videodiag::Level::Info,
+        QStringLiteral("[Kanban] 占位渲染器绘制面变大到 %1x%2，纹理按新上限 %3 重建")
+            .arg(qRound(m_width * m_dpr))
+            .arg(qRound(m_height * m_dpr))
+            .arg(target),
+        QStringLiteral("Live2D"));
+    return true;
+}
+
+QString PlaceholderRenderer::textureDebugText() const
+{
+    if (m_modelTexture.isNull())
+        return QStringLiteral("无纹理");
+    // 报出「已用上限」与「按当前绘制面算出的目标上限」两个数：光看解出来的尺寸分不清
+    // 「本来就没有更细的余地」和「该重解却没重解」，这两个数一比就清楚。
+    QString text = QStringLiteral("纹理 %1x%2 已用上限 %3 目标上限 %4 源 %5x%6")
+                       .arg(m_modelTexture.width())
+                       .arg(m_modelTexture.height())
+                       .arg(m_modelTextureLimit)
+                       .arg(effectiveTextureLimit(m_modelSourceSize))
+                       .arg(m_modelSourceSize.width())
+                       .arg(m_modelSourceSize.height());
+    if (m_modelTextureFailedLimit > 0) {
+        // 失败时手上还是旧的那张，别让它看起来像已经重解过。
+        text += QStringLiteral(" 重解失败于上限 %1").arg(m_modelTextureFailedLimit);
+    }
+    return text;
+}
+
 void PlaceholderRenderer::unloadModel()
 {
     m_modelName.clear();
     m_modelTexture = QImage();
+    m_modelDir.clear();
+    m_modelTexturePath.clear();
+    m_modelSourceSize = QSize();
+    m_modelTextureLimit = 0;
+    m_modelTextureFailedLimit = 0;
     m_motionActive = false;
+    m_motionIsPlayable = false;
+    m_currentMotionOrdinal = 0;
 }
 
 void PlaceholderRenderer::resize(int width, int height, float devicePixelRatio)
@@ -144,10 +227,11 @@ void PlaceholderRenderer::update(float deltaSeconds)
 
     // 眨眼：到点触发一次短闭眼。
     m_nextBlinkIn -= deltaSeconds;
-    if (m_nextBlinkIn <= 0.0f) {
+    if (!m_motionActive && m_nextBlinkIn <= 0.0f) {
         m_nextBlinkIn = 2.4f + 2.6f * (0.5f + 0.5f * qSin(m_time * 0.37f));
         m_motion = {QStringLiteral("blink"), 0.0f, kBlinkDuration * 2.0f};
         m_motionActive = true;
+        m_motionIsPlayable = false;
     }
 
     // 视线一阶低通缓动，避免跟随鼠标时头部抖动。
@@ -157,9 +241,18 @@ void PlaceholderRenderer::update(float deltaSeconds)
     if (m_motionActive) {
         m_motion.elapsed += deltaSeconds;
         if (m_motion.elapsed >= m_motion.duration) {
+            const bool finishedPlayable = m_motionIsPlayable;
             m_motionActive = false;
             m_motion = {};
+            m_motionIsPlayable = false;
+            if (finishedPlayable && m_motionLoopEnabled) {
+                playNextMotion();
+            }
         }
+    }
+    // 默认开启循环时不等第一个眨眼周期，进场就依次播放全部动作。
+    if (!m_motionActive && m_motionLoopEnabled) {
+        playNextMotion();
     }
 }
 
@@ -206,6 +299,8 @@ void PlaceholderRenderer::pointerClick(const QPointF &pos)
     Q_UNUSED(pos);
     m_motion = {QStringLiteral("tap"), 0.0f, kMotions[0].duration};
     m_motionActive = true;
+    m_motionIsPlayable = true;
+    m_currentMotionOrdinal = 1;
 }
 
 bool PlaceholderRenderer::playNextMotion()
@@ -223,6 +318,8 @@ bool PlaceholderRenderer::playNextMotion()
     m_motionIndex = (i + 1) % names.size();
     m_motion = {names.at(i), 0.0f, kMotions[i].duration};
     m_motionActive = true;
+    m_motionIsPlayable = true;
+    m_currentMotionOrdinal = i + 1;
     return true;
 }
 
@@ -254,6 +351,8 @@ void PlaceholderRenderer::shutdown()
 {
     m_ready = false;
     m_motionActive = false;
+    m_motionIsPlayable = false;
+    m_currentMotionOrdinal = 0;
     unloadModel();
 }
 

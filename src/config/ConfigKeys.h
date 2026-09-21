@@ -90,12 +90,18 @@ inline constexpr auto AlwaysOnTop = "kanban/alwaysOnTop"; // 置顶(关=贴在�
 inline constexpr auto MouseThrough = "kanban/mouseThrough"; // 鼠标穿透
 inline constexpr auto TargetFps = "kanban/targetFps";     // 动画目标帧率
 inline constexpr auto AllowInteraction = "kanban/allowInteraction"; // 允许点击/悬停互动
+inline constexpr auto MotionLoop = "kanban/motionLoop";   // 自动轮流播放全部动作
+inline constexpr auto PlaySound = "kanban/playSound";     // 播放模型动作语音(默认开)
+inline constexpr auto DoubleClickSwitch = "kanban/doubleClickSwitch"; // 双击切换动作
 // 视线追踪强度：0=无 1=弱 2=中 3=强。默认 2(中)：追踪是「看起来像活物」的核心，
 // 而中档是实测手感最满意的值。
 inline constexpr auto GazeStrength = "kanban/gazeStrength";
 // 纹理按窗口尺寸降采样后再上传(默认开)；关掉即按素材原始尺寸上传(实测 4×4096²
 // 模型在 320×480 窗口下常驻 393MB 显存)。判据见 KanbanRenderer.h。
 inline constexpr auto TextureDownscale = "kanban/textureDownscale";
+// 按清单隐藏网格(默认开)：读模型目录里的 *.hidden.json(查看器导出)，隐藏其中列出的
+// 部件与网格。关掉 = 完全照模型原样显示，不改任何文件。
+inline constexpr auto MeshHide = "kanban/meshHide";
 // 旧版布尔开关(有则视为「开=中档」)：只在读配置时作为迁移来源，新写入一律走
 // GazeStrength —— 见 KanbanController::loadSettings 里的迁移注释。
 inline constexpr auto GazeTrackingLegacy = "kanban/gazeTracking";

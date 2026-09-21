@@ -11,13 +11,16 @@
 namespace kanban {
 
 struct ModelInfo {
-    QString id;              // 稳定标识：模型目录名(相对模型根目录)
+    QString id;              // 稳定标识：模型目录名
     QString name;            // 展示名
+    QString thumbKey;        // 预览图缓存键：模型目录相对模型根目录的路径，分隔符换成
+                             // '#'，如 data/models/分类/分类/模型文件夹名 →
+                             // 分类#分类#模型文件夹名。空串 = 算不出安全键，不出预览图。
     QString rootDir;         // 模型所在目录(绝对)
     QString modelJsonPath;   // *.model3.json(绝对)
     QString moc3Path;        // 解析出的 .moc3(绝对)
     int textureCount = 0;
-    int motionCount = 0;     // motion 组数
+    int motionCount = 0;     // motion 文件数(含 idle)
     int expressionCount = 0;
     bool valid = false;      // 可装载
     QStringList problems;    // 不可装载的原因(缺哪个文件/字段)

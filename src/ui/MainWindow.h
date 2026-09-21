@@ -110,6 +110,12 @@ private:
     void updatePreviewAspect();
     void updateEffectPresetSelection(int index);
     void setLog(const QString &text, bool isError);
+    // 写一条「就绪」提示，并记住「这行现在是提示」—— 切页签时只有这种状态下才会被换成
+    // 该页的提示；任何 setLog() 写的结果消息都原样留着，见 selectHeaderTab。
+    void setLogHint(const QString &text);
+    // 两个页签各自的「就绪」提示。单一出处：初始文案与切页签时的替换都用它。
+    static QString imagePageHintText();
+    static QString effectPageHintText();
     void setStatusChips();
 
     void reportDllMigration();
@@ -146,12 +152,13 @@ private:
     void showFromTray();                 // 托盘图标左键单击/双击
     void onTrayQuitRequested();
 
-    // 取图逻辑：先按模型文件夹名到 .cache/model-thumbs 找同名 PNG，找不到才生成。
-    // 生成由独立进程(本程序自己的 --render-model-thumbs 模式)完成，原因见
-    // src/kanban/ModelThumbJob.h。进度信号是文件落盘，不是子进程的标准输出。
+    // 取图逻辑：先按 thumbKey(模型目录相对 data/models 的路径，分隔符换 '#')到
+    // .cache/model-thumbs 找同名 PNG，找不到才生成。生成由独立进程(本程序自己的
+    // --render-model-thumbs 模式)完成，原因见 src/kanban/ModelThumbJob.h。
+    // 进度信号是文件落盘，不是子进程的标准输出。
     void ensureKanbanModelThumbs(bool force = false);
     void reloadKanbanModelIcons();       // 按当前缓存重贴全部格子图标
-    void applyKanbanModelThumb(const QString &modelId); // 单个模型出图后即时贴图
+    void applyKanbanModelThumb(const QString &thumbKey); // 单个模型出图后即时贴图
     void pollKanbanModelThumbs();        // 任务期间轮询：已落盘的先贴上去
     void onKanbanThumbFinished(int exitCode);
     void showKanbanModelMenu(const QPoint &viewportPos); // 模型卡片右键菜单
@@ -269,6 +276,8 @@ private:
     QLabel *m_imageChip = nullptr;
     QLabel *m_effectChip = nullptr;
     QLabel *m_logLabel = nullptr;
+    // 底部那行现在是不是一条「就绪」提示(而不是某次操作的结果消息)。
+    bool m_logShowsHint = false;
     QLabel *m_adminLabel = nullptr;
     QLabel *m_osLabel = nullptr;
     QLabel *m_versionLabel = nullptr;
@@ -306,6 +315,11 @@ private:
     QCheckBox *m_kanbanTopBox = nullptr;
     QCheckBox *m_kanbanThroughBox = nullptr;
     QCheckBox *m_kanbanInteractBox = nullptr;
+    QCheckBox *m_kanbanMotionLoopBox = nullptr;
+    QCheckBox *m_kanbanSoundBox = nullptr;
+    QCheckBox *m_kanbanDoubleClickBox = nullptr;
+    // 「按清单隐藏网格」总开关；清单本身在模型目录的 *.hidden.json 里，不是界面上的数据。
+    QCheckBox *m_kanbanMeshHideBox = nullptr;
     // 视线追踪是四选一(无/弱/中/强)，用互斥单选框而不是复选框：这是一条一维刻度。
     // id 直接用 kanban::KanbanRenderer 的档位值，见构建处。
     QButtonGroup *m_kanbanGazeGroup = nullptr;

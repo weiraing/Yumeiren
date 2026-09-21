@@ -434,9 +434,9 @@ QWidget *MainWindow::buildWallpaperPage()
 }
 void MainWindow::addVideos()
 {
+    // 同图库目录：data/video 只用于定位，不创建(运行目录的 data 归构建期复制管)。
     const QString videoDir = QCoreApplication::applicationDirPath()
                              + QStringLiteral("/data/video");
-    QDir().mkpath(videoDir);
 
     QStringList files = QFileDialog::getOpenFileNames(
         this, QStringLiteral("选择视频文件"), videoDir,

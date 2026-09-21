@@ -53,6 +53,22 @@ void collectModelJsons(const QDir &dir, int depth, QStringList *out)
         collectModelJsons(QDir(dir.absoluteFilePath(s)), depth + 1, out);
 }
 
+// 预览图缓存键：模型目录相对模型根目录的路径，分隔符统一换成 '#'。模型直接躺在
+// 根目录下的多层子目录时，叶子名会重名，必须带路径才对得上号。模型 json 直接躺在
+// 根目录(相对路径为 ".")或跑到根目录之外(".." 开头)时没有安全键，返回空串。
+QString thumbKeyFor(const QString &rootDir, const QString &modelsRoot)
+{
+    const QString rel =
+        QDir(modelsRoot).relativeFilePath(QDir(rootDir).absolutePath());
+    if (rel.isEmpty() || rel == QLatin1String(".") ||
+        rel.startsWith(QLatin1String("../")))
+        return QString();
+    QString key = rel;
+    key.replace(QLatin1Char('/'), QLatin1Char('#'));
+    key.replace(QLatin1Char('\\'), QLatin1Char('#'));
+    return key;
+}
+
 } // namespace
 
 QString KanbanModelManager::defaultModelsRoot()
@@ -120,9 +136,9 @@ bool KanbanModelManager::validateModelJson(const QString &jsonPath, ModelInfo *o
     }
 
     const QJsonObject motions = refs.value(QStringLiteral("Motions")).toObject();
-    out->motionCount = motions.count();
     for (auto it = motions.begin(); it != motions.end(); ++it) {
         const QJsonArray list = it.value().toArray();
+        out->motionCount += int(list.size());
         for (const QJsonValue &v : list) {
             const QString rel = v.toObject().value(QStringLiteral("File")).toString();
             if (!rel.isEmpty() && !QFileInfo::exists(resolve(out->rootDir, rel)))
@@ -171,6 +187,7 @@ int KanbanModelManager::rescan()
         if (info.name.isEmpty())
             info.name = QFileInfo(f).completeBaseName();
         info.id = info.name;
+        info.thumbKey = thumbKeyFor(info.rootDir, root);
         if (!info.valid) {
             videodiag::log(videodiag::Level::Warning,
                            QStringLiteral("模型不可用: %1 -> %2")

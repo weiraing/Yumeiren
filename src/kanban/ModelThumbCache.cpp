@@ -12,16 +12,17 @@ namespace kanban {
 
 namespace {
 
-// id 必须是「一个目录叶子名」：不含分隔符、不是 . / ..、不是空。这是安全边界
-// 而非洁癖 —— id 来自磁盘上的目录名，而我们会拿它拼出一个将被写入的路径。
-bool isSafeModelId(const QString &id)
+// key 必须是「一个文件名」：不含分隔符、不是 . / ..、不是空。这是安全边界
+// 而非洁癖 —— key 会原样拼进一个将被写入的路径，带分隔符就能逃出缓存目录。
+// 正常的 thumbKey(相对路径换 '#' 得来)天然不含分隔符，这关只是兜底。
+bool isSafeThumbKey(const QString &key)
 {
-    if (id.isEmpty() || id == QLatin1String(".") || id == QLatin1String(".."))
+    if (key.isEmpty() || key == QLatin1String(".") || key == QLatin1String(".."))
         return false;
-    if (id.contains(QLatin1Char('/')) || id.contains(QLatin1Char('\\')))
+    if (key.contains(QLatin1Char('/')) || key.contains(QLatin1Char('\\')))
         return false;
     // Windows 上冒号开头的名字(如 "C:")会被解释成驱动器，一并挡掉。
-    if (id.contains(QLatin1Char(':')))
+    if (key.contains(QLatin1Char(':')))
         return false;
     return true;
 }
@@ -38,25 +39,25 @@ QString ModelThumbCache::directory()
     return dir;
 }
 
-QString ModelThumbCache::pathFor(const QString &modelId)
+QString ModelThumbCache::pathFor(const QString &thumbKey)
 {
-    if (!isSafeModelId(modelId))
+    if (!isSafeThumbKey(thumbKey))
         return QString();
-    return QDir(CachePaths::modelThumbs()).filePath(modelId + QStringLiteral(".png"));
+    return QDir(CachePaths::modelThumbs()).filePath(thumbKey + QStringLiteral(".png"));
 }
 
-bool ModelThumbCache::has(const QString &modelId)
+bool ModelThumbCache::has(const QString &thumbKey)
 {
-    const QString path = pathFor(modelId);
+    const QString path = pathFor(thumbKey);
     if (path.isEmpty())
         return false;
     const QFileInfo info(path);
     return info.exists() && info.isFile() && info.size() > 0;
 }
 
-QString ModelThumbCache::store(const QString &modelId, const QImage &image)
+QString ModelThumbCache::store(const QString &thumbKey, const QImage &image)
 {
-    const QString target = pathFor(modelId);
+    const QString target = pathFor(thumbKey);
     if (target.isEmpty())
         return QString();
     if (directory().isEmpty())
@@ -84,9 +85,9 @@ QString ModelThumbCache::store(const QString &modelId, const QImage &image)
     return target;
 }
 
-bool ModelThumbCache::remove(const QString &modelId)
+bool ModelThumbCache::remove(const QString &thumbKey)
 {
-    const QString path = pathFor(modelId);
+    const QString path = pathFor(thumbKey);
     if (path.isEmpty())
         return false;
     // 只删这一张 PNG，目录归 directory() 管。「本来就没有缓存」与「删掉了」对调用方

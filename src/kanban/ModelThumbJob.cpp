@@ -169,7 +169,7 @@ int runModelThumbJob(const QStringList &args, QString *error)
 
     // 先算清楚「到底要出哪几张图」，且必须在创建 GL 上下文**之前**做完：全部命中缓存时不该建上下文。
     struct Task {
-        QString id;
+        QString key; // 缓存文件名(不含 .png)，见 ModelThumbCache 头注释
         QString jsonPath;
     };
     QVector<Task> tasks;
@@ -179,12 +179,16 @@ int runModelThumbJob(const QStringList &args, QString *error)
         // 坏模型在扫描阶段就被标掉了，界面也不会列它，这里不重复报。
         if (!model.valid)
             continue;
-        if (!force && ModelThumbCache::has(model.id)) {
-            report(QStringLiteral("SKIP %1").arg(model.id));
+        // 没有安全缓存键的模型(如 json 直接躺在模型根目录)界面侧同样跳过它，
+        // 这里不试，否则每轮都渲染一遍又写不出文件。
+        if (model.thumbKey.isEmpty())
+            continue;
+        if (!force && ModelThumbCache::has(model.thumbKey)) {
+            report(QStringLiteral("SKIP %1").arg(model.thumbKey));
             ++skipped;
             continue;
         }
-        tasks.append({model.id, model.modelJsonPath});
+        tasks.append({model.thumbKey, model.modelJsonPath});
     }
 
     if (tasks.isEmpty()) {
@@ -245,7 +249,7 @@ int runModelThumbJob(const QStringList &args, QString *error)
     for (const Task &task : tasks) {
         QString error;
         if (!renderer.loadModel(task.jsonPath, &error)) {
-            report(failLine(task.id, error.isEmpty() ? QStringLiteral("模型装载失败") : error));
+            report(failLine(task.key, error.isEmpty() ? QStringLiteral("模型装载失败") : error));
             ++failed;
             continue;
         }
@@ -265,18 +269,18 @@ int runModelThumbJob(const QStringList &args, QString *error)
         // 裁到内容边界，整张全透明则判为出图失败(见 trimToContent)。
         frame = trimToContent(frame, kTrimMargin);
         if (frame.isNull()) {
-            report(failLine(task.id, QStringLiteral("画面全空 —— 模型没画出来")));
+            report(failLine(task.key, QStringLiteral("画面全空 —— 模型没画出来")));
             ++failed;
             continue;
         }
 
-        const QString saved = ModelThumbCache::store(task.id, frame);
+        const QString saved = ModelThumbCache::store(task.key, frame);
         if (saved.isEmpty()) {
-            report(failLine(task.id, QStringLiteral("写不出 PNG")));
+            report(failLine(task.key, QStringLiteral("写不出 PNG")));
             ++failed;
             continue;
         }
-        report(QStringLiteral("OK %1").arg(task.id));
+        report(QStringLiteral("OK %1").arg(task.key));
         ++ok;
     }
 

@@ -69,7 +69,11 @@ const char *kBoolRules[] = {
     ConfigKeys::Kanban::AlwaysOnTop,
     ConfigKeys::Kanban::MouseThrough,
     ConfigKeys::Kanban::AllowInteraction,
+    ConfigKeys::Kanban::MotionLoop,
+    ConfigKeys::Kanban::PlaySound,
+    ConfigKeys::Kanban::DoubleClickSwitch,
     ConfigKeys::Kanban::TextureDownscale,
+    ConfigKeys::Kanban::MeshHide,
     ConfigKeys::Tray::Enabled,
     ConfigKeys::Tray::MinimizeToTrayOnClose,
 };
@@ -85,7 +89,15 @@ const char *kBoolDefaultTrue[] = {
     ConfigKeys::Video::AffinityLimit,
     ConfigKeys::Kanban::AlwaysOnTop,
     ConfigKeys::Kanban::AllowInteraction,
+    ConfigKeys::Kanban::MotionLoop,
+    // 语音默认开：这是本项目的既有行为，加这个键只是为了给用户一个关掉的开关，
+    // 升级后不该突然变安静。
+    ConfigKeys::Kanban::PlaySound,
+    ConfigKeys::Kanban::DoubleClickSwitch,
     ConfigKeys::Kanban::TextureDownscale,
+    // 网格隐藏默认开：用户把清单丢进模型目录就是想让它生效，不该再让他找一遍开关。
+    // 没有清单的模型完全不受影响，所以默认开是安全的。
+    ConfigKeys::Kanban::MeshHide,
     ConfigKeys::Tray::Enabled,
     // 有后台任务时点关闭应「隐藏而不是退出」，故默认开；读取端(closeEvent /
     // 界面勾选框)默认值同为 true。

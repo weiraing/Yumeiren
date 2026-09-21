@@ -46,10 +46,21 @@ public:
     // 视线参数的实时快照，诊断探针用。「鼠标动但模型不转头」有三种成因(参数名对不上、
     // 被运动每帧压回、参数范围窄)，只有把值打出来才分得清。
     QString gazeDebugText() const;
+    // 动作/部件诊断快照(双臂参数与 Pose 部件透明度)，供离屏探针输出。
+    QString motionDebugText() const override;
+    QString partOpacityText(const QStringList &ids) const override;
+    QString drawableOpacityText(const QStringList &ids) const override;
+    // 网格隐藏清单摘要；没装模型或本模型没有清单时为空串。
+    QString meshHideText() const override;
+    // 切「按清单隐藏网格」开关后立刻刷新画面（暂停时不会走 update()）。
+    void refreshMeshHide() override;
     void pointerClick(const QPointF &pos) override;
     bool playNextMotion() override;
-    // 可播动作数(不含 idle)；未接入的那份恒为 0，界面据此把入口置灰。
+    void setMotionLoopEnabled(bool enabled) override;
+    void setSoundEnabled(bool enabled) override;
+    // 实际装载成功的动作数(含 idle)；未接入的那份恒为 0，界面据此统计并置灰。
     int playableMotionCount() const override;
+    int currentMotionOrdinal() const override;
     // 表情走 ExpressionMotionManager，与 MotionManager 互不抢占优先级，切表情不会
     // 打断正在播的动作。
     int expressionCount() const override;

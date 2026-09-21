@@ -11,6 +11,8 @@
 #include <QSet>
 #include <QString>
 
+#include <memory>
+
 class QMediaPlayer;
 class QAudioOutput;
 class QVideoWidget;
@@ -182,11 +184,12 @@ private:
     int m_fileRetries = 0;         // 当前曲目有限重试计数(0/1=重试,≥2=跳过)
 
     // 长挂起释放：m_resumePosMs 记录暂停位置，恢复时经 LoadedMedia 跳回
-    QElapsedTimer *m_suspendClock = nullptr;
+    // 两个时钟都无父对象可挂，用 unique_ptr 管起来（原来是裸 new，没人 delete）。
+    std::unique_ptr<QElapsedTimer> m_suspendClock;
     qint64 m_resumePosMs = -1;
 
     // Explorer 重启 / 窗口失效修复的节流
-    QElapsedTimer *m_mountFixClock = nullptr;
+    std::unique_ptr<QElapsedTimer> m_mountFixClock;
     bool m_relayoutPending = false;
 
     QList<VideoOutput> m_outputs;

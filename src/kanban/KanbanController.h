@@ -52,11 +52,18 @@ public:
     bool retry();       // Error 态下重试
     void pauseResume(); // 暂停/恢复(不销毁窗口)
     void stop();        // 取消看板娘：停帧、释放模型、关窗、复位
-    void playNext();    // 下一个动作；没有可播动作就到此为止(不换模型)
+    void playNext();    // 切换动作；没有可播动作就到此为止(不换模型)
     void playNextExpression(); // 下一个表情；没有表情就静默返回(不换模型)
-    // 可播动作数(不含 idle)与「这个入口该不该可点」。界面拿它置灰。
+    // 实际装载成功的动作数(含 idle)与「这个入口该不该可点」。界面拿它统计和置灰。
     int playableMotionCount() const;
     bool canPlayNextMotion() const;
+    int currentMotionOrdinal() const;
+    void setMotionLoopEnabled(bool enabled);
+    bool motionLoopEnabled() const { return m_motionLoopEnabled; }
+    void setSoundEnabled(bool enabled);
+    bool soundEnabled() const { return m_soundEnabled; }
+    void setDoubleClickSwitchEnabled(bool enabled);
+    bool doubleClickSwitchEnabled() const { return m_doubleClickSwitchEnabled; }
     // 只有 start() 会调用(软件渲染后端启动的最后一步)。
     void showWindow();
 
@@ -80,6 +87,16 @@ public:
     int gazeStrength() const { return m_gazeStrength; }
     // 「有没有开」= 档位 > 0。
     bool gazeTracking() const { return m_gazeStrength != 0; }
+    // 按清单隐藏网格的总开关。清单本身是**每个模型一份**的：模型目录里的 *.hidden.json
+    // (由 tools/live2d-part-inspector 导出)，装模型时读取，改文件要重新装载才生效。
+    // 刻意不做成员镜像：与 textureDownscale 一样，以进程级标志为唯一来源，
+    // 免得「控制器以为开着、渲染器以为关着」这类分叉。
+    void setMeshHideEnabled(bool enabled);
+    // 定义放在 .cpp：读的是 KanbanRenderer.h 里的进程级标志，而这个头刻意不引入渲染器头
+    // （只有 .cpp 才需要它）。
+    bool meshHideEnabled() const;
+    // 当前模型命中的清单摘要(界面状态行用)；本模型没有清单文件时为空串。
+    QString meshHideText() const;
     bool setModelPath(const QString &modelJsonPath);
     QString modelPath() const { return m_modelPath; }
     int refreshModels(); // 重新扫描模型目录，返回可用模型数
@@ -98,7 +115,7 @@ signals:
     void backendChanged(const QString &backendText);
     void currentModelChanged(const QString &modelName);
     void settingsChanged();      // 需要回写界面上的滑块/复选框
-    void openSettingsRequested(); // 右键菜单「打开主界面设置」
+    void openSettingsRequested(); // 右键菜单「打开设置」
     void quitKanbanRequested();
 
 private slots:
@@ -158,7 +175,9 @@ private:
 
     // —— 挂起(锁屏/熄屏) ——
     QTimer *m_suspendTimer = nullptr;    // 1s 心跳，只在跑起来时挂着
-    QElapsedTimer *m_suspendClock = nullptr; // 本次持续挂起的时长
+    // 本次持续挂起的时长。无父对象可挂，所以用 unique_ptr 管起来 —— 之前是裸 new，
+    // 一直没人 delete(进程级对象，泄漏量小但确实是漏的)。
+    std::unique_ptr<QElapsedTimer> m_suspendClock;
     int m_suspendReasons = 0;
     bool m_releasedForSuspend = false;
     bool m_monitorOn = true;
@@ -172,6 +191,9 @@ private:
     bool m_alwaysOnTop = true;
     bool m_mouseThrough = false;
     bool m_interactionEnabled = true;
+    bool m_motionLoopEnabled = true;
+    bool m_soundEnabled = true;
+    bool m_doubleClickSwitchEnabled = true;
     int m_gazeStrength = 2; // 0=无 1=弱 2=中 3=强
 };
 

@@ -35,7 +35,7 @@ KanbanController::KanbanController(QObject *parent)
     connect(m_clock, &KanbanAnimationClock::measuredFpsChanged,
             this, &KanbanController::measuredFpsChanged);
     // 挂起心跳只在跑起来时挂着，没在跑时无事可判。
-    m_suspendClock = new QElapsedTimer();
+    m_suspendClock = std::make_unique<QElapsedTimer>();
     m_suspendTimer = new QTimer(this);
     m_suspendTimer->setTimerType(Qt::CoarseTimer);
     m_suspendTimer->setInterval(kSuspendHeartbeatMs);
@@ -150,6 +150,11 @@ bool KanbanController::ensureWindow()
         }
     });
     connect(m_window, &KanbanWindow::clicked, this, &KanbanController::handleClicked);
+    connect(m_window, &KanbanWindow::doubleClicked, this, [this](const QPointF &) {
+        if (m_doubleClickSwitchEnabled && m_interactionEnabled) {
+            playNext();
+        }
+    });
     // 视线档位只有两条入口：设置页四档单选框、托盘「看板娘 > 视线追踪 >」。
     connect(m_window, &KanbanWindow::dragStarted, this, [this] {
         m_machine.transition(State::Dragging, "dragStarted");
@@ -172,7 +177,7 @@ bool KanbanController::ensureWindow()
     connect(m_window, &KanbanWindow::nextExpressionRequested, this,
             &KanbanController::playNextExpression);
     connect(m_window, &KanbanWindow::nextModelRequested, this, [this] {
-        // 「切换模型」与「播放下一个动作」是两件事：前者强制换模型。
+        // 「切换模型」与「切换动作」是两件事：前者强制换模型。
         const ModelInfo *next = m_models.nextValidAfter(m_modelPath);
         if (next) {
             setModelPath(next->modelJsonPath);
@@ -338,6 +343,8 @@ bool KanbanController::activateKanban()
     // 视线追踪状态落到渲染器上：这里是 Live2D 成功 / 降级 / 重试三条路径的唯一汇合
     // 点（pickRenderer 会漏掉降级新建的渲染器，ensureWindow 又太早）。
     m_renderer->setGazeStrength(m_gazeStrength);
+    m_renderer->setMotionLoopEnabled(m_motionLoopEnabled);
+    m_renderer->setSoundEnabled(m_soundEnabled);
 
     if (!m_machine.transition(State::Idle, "activateKanban")) {
         return false;

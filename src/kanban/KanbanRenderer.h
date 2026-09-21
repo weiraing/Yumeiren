@@ -59,6 +59,28 @@ inline bool textureDownscaleEnabled()
     return textureDownscaleFlag();
 }
 
+// 按网格隐藏清单的总开关，由配置 kanban/meshHide 在读设置时写入。与 textureDownscaleFlag
+// 同一套：进程级而非渲染器成员 —— 模型实现、控制器、离屏探针问的是同一件事，不该各存一份
+// 再想办法同步。
+//
+// 清单本身**每个模型一份**：模型目录里的 *.hidden.json(查看器导出)。这里只管「用不用它」，
+// 关掉时不做任何补偿 —— IsVisible 位每帧由 Core 从 opacities 重算，不写就是「照原样显示」。
+inline bool &meshHideFlag()
+{
+    static bool s_on = true;
+    return s_on;
+}
+
+inline void setMeshHideEnabled(bool on)
+{
+    meshHideFlag() = on;
+}
+
+inline bool meshHideEnabled()
+{
+    return meshHideFlag();
+}
+
 // 窗口尺寸推出的「够用值」，恒为 2 的幂。只回答「窗口能显示多少」，
 // 不回答「这张图里被用到的部分还剩多少」—— 后者要用下面那个重载。
 inline int textureMaxDimFor(const QSize &pixelSize)
@@ -161,8 +183,15 @@ public:
     // pos 是**光标相对窗口的坐标**(范围允许超出 [0,size))，不是「鼠标是否压在窗口上」。
     virtual void pointerMove(const QPointF &pos) = 0;
     virtual void pointerClick(const QPointF &pos) = 0;
-    // 播放下一个动作；返回 true 表示确实播了，返回 false 表示没有可播动作。
+    // 切换动作；返回 true 表示确实播了，返回 false 表示没有可播动作。
     virtual bool playNextMotion() = 0;
+    // 动作循环：当前动作结束后自动播放下一个，到尾后从头继续。
+    virtual void setMotionLoopEnabled(bool enabled) { m_motionLoopEnabled = enabled; }
+    bool motionLoopEnabled() const { return m_motionLoopEnabled; }
+
+    // 动作语音开关：关掉后即便模型自带语音也不播（闸门在后端的 playMotionSound）。
+    virtual void setSoundEnabled(bool enabled) { m_soundEnabled = enabled; }
+    bool soundEnabled() const { return m_soundEnabled; }
 
     // 视线追踪强度：四档，「无」= 关闭。
     // 档位语义放这里(后端能力)，交互策略留控制器。理由见设计注记 §2.2。
@@ -189,12 +218,16 @@ public:
 protected:
     // 默认实现只写这个字段，派生类在 pointerMove / update 里自行判断。
     int m_gazeStrength = GazeMedium;
+    bool m_motionLoopEnabled = true;
+    bool m_soundEnabled = true;
 
 public:
 
-    // 「可播动作」数 —— **不含 idle 组**，理由见设计注记 §2.6。
-    // 按模型文件决定的后端必须给真值：实测 13 个模型里有 8 个的可播动作不足 2 个。
+    // 模型实际装载成功的动作总数，包含 idle。
+    // 按模型文件决定的后端必须给真值，界面统计与循环都使用这个口径。
     virtual int playableMotionCount() const { return 0; }
+    // 最近一次手动/命中触发的可播动作序号(从 1 开始)；未触发或后端不支持时为 0。
+    virtual int currentMotionOrdinal() const { return 0; }
 
     // 这个入口该不该可点：至少要有两个可播动作(一个时就是原地重播，用户以为程序坏了)。
     bool canPlayNextMotion() const { return playableMotionCount() >= 2; }
@@ -205,6 +238,32 @@ public:
     virtual int expressionCount() const { return 0; }
     // 切到下一个表情(循环)。返回 false 表示没有可切的表情，调用方静默返回即可。
     virtual bool playNextExpression() { return false; }
+
+    // 动作/部件状态的只读快照，仅供离屏诊断探针输出；各后端按需实现。
+    virtual QString motionDebugText() const { return QString(); }
+    // 纹理状态快照(解出来的尺寸 / 当前上限 / 源尺寸)，同样只给探针用。
+    // 存在的理由：纹理重建这件事只有「窗口放大到跨过上限档位」时才发生，
+    // 靠截图看不出分辨率差，得让后端自己把数字报出来。
+    virtual QString textureDebugText() const { return QString(); }
+    // 按部件 Id 取不透明度快照，同样只给探针用(见 CubismModel.h 的同名方法)。
+    virtual QString partOpacityText(const QStringList &ids) const
+    {
+        Q_UNUSED(ids);
+        return QString();
+    }
+    // 按 drawable Id 取不透明度快照。部件的显隐最终是「部件不透明度 × drawable 自身
+    // 不透明度」，后者由模型里的参数绑定决定 —— 只看部件会漏判这类模型(见同名方法)。
+    virtual QString drawableOpacityText(const QStringList &ids) const
+    {
+        Q_UNUSED(ids);
+        return QString();
+    }
+
+    // 网格隐藏清单的摘要文本(界面状态行与诊断探针共用)；本模型没有清单时返回空串。
+    // 占位后端没有清单这回事，保持空串即可。
+    virtual QString meshHideText() const { return QString(); }
+    // 切「按清单隐藏网格」开关后立刻让画面反映出来(暂停时不会走 update())。占位后端无操作。
+    virtual void refreshMeshHide() {}
 
     virtual void pause() = 0;
     virtual void resume() = 0;

@@ -75,6 +75,18 @@ QString Live2DRenderer::gazeDebugText() const
 {
     return QStringLiteral("未接入 SDK");
 }
+QString Live2DRenderer::motionDebugText() const
+{
+    return QStringLiteral("未接入 SDK");
+}
+QString Live2DRenderer::partOpacityText(const QStringList &) const
+{
+    return QStringLiteral("未接入 SDK");
+}
+QString Live2DRenderer::drawableOpacityText(const QStringList &) const
+{
+    return QStringLiteral("未接入 SDK");
+}
 void Live2DRenderer::pointerMove(const QPointF &) {}
 // 必须给这个定义：头文件里声明成了 override，虚表会指向这个符号而非基类的内联实现，
 // 不定义就是链接错误(ld 报 undefined reference)。函数体转发给基类，保持
@@ -90,9 +102,26 @@ bool Live2DRenderer::playNextMotion()
     return false;
 }
 
+void Live2DRenderer::setMotionLoopEnabled(bool enabled)
+{
+    // 未接入 SDK 时也保留开关状态，降级到占位后端后行为一致。
+    KanbanRenderer::setMotionLoopEnabled(enabled);
+}
+
+void Live2DRenderer::setSoundEnabled(bool enabled)
+{
+    // 同上：本构建没有 SDK，根本播不出声音，但仍保留状态，设置页勾选不会丢。
+    KanbanRenderer::setSoundEnabled(enabled);
+}
+
 int Live2DRenderer::playableMotionCount() const
 {
     // 0 = 本构建没有 SDK，一段动作都播不了，入口据此置灰。
+    return 0;
+}
+
+int Live2DRenderer::currentMotionOrdinal() const
+{
     return 0;
 }
 

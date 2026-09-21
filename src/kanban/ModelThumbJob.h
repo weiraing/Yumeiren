@@ -4,8 +4,9 @@
 // 里没法安全复用。
 //
 // 命令行：--render-model-thumbs [--force]
-// **契约是文件系统**：每张图落盘到 <程序目录>/.cache/model-thumbs/<模型名>.png 即为
-// 完成信号；stdout 只供人看，主程序不依赖它。
+// **契约是文件系统**：每张图落盘到 <程序目录>/.cache/model-thumbs/<thumbKey>.png
+// (thumbKey = 模型目录相对 data/models 的路径，分隔符换成 '#')即为完成信号；
+// stdout 只供人看，主程序不依赖它。
 #ifndef KANBANMODELTHUMBJOB_H
 #define KANBANMODELTHUMBJOB_H
 

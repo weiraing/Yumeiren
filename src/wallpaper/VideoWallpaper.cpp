@@ -101,9 +101,9 @@ void VideoWallpaper::shutdownNow()
 VideoWallpaper::VideoWallpaper(QObject *parent) : QObject(parent)
 {
     g_wallpaper = this;
-    m_mountFixClock = new QElapsedTimer();
+    m_mountFixClock = std::make_unique<QElapsedTimer>();
     m_mountFixClock->start();
-    m_suspendClock = new QElapsedTimer();
+    m_suspendClock = std::make_unique<QElapsedTimer>();
 
     m_fullscreenTimer = new QTimer(this);
     m_fullscreenTimer->setInterval(1000);

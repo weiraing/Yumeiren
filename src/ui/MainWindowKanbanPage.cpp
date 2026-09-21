@@ -35,6 +35,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QPainter>
+#include <QPalette>
 #include <QPixmap>
 #include <QProcess>
 #include <QPushButton>
@@ -55,6 +56,41 @@ constexpr int kModelIconHeight = 157;
 
 // 问号徽标边长。QSS #HelpBadge 的 border-radius 取一半即正圆，改这里要同步改 QSS。
 constexpr int kHelpBadgeSize = 22;
+
+// 「按清单隐藏网格」的提示词。末尾动态补一段「当前模型的清单情况」：这个复选框只管总开关，
+// 用户勾着却什么都没变时，得能自己看出是「这个模型没有清单」而不是「功能坏了」。
+QString meshHideTooltip(const QString &summary)
+{
+    QString text = QStringLiteral(
+        "默认开启：装载模型时读取模型目录里的 *.hidden.json，把清单中列出的部件与网格隐藏掉。\n"
+        "清单由模型查看器导出，原样放进模型目录即可；改完清单要重新装载模型"
+        "（重开看板娘，或换个模型再换回来）。\n"
+        "取消勾选则完全照模型原样显示，不改动任何文件。");
+    text += summary.isEmpty()
+                ? QStringLiteral("\n当前模型目录里没有 *.hidden.json，这个开关对它没有影响。")
+                : QStringLiteral("\n当前模型：%1").arg(summary);
+    return text;
+}
+
+QString kanbanValueColor(const QWidget *widget)
+{
+    const QPalette palette = widget ? widget->palette() : QApplication::palette();
+    return palette.color(QPalette::WindowText).lightness() < 128
+               ? QStringLiteral("#2f6fd6")
+               : QStringLiteral("#7db1ff");
+}
+
+QString kanbanValueHtml(const QString &value, const QString &color)
+{
+    return QStringLiteral("<span style=\"color:%1;font-weight:600\">%2</span>")
+        .arg(color, value.toHtmlEscaped());
+}
+
+QString kanbanPairHtml(const QString &label, const QString &value, const QString &color)
+{
+    return QStringLiteral("%1：%2")
+        .arg(label.toHtmlEscaped(), kanbanValueHtml(value, color));
+}
 
 class ModelCardDelegate final : public QStyledItemDelegate
 {
@@ -115,8 +151,8 @@ void applyKanbanThumbIcon(QListWidgetItem *item, const QSize &iconSize)
 {
     if (!item)
         return;
-    const QString id = item->data(Qt::UserRole + 1).toString();
-    const QString path = kanban::ModelThumbCache::pathFor(id);
+    const QString key = item->data(Qt::UserRole + 1).toString();
+    const QString path = kanban::ModelThumbCache::pathFor(key);
 
     // 必须缩到**设备**像素并告知 dpr：只缩到逻辑尺寸，Qt 会再放大 dpr 倍填满，糊成一片。
     qreal dpr = 1.0;
@@ -127,7 +163,7 @@ void applyKanbanThumbIcon(QListWidgetItem *item, const QSize &iconSize)
 
     QPixmap thumb;
     // 先缩到格子大小再交给 QIcon：原图 320×480，全按原尺寸留在内存要占近 10MB。
-    if (!path.isEmpty() && kanban::ModelThumbCache::has(id) && thumb.load(path)) {
+    if (!path.isEmpty() && kanban::ModelThumbCache::has(key) && thumb.load(path)) {
         QPixmap scaled =
             thumb.scaled(pixelSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         scaled.setDevicePixelRatio(dpr);
@@ -200,7 +236,7 @@ QWidget *MainWindow::buildKanbanPage()
         m_kanban->pauseResume();
         updateKanbanControls();
     });
-    m_kanbanNextBtn = new QPushButton(QStringLiteral("⏭ 播放下一个动作"), leftCard);
+    m_kanbanNextBtn = new QPushButton(QStringLiteral("⏭ 切换动作"), leftCard);
     m_kanbanNextBtn->setMinimumHeight(40);
     m_kanbanNextBtn->setEnabled(false);
     connect(m_kanbanNextBtn, &QPushButton::clicked, this, [this] {
@@ -337,6 +373,7 @@ QWidget *MainWindow::buildKanbanModelCard(QWidget *parent)
     m_kanbanModelInfo = new QLabel(card);
     m_kanbanModelInfo->setObjectName(QStringLiteral("HintLabel"));
     m_kanbanModelInfo->setWordWrap(true);
+    m_kanbanModelInfo->setTextFormat(Qt::RichText);
     lay->addWidget(m_kanbanModelInfo);
 
     // 常驻说明塞进刷新行右端的 #HelpBadge 提示里：一次性说明不该长期占版面(实测两行)。
@@ -417,6 +454,16 @@ QWidget *MainWindow::buildKanbanParamCard(QWidget *parent)
     });
     addCheckRow(m_kanbanTopBox);
 
+    // 这个勾选框只管「用不用清单」，清单本身在模型目录里（查看器导出的 *.hidden.json）。
+    // 提示词必须写清「改文件要重新装载」—— 否则用户改完清单发现没生效，只会当成坏了。
+    m_kanbanMeshHideBox = new QCheckBox(QStringLiteral("按清单隐藏网格"), card);
+    m_kanbanMeshHideBox->setToolTip(tooltipstyle::format(meshHideTooltip(QString())));
+    connect(m_kanbanMeshHideBox, &QCheckBox::toggled, this, [this](bool on) {
+        if (!m_kanbanSyncing)
+            m_kanban->setMeshHideEnabled(on);
+    });
+    addCheckRow(m_kanbanMeshHideBox);
+
     m_kanbanInteractBox = new QCheckBox(QStringLiteral("允许点击互动"), card);
     m_kanbanInteractBox->setToolTip(tooltipstyle::format(
         QStringLiteral("勾选后可以用鼠标拖动小人、点它触发动作；\n"
@@ -426,6 +473,40 @@ QWidget *MainWindow::buildKanbanParamCard(QWidget *parent)
             m_kanban->setInteractionEnabled(on);
     });
     addCheckRow(m_kanbanInteractBox);
+
+    // 横线划分：线上是「窗口/显示类」项，线下是动作、声音、穿透等「行为类」项。
+    auto *displaySep = new QFrame(card);
+    displaySep->setObjectName(QStringLiteral("SideCardSep"));
+    displaySep->setFrameShape(QFrame::HLine);
+    lay->addWidget(displaySep);
+
+    m_kanbanMotionLoopBox = new QCheckBox(QStringLiteral("动作循环"), card);
+    m_kanbanMotionLoopBox->setToolTip(tooltipstyle::format(
+        QStringLiteral("默认开启：当前动作播完后自动切换到下一个，到尾后从头循环")));
+    connect(m_kanbanMotionLoopBox, &QCheckBox::toggled, this, [this](bool on) {
+        if (!m_kanbanSyncing)
+            m_kanban->setMotionLoopEnabled(on);
+    });
+    addCheckRow(m_kanbanMotionLoopBox);
+
+    m_kanbanSoundBox = new QCheckBox(QStringLiteral("播放声音"), card);
+    m_kanbanSoundBox->setToolTip(tooltipstyle::format(
+        QStringLiteral("默认开启：切动作时播放模型自带的语音。\n"
+                       "取消勾选后，即便模型带语音也不会出声。")));
+    connect(m_kanbanSoundBox, &QCheckBox::toggled, this, [this](bool on) {
+        if (!m_kanbanSyncing)
+            m_kanban->setSoundEnabled(on);
+    });
+    addCheckRow(m_kanbanSoundBox);
+
+    m_kanbanDoubleClickBox = new QCheckBox(QStringLiteral("双击动画切换动作"), card);
+    m_kanbanDoubleClickBox->setToolTip(tooltipstyle::format(
+        QStringLiteral("默认开启：双击桌面上的动画人物，切换到下一个动作")));
+    connect(m_kanbanDoubleClickBox, &QCheckBox::toggled, this, [this](bool on) {
+        if (!m_kanbanSyncing)
+            m_kanban->setDoubleClickSwitchEnabled(on);
+    });
+    addCheckRow(m_kanbanDoubleClickBox);
 
     m_kanbanThroughBox = new QCheckBox(QStringLiteral("鼠标穿透"), card);
     m_kanbanThroughBox->setToolTip(tooltipstyle::format(
@@ -539,7 +620,7 @@ void MainWindow::setupKanbanAndTray()
                 if (name.isEmpty())
                     setKanbanLog(QStringLiteral("未装载模型，使用内置占位形象。"), false);
             });
-    // 右键菜单「打开主界面设置」：把主窗口捞回来并停在看板娘页。
+    // 右键菜单「打开设置」：把主窗口捞回来并停在看板娘页。
     connect(&kan, &kanban::KanbanController::openSettingsRequested, this, [this] {
         showFromTray();
         m_nav->setCurrentRow(2);
@@ -613,10 +694,11 @@ void MainWindow::refreshKanbanModels()
         auto *item = new QListWidgetItem(m_kanbanModelGrid);
         item->setText(model.id);
         // UserRole   = .model3.json 绝对路径，点击时直接拿它切模型
-        // UserRole+1 = 模型文件夹名，也是预览图的文件名
+        // UserRole+1 = 预览图缓存键(ModelInfo::thumbKey，相对 data/models 的
+        //              路径换 '#'，与生成进程一致)，可能为空(空则不出预览图)
         // UserRole+2 = 该格子的图是不是真预览图(占位图时为 false)，用于 tooltip
         item->setData(Qt::UserRole, model.modelJsonPath);
-        item->setData(Qt::UserRole + 1, model.id);
+        item->setData(Qt::UserRole + 1, model.thumbKey);
         item->setTextAlignment(Qt::AlignHCenter | Qt::AlignTop);
         item->setSizeHint(m_kanbanModelGrid->gridSize());
         if (!current.isEmpty() && model.modelJsonPath == current)
@@ -658,8 +740,8 @@ void MainWindow::deleteKanbanModel(QListWidgetItem *item)
     // 之后再碰就是 use-after-free。
     const QString modelName = item->text();
     const QString jsonPath = item->data(Qt::UserRole).toString();
-    const QString modelId = item->data(Qt::UserRole + 1).toString();
-    if (jsonPath.isEmpty() || modelId.isEmpty())
+    const QString thumbKey = item->data(Qt::UserRole + 1).toString();
+    if (jsonPath.isEmpty())
         return;
 
     // 模型文件夹 = .model3.json 所在目录，由它推出来，不另外存一份。
@@ -684,8 +766,9 @@ void MainWindow::deleteKanbanModel(QListWidgetItem *item)
         return;
     }
 
-    // 缓存图可再生，直接永久删掉，不占回收站。
-    const bool thumbRemoved = kanban::ModelThumbCache::remove(modelId);
+    // 缓存图可再生，直接永久删掉，不占回收站。键可能为空(该模型本来就没出过图)，
+    // remove() 对空键原样返回 false，正合适。
+    const bool thumbRemoved = kanban::ModelThumbCache::remove(thumbKey);
 
     const bool wasCurrent = (m_kanban->modelPath() == jsonPath);
 
@@ -754,14 +837,14 @@ void MainWindow::reloadKanbanModelIcons()
 }
 
 // 单个模型出图后即时贴图：不必整面墙重贴。
-void MainWindow::applyKanbanModelThumb(const QString &modelId)
+void MainWindow::applyKanbanModelThumb(const QString &thumbKey)
 {
-    if (!m_kanbanModelGrid || modelId.isEmpty())
+    if (!m_kanbanModelGrid || thumbKey.isEmpty())
         return;
     const QSize iconSize = m_kanbanModelGrid->iconSize();
     for (int i = 0; i < m_kanbanModelGrid->count(); ++i) {
         QListWidgetItem *item = m_kanbanModelGrid->item(i);
-        if (!item || item->data(Qt::UserRole + 1).toString() != modelId)
+        if (!item || item->data(Qt::UserRole + 1).toString() != thumbKey)
             continue;
         applyKanbanThumbIcon(item, iconSize);
         item->setToolTip(tooltipstyle::format(
@@ -787,11 +870,11 @@ void MainWindow::ensureKanbanModelThumbs(bool force)
         const QListWidgetItem *item = m_kanbanModelGrid->item(i);
         if (!item)
             continue;
-        const QString id = item->data(Qt::UserRole + 1).toString();
-        if (id.isEmpty())
+        const QString key = item->data(Qt::UserRole + 1).toString();
+        if (key.isEmpty())
             continue;
-        if (force || !kanban::ModelThumbCache::has(id))
-            missing << id;
+        if (force || !kanban::ModelThumbCache::has(key))
+            missing << key;
     }
     if (missing.isEmpty())
         return;
@@ -919,18 +1002,34 @@ void MainWindow::updateKanbanStatus()
     if (!m_kanban || !m_kanbanModelInfo)
         return;
 
-    QString status = QStringLiteral("状态 %1").arg(m_kanban->stateText());
-    if (m_kanban->isRunning())
-        status += QStringLiteral(" · 后端 %1 · 实测 %2 fps")
-                      .arg(m_kanban->backendText())
-                      .arg(m_kanban->measuredFps());
-    else if (!m_kanban->backendText().isEmpty())
-        status += QStringLiteral(" · 后端 %1").arg(m_kanban->backendText());
+    const QString valueColor = kanbanValueColor(m_kanbanModelInfo);
+    QString status;
+    const auto appendStatus = [&](const QString &label, const QString &value) {
+        if (!status.isEmpty())
+            status += QStringLiteral(" · ");
+        status += kanbanPairHtml(label, value, valueColor);
+    };
+
+    appendStatus(QStringLiteral("状态"), m_kanban->stateText());
+    if (m_kanban->isRunning()) {
+        appendStatus(QStringLiteral("后端"), m_kanban->backendText());
+        appendStatus(QStringLiteral("实测"), QStringLiteral("%1 fps").arg(m_kanban->measuredFps()));
+    } else if (!m_kanban->backendText().isEmpty()) {
+        appendStatus(QStringLiteral("后端"), m_kanban->backendText());
+    }
+
+    const int motionTotal = m_kanban->playableMotionCount();
+    if (motionTotal > 0) {
+        appendStatus(QStringLiteral("当前动作"),
+                     QStringLiteral("%1/%2")
+                         .arg(m_kanban->currentMotionOrdinal())
+                         .arg(motionTotal));
+    }
 
     // 模型明细还没算过时只显示状态行，别拼出一个空行。
     m_kanbanModelInfo->setText(m_kanbanModelLine.isEmpty()
                                    ? status
-                                   : status + QLatin1Char('\n') + m_kanbanModelLine);
+                                   : status + QStringLiteral("<br>") + m_kanbanModelLine);
 }
 
 // 同步按钮、模型选中项与设置控件。
@@ -966,7 +1065,7 @@ void MainWindow::updateKanbanControls()
                                     ? QStringLiteral("当前模型有 %1 个动作，点击逐个切换")
                                           .arg(motionCount)
                                     : (motionCount == 0
-                                           ? QStringLiteral("当前模型只有待机动作，没有可播放的动作")
+                                           ? QStringLiteral("当前模型没有可播放的动作")
                                            : QStringLiteral("当前模型只有 1 个动作，没有可切换的对象")));
     // 没有表情就置灰，并把原因写进提示，用户才能自己换一个带表情的模型。
     const int exprCount = m_kanban->expressionCount();
@@ -977,10 +1076,11 @@ void MainWindow::updateKanbanControls()
                                     : QStringLiteral("当前模型没有表情文件"));
 
     const QVector<kanban::ModelInfo> models = m_kanban->validModelList();
+    const QString valueColor = kanbanValueColor(m_kanbanModelInfo);
     QString info;
     int selectedRow = -1;
     if (models.isEmpty()) {
-        info = QStringLiteral("可用模型 0 个。");
+        info = kanbanPairHtml(QStringLiteral("可用模型"), QStringLiteral("0 个"), valueColor);
     } else {
         const bool wasSyncing = m_kanbanSyncing;
         m_kanbanSyncing = true;
@@ -1002,15 +1102,38 @@ void MainWindow::updateKanbanControls()
 
         const int index = (selectedRow >= 0 && selectedRow < models.size()) ? selectedRow : 0;
         const kanban::ModelInfo &sel = models.at(index);
-        info = QStringLiteral("可用模型 %1 个 · 当前：%2 · 贴图 %3 · 动作组 %4 · 表情 %5")
-                   .arg(models.size())
-                   .arg(sel.name)
-                   .arg(sel.textureCount)
-                   .arg(sel.motionCount)
-                   .arg(sel.expressionCount);
+        // 模型装载后以渲染器实际装载成功的动作数为准，包含 idle，
+        // 与上方「当前动作 x/y」以及模型文件中的动作数保持一致。
+        const int detailMotionCount =
+            (running && sel.modelJsonPath == m_kanban->modelPath())
+                ? m_kanban->playableMotionCount()
+                : sel.motionCount;
+        info = kanbanPairHtml(QStringLiteral("可用模型"),
+                              QStringLiteral("%1 个").arg(models.size()), valueColor)
+               + QStringLiteral(" · ")
+               + kanbanPairHtml(QStringLiteral("当前"), sel.name, valueColor)
+               + QStringLiteral(" · ")
+               + kanbanPairHtml(QStringLiteral("贴图"), QString::number(sel.textureCount),
+                                valueColor)
+               + QStringLiteral(" · ")
+               + kanbanPairHtml(QStringLiteral("动作"), QString::number(detailMotionCount),
+                                valueColor)
+               + QStringLiteral(" · ")
+               + kanbanPairHtml(QStringLiteral("表情"), QString::number(sel.expressionCount),
+                                valueColor);
     }
     if (!m_kanban->live2dAvailable())
-        info += QStringLiteral("\n本程序未编译 Live2D 后端，模型只扫描校验，画面用内置占位形象。");
+        info += QStringLiteral("<br>")
+                + QStringLiteral("本程序未编译 Live2D 后端，模型只扫描校验，画面用内置占位形象。")
+                      .toHtmlEscaped();
+
+    // 清单生效情况只有渲染器知道（装载时解析的），所以直接问它。没有清单时是空串，
+    // 不留一段空位；有清单却关着开关时仍然显示 —— 用户得看得出「藏了但没生效」。
+    const QString meshHideSummary = m_kanban->meshHideText();
+    if (!meshHideSummary.isEmpty()) {
+        info += QStringLiteral(" · ")
+                + kanbanPairHtml(QStringLiteral("网格隐藏"), meshHideSummary, valueColor);
+    }
 
     m_kanbanModelLine = info;
     updateKanbanStatus();
@@ -1022,6 +1145,11 @@ void MainWindow::updateKanbanControls()
     m_kanbanTopBox->setChecked(m_kanban->alwaysOnTop());
     m_kanbanThroughBox->setChecked(m_kanban->mouseThrough());
     m_kanbanInteractBox->setChecked(m_kanban->interactionEnabled());
+    m_kanbanMotionLoopBox->setChecked(m_kanban->motionLoopEnabled());
+    m_kanbanSoundBox->setChecked(m_kanban->soundEnabled());
+    m_kanbanDoubleClickBox->setChecked(m_kanban->doubleClickSwitchEnabled());
+    m_kanbanMeshHideBox->setChecked(m_kanban->meshHideEnabled());
+    m_kanbanMeshHideBox->setToolTip(tooltipstyle::format(meshHideTooltip(meshHideSummary)));
 
     switch (kanban::KanbanRenderer::clampGazeStrength(m_kanban->gazeStrength())) {
     case kanban::KanbanRenderer::GazeOff:
@@ -1123,6 +1251,27 @@ void MainWindow::updateKanbanControls()
                                .arg(parts.join(QStringLiteral(" "))),
                            QStringLiteral("Kanban"));
         }
+
+        // 「按清单隐藏网格」的开关状态、清单摘要与可点坐标。自动化验证靠这一行拿到
+        // 「现在勾没勾、清单认了几条、点哪里」，不必去数像素。
+        {
+            const QSize msz = m_kanbanMeshHideBox->size();
+            const QPoint mc =
+                m_kanbanMeshHideBox->mapTo(this, QPoint(msz.width() / 2, msz.height() / 2));
+            const QPoint mg =
+                m_kanbanMeshHideBox->mapToGlobal(QPoint(msz.width() / 2, msz.height() / 2));
+            videodiag::log(videodiag::Level::Debug,
+                           QStringLiteral("[KanbanPage] 网格隐藏 checked=%1 enabled=%2 "
+                                          "摘要=%3 中心=%4,%5 屏幕=%6,%7 尺寸=%8x%9")
+                               .arg(m_kanbanMeshHideBox->isChecked() ? 1 : 0)
+                               .arg(m_kanbanMeshHideBox->isEnabled() ? 1 : 0)
+                               .arg(meshHideSummary.isEmpty() ? QStringLiteral("(无清单)")
+                                                              : meshHideSummary)
+                               .arg(mc.x()).arg(mc.y())
+                               .arg(mg.x()).arg(mg.y())
+                               .arg(msz.width()).arg(msz.height()),
+                           QStringLiteral("Kanban"));
+        }
     }
 }
 
@@ -1182,6 +1331,14 @@ void MainWindow::selectHeaderTab(int index)
     for (int i = 0; i < m_headerTabs.size(); ++i)
         m_headerTabs[i]->setChecked(i == index);
     m_stack->setCurrentIndex(index);
+    // 底部那行若还是「就绪」提示，就跟着页签换成该页的 —— 「切到效果样式却仍写着
+    // 图片页那句」就是这么来的。结果是「某次操作的反馈」时不换：用户刚点了应用，
+    // 那句「效果样式已应用！」比一句泛泛的就绪提示有用。
+    if (index == 0 || index == 1) {
+        const QString hint = index == 0 ? imagePageHintText() : effectPageHintText();
+        if (m_logShowsHint && m_logLabel->text() != hint)
+            setLogHint(hint);
+    }
     if (index == 0)
         updateImagePreview();
 }

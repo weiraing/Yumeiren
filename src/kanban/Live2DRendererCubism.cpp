@@ -96,6 +96,8 @@ bool Live2DRenderer::loadModel(const QString &modelJsonPath, QString *outError)
     m_d->textureRebuildPending = false;
 
     model->setDeterministicIdle(m_deterministicIdle);
+    model->setMotionLoopEnabled(m_motionLoopEnabled);
+    model->setSoundEnabled(m_soundEnabled);
     m_modelPath = modelJsonPath;
     m_modelLoaded = true;
     logInfo(QStringLiteral("已装载 %1：纹理 %2 张 / 动作组 %3 个(可播动作 %4 个) / 表情 %5 个")
@@ -122,6 +124,15 @@ bool Live2DRenderer::loadModel(const QString &modelJsonPath, QString *outError)
         }
     }
     m_d->model = std::move(model);
+    // 装载完立刻把状态落定一次。理由有两层：
+    // ① pose 的互斥显隐与 *.hidden.json 都**只在 update() 里生效** —— applyMeshHide() 挂在
+    //    update() 末尾，IsVisible 位是 Core 在 Update() 里从 opacities 重算的；装载后部件
+    //    opacities 全是默认值 1，于是 pose 组里的两个部件、以及清单里该藏的网格**全可见**。
+    // ② 真实程序的首帧 paintGL 由窗口系统触发，比帧 tick 的第一次 update() 更早(实测日志里
+    //    首帧 paintGL 早于 activateKanban 起钟 0.6s)，所以那一帧画的就是①那个全开状态 ——
+    //    用户看到的「隐藏内容闪一下」就是它。
+    // 直接调模型的 update 而不是本类的：本类那份带 m_paused 判断，而暂停中装载也要落定。
+    m_d->model->update(0.0f);
     return true;
 }
 
@@ -274,6 +285,35 @@ QString Live2DRenderer::gazeDebugText() const
         .arg(m_d->gazeY, 0, 'f', 3);
 }
 
+QString Live2DRenderer::motionDebugText() const
+{
+    return m_d->model ? m_d->model->motionDebugText() : QStringLiteral("无模型");
+}
+
+QString Live2DRenderer::partOpacityText(const QStringList &ids) const
+{
+    return m_d->model ? m_d->model->partOpacityText(ids) : QStringLiteral("无模型");
+}
+
+QString Live2DRenderer::drawableOpacityText(const QStringList &ids) const
+{
+    return m_d->model ? m_d->model->drawableOpacityText(ids) : QStringLiteral("无模型");
+}
+
+QString Live2DRenderer::meshHideText() const
+{
+    // 与另外几个诊断快照不同：这里没有模型时返回**空串**而不是「无模型」——
+    // 界面拿它决定「状态行要不要多一段」，不是拿它当诊断输出。
+    return m_d->model ? m_d->model->meshHideText() : QString();
+}
+
+void Live2DRenderer::refreshMeshHide()
+{
+    if (m_d->model) {
+        m_d->model->refreshMeshHide();
+    }
+}
+
 void Live2DRenderer::setGazeStrength(int strength)
 {
     const int next = clampGazeStrength(strength);
@@ -311,9 +351,30 @@ bool Live2DRenderer::playNextMotion()
     return m_d->model && m_d->model->playNextMotion();
 }
 
+void Live2DRenderer::setMotionLoopEnabled(bool enabled)
+{
+    KanbanRenderer::setMotionLoopEnabled(enabled);
+    if (m_d->model) {
+        m_d->model->setMotionLoopEnabled(enabled);
+    }
+}
+
+void Live2DRenderer::setSoundEnabled(bool enabled)
+{
+    KanbanRenderer::setSoundEnabled(enabled);
+    if (m_d->model) {
+        m_d->model->setSoundEnabled(enabled);
+    }
+}
+
 int Live2DRenderer::playableMotionCount() const
 {
     return m_d->model ? m_d->model->playableMotionCount() : 0;
+}
+
+int Live2DRenderer::currentMotionOrdinal() const
+{
+    return m_d->model ? m_d->model->currentMotionOrdinal() : 0;
 }
 
 int Live2DRenderer::expressionCount() const
@@ -333,6 +394,10 @@ bool Live2DRenderer::playNextExpression()
 void Live2DRenderer::pause()
 {
     m_paused = true;
+    // 暂停要连声音一起停：时钟停住后动作不再推进，语音却会自己播完，听着像没暂停成功。
+    if (m_d->model) {
+        m_d->model->stopMotionSound();
+    }
 }
 
 void Live2DRenderer::resume()
