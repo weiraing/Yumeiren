@@ -52,7 +52,7 @@ const NumericRule kNumericRules[] = {
     {ConfigKeys::Web::RefreshMode, 0, 0, 2},
     {ConfigKeys::Web::Volume, 0, 0, 100},
     {ConfigKeys::Web::Zoom, 100, 50, 200},
-    {ConfigKeys::Web::FpsCap, 0, 0, 60},
+    {ConfigKeys::Web::FpsCap, 24, 0, 60},
 };
 
 const char *kBoolRules[] = {

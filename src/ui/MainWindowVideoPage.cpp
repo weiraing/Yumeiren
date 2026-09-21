@@ -461,7 +461,8 @@ QWidget *MainWindow::buildWebWallpaperPage()
     m_webFpsCombo->setCurrentIndex(capIdx);
     styleCombo(m_webFpsCombo);
     m_webFpsCombo->setToolTip(tooltipstyle::format(
-        QStringLiteral("限制页面脚本的动画帧率(requestAnimationFrame)，页面动效越少越省 GPU/CPU；"
+        QStringLiteral("默认 24：网页壁纸不需要满屏幕刷新率，页面按 requestAnimationFrame"
+                       "驱动的动效(canvas/WebGL)会随之降帧，大幅省 GPU/CPU；"
                        "对 CSS 过渡类动画不起作用")));
     connect(m_webFpsCombo, &QComboBox::currentIndexChanged, this, [](int idx) {
         const int vals[4] = {0, 24, 30, 60};

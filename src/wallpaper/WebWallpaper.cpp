@@ -331,7 +331,7 @@ void WebWallpaper::loadSettings()
     m_interactive = config.value(QString::fromLatin1(ConfigKeys::Web::Interactive), true).toBool();
     m_volume = config.value(QString::fromLatin1(ConfigKeys::Web::Volume), 0).toInt();
     m_zoomPercent = config.value(QString::fromLatin1(ConfigKeys::Web::Zoom), 100).toInt();
-    m_fpsCap = config.value(QString::fromLatin1(ConfigKeys::Web::FpsCap), 0).toInt();
+    m_fpsCap = config.value(QString::fromLatin1(ConfigKeys::Web::FpsCap), 24).toInt();
     m_source = config.value(QString::fromLatin1(ConfigKeys::Web::Source)).toString();
 }
 

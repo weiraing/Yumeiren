@@ -197,6 +197,9 @@ void VideoWallpaper::playIndex(int index, qint64 resumePos)
 {
     if (m_playlist.isEmpty())
         return;
+    // 与网页壁纸互斥的**唯一收口**：启动、换曲、双击切曲、挂起恢复全部经过
+    // 这里，谁起播视频谁就把网页壁纸停掉。对未运行的网页壁纸是空操作。
+    WebWallpaper::instance().stop();
     VW_ASSERT_GUI();
     m_started = true;
     ensureHeartbeatTimers();
