@@ -30,6 +30,9 @@ public:
     // 才能保证两种模式互不串台。
     static QString imagePool();
     static QString logs();           // .cache/logs  诊断日志
+    // .cache/web-profile  WebView2 浏览器配置(网页壁纸)。归清缓存管：可再生的
+    // 用户级数据(重新登录即可)，不放在 data/ 是因为浏览器缓存动辄上百 MB。
+    static QString webProfile();
 
     // 创建根目录与实际用到的子目录。幂等。失败时给出明确原因，绝不回退 AppData。
     static bool ensureDirectories(QString *errorMessage = nullptr);

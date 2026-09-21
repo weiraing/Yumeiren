@@ -18,6 +18,7 @@
 #include "platform/windows/globalhotkey.h"
 #include "tray/SystemTrayController.h"
 #include "wallpaper/VideoWallpaper.h"
+#include "wallpaper/WebWallpaper.h"
 
 #include <QApplication>
 #include <QAction>
@@ -804,6 +805,9 @@ void MainWindow::setupKanbanAndTray()
     ApplicationShutdown &shutdown = ApplicationShutdown::instance();
     shutdown.addStep(QStringLiteral("停止视频壁纸"), [] {
         VideoWallpaper::instance().stopAll();
+    });
+    shutdown.addStep(QStringLiteral("停止网页壁纸"), [] {
+        WebWallpaper::instance().stop();
     });
     shutdown.addStep(QStringLiteral("停止看板娘"), [this] {
         if (m_kanban)

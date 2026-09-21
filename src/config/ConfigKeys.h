@@ -64,6 +64,17 @@ inline constexpr auto AffinityLimit = "video/affinityLimit";
 inline constexpr auto Diag = "video/diag";
 }
 
+// 动态网页壁纸(WebView2)。Source 存「url 或 data/web 下的相对路径/文件名」。
+namespace Web {
+inline constexpr auto Enabled = "web/enabled";           // 上次退出时在跑(启动恢复判据)
+inline constexpr auto Source = "web/source";
+inline constexpr auto RefreshMode = "web/refreshMode";   // 0=实时 1=快照·每分钟 2=快照·每小时
+inline constexpr auto Interactive = "web/interactive";   // 允许鼠标交互(否则点击穿透)
+inline constexpr auto Volume = "web/volume";             // 0=静音；WebView2 只有静音两档
+inline constexpr auto Zoom = "web/zoom";                 // 50~200
+inline constexpr auto FpsCap = "web/fpsCap";             // 0=跟随页面,24/30/60
+}
+
 namespace Window {
 inline constexpr auto Width = "window/width";
 inline constexpr auto Height = "window/height";

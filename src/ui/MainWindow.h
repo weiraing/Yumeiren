@@ -106,6 +106,7 @@ private:
     QWidget *buildWallpaperPage();
     QWidget *buildVideoWallpaperPage();
     QWidget *buildWebWallpaperPage();
+    void updateWebWallpaperControls(); // 网页壁纸按钮/状态与运行态同步
     QSlider *makeSlider(int min, int max, int value, QLabel **valueLabel,
                         const QString &suffix = QString());
 
@@ -252,6 +253,17 @@ private:
     QCheckBox *m_affinityBox = nullptr;   // 资源友好模式(限制逻辑核, 重启生效)
     QCheckBox *m_autostartBox = nullptr;
     QComboBox *m_screenModeCombo = nullptr;
+    // 动态网页壁纸页(WebView2)
+    QLineEdit *m_webSourceEdit = nullptr;
+    QComboBox *m_webRefreshCombo = nullptr;
+    QComboBox *m_webInteractCombo = nullptr;
+    QComboBox *m_webFpsCombo = nullptr;
+    QSlider *m_webVolumeSlider = nullptr;
+    QLabel *m_webVolumeVal = nullptr;
+    QSlider *m_webZoomSlider = nullptr;
+    QLabel *m_webZoomVal = nullptr;
+    QPushButton *m_webStartBtn = nullptr;
+    QLabel *m_webStateLabel = nullptr;
     QPushButton *m_playBtn = nullptr;
     QPushButton *m_pauseBtn = nullptr;
     QComboBox *m_fpsBox = nullptr;

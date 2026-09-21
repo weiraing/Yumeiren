@@ -49,6 +49,10 @@ const NumericRule kNumericRules[] = {
     {ConfigKeys::Kanban::PosX, -1, -1, 8192},
     {ConfigKeys::Kanban::PosY, -1, -1, 8192},
     {ConfigKeys::Kanban::TargetFps, 30, 10, 60},
+    {ConfigKeys::Web::RefreshMode, 0, 0, 2},
+    {ConfigKeys::Web::Volume, 0, 0, 100},
+    {ConfigKeys::Web::Zoom, 100, 50, 200},
+    {ConfigKeys::Web::FpsCap, 0, 0, 60},
 };
 
 const char *kBoolRules[] = {
@@ -76,6 +80,8 @@ const char *kBoolRules[] = {
     ConfigKeys::Kanban::MeshHide,
     ConfigKeys::Tray::Enabled,
     ConfigKeys::Tray::MinimizeToTrayOnClose,
+    ConfigKeys::Web::Enabled,
+    ConfigKeys::Web::Interactive,
 };
 
 // 布尔项缺省值表：列在这里的默认开，其余默认关。用表是为了新增键时只看一处。
@@ -102,6 +108,9 @@ const char *kBoolDefaultTrue[] = {
     // 有后台任务时点关闭应「隐藏而不是退出」，故默认开；读取端(closeEvent /
     // 界面勾选框)默认值同为 true。
     ConfigKeys::Tray::MinimizeToTrayOnClose,
+    // 网页壁纸默认允许交互：选网页壁纸多半就是冲着可交互内容来的，默认关会让
+    // 用户以为功能坏了。
+    ConfigKeys::Web::Interactive,
 };
 
 bool boolDefaultFor(const char *key)

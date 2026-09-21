@@ -110,6 +110,28 @@ function(yumeiren_deploy_qt_runtime target)
     add_dependencies(${target} yumeiren_deploy_runtime_${target})
 endfunction()
 
+# WebView2 Loader DLL：动态网页壁纸用。运行时本体是系统组件(Edge WebView2
+# Runtime)，不随包发布；这里只补我们自己那 0.2MB 的加载器。missing 时警告但不
+# 卡构建 —— 网页壁纸功能在 UI 上会以「运行时不可用」降级。
+function(yumeiren_deploy_webview2 target)
+    set(_wv2_loader "${CMAKE_CURRENT_SOURCE_DIR}/third_party/webview2/loader/WebView2Loader.dll")
+    if(EXISTS "${_wv2_loader}")
+        # 与 Qt 运行时/data 同一个坑同一个解法：挂 ALL 的独立 target，而不是
+        # POST_BUILD —— 后者只在重新链接时才跑，删掉 DLL 后重编译永远补不回来。
+        add_custom_target(yumeiren_deploy_webview2_${target} ALL
+            COMMAND ${CMAKE_COMMAND}
+                    "-DDST_DIR=$<TARGET_FILE_DIR:${target}>"
+                    "-DFILES=${_wv2_loader}"
+                    "-DPAIRS="
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/DeployQtRuntime.cmake
+            COMMENT "补齐 ${target} 的 WebView2 Loader"
+            VERBATIM)
+        add_dependencies(${target} yumeiren_deploy_webview2_${target})
+    else()
+        message(WARNING "third_party/webview2/loader/WebView2Loader.dll 缺失，动态网页壁纸将不可用")
+    endif()
+endfunction()
+
 set(YUMEIREN_SOURCES
     src/main.cpp
     # app/ module
@@ -135,10 +157,12 @@ set(YUMEIREN_SOURCES
     src/wallpaper/VideoWallpaper.cpp
     src/wallpaper/VideoWallpaperOutput.cpp
     src/wallpaper/VideoWallpaperSettings.cpp
+    src/wallpaper/WebWallpaper.cpp
     # platform/ module
     src/platform/windows/desktopmount.cpp
     src/platform/windows/globalhotkey.cpp
     src/platform/windows/shellfileops.cpp
+    src/platform/windows/webview2boot.cpp
     # tray/ module
     src/tray/SystemTrayController.cpp
     # kanban/ module
@@ -191,7 +215,7 @@ qt_add_executable(Yumeiren WIN32
     ${YUMEIREN_GENERATED_RC}
 )
 
-target_include_directories(Yumeiren PRIVATE src)
+target_include_directories(Yumeiren PRIVATE src third_party/webview2/include)
 yumeiren_apply_version(Yumeiren)
 
 set_property(SOURCE "${YUMEIREN_GENERATED_RC}" APPEND PROPERTY
@@ -205,6 +229,7 @@ if(YUMEIREN_WITH_LIVE2D)
     yumeiren_deploy_cubism(Yumeiren)
 endif()
 yumeiren_deploy_qt_runtime(Yumeiren)
+yumeiren_deploy_webview2(Yumeiren)
 
 set_target_properties(Yumeiren PROPERTIES
     OUTPUT_NAME "虞美人"
@@ -213,7 +238,7 @@ set_target_properties(Yumeiren PROPERTIES
 qt_add_executable(YumeirenTest WIN32
     ${YUMEIREN_SOURCES}
 )
-target_include_directories(YumeirenTest PRIVATE src)
+target_include_directories(YumeirenTest PRIVATE src third_party/webview2/include)
 yumeiren_apply_version(YumeirenTest)
 target_link_libraries(YumeirenTest PRIVATE ${YUMEIREN_LIBS})
 if(YUMEIREN_WITH_LIVE2D)
@@ -221,6 +246,7 @@ if(YUMEIREN_WITH_LIVE2D)
     yumeiren_deploy_cubism(YumeirenTest)
 endif()
 yumeiren_deploy_qt_runtime(YumeirenTest)
+yumeiren_deploy_webview2(YumeirenTest)
 
 set(APP_RESOURCES
     resources/style.qss
@@ -280,12 +306,13 @@ if(YUMEIREN_WITH_LIVE2D AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/kanbanprob
     set(YUMEIREN_PROBE_SOURCES ${YUMEIREN_SOURCES})
     list(REMOVE_ITEM YUMEIREN_PROBE_SOURCES src/main.cpp)
     add_executable(KanbanProbe ${YUMEIREN_PROBE_SOURCES} tools/kanbanprobe/main.cpp)
-    target_include_directories(KanbanProbe PRIVATE src)
+    target_include_directories(KanbanProbe PRIVATE src third_party/webview2/include)
     yumeiren_apply_version(KanbanProbe)
     target_link_libraries(KanbanProbe PRIVATE ${YUMEIREN_LIBS})
     target_compile_definitions(KanbanProbe PRIVATE YUMEIREN_WITH_LIVE2D=1)
     yumeiren_deploy_cubism(KanbanProbe)
     yumeiren_deploy_qt_runtime(KanbanProbe)
+yumeiren_deploy_webview2(KanbanProbe)
     # 不单独复制 data/models：它与上面的 yumeiren_runtime_data 抢同一个目标目录，
     # 先建出 build/data 就会把整份 data 的补齐判据顶掉。
     add_dependencies(KanbanProbe yumeiren_runtime_data)

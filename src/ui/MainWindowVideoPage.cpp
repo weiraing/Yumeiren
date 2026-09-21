@@ -8,8 +8,10 @@
 #include "ui/TooltipStyle.h"
 #include "ui/UiMetrics.h" // 左列宽度：与看板娘页共用同一个常量
 #include "wallpaper/VideoWallpaper.h"
+#include "wallpaper/WebWallpaper.h"
 
 #include <QButtonGroup>
+#include <QDesktopServices>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
@@ -358,71 +360,208 @@ QWidget *MainWindow::buildWebWallpaperPage()
 
     auto *card = new QFrame(page);
     card->setObjectName(QStringLiteral("PageCard"));
+    card->setFixedWidth(uimetrics::kPageLeftColWidth);
     auto *cardLay = new QVBoxLayout(card);
     cardLay->setContentsMargins(18, 14, 18, 18);
     cardLay->setSpacing(10);
 
-    auto *row1 = new QHBoxLayout();
     auto *t = new QLabel(QStringLiteral("动态网页壁纸"), card);
     t->setObjectName(QStringLiteral("GroupTitle"));
-    row1->addWidget(t);
-    row1->addStretch(1);
-    auto *badge = new QLabel(QStringLiteral("🚧 功能开发中 · 界面预览"), card);
-    badge->setObjectName(QStringLiteral("HintLabel"));
-    row1->addWidget(badge);
-    cardLay->addLayout(row1);
+    cardLay->addWidget(t);
+
+    // 运行时体检：WebView2 是系统组件，缺了就把整页置灰并说明装法 —— 与 Live2D
+    // 后端缺失同一套「明确告诉你为什么不能用」的处理。
+    QString version;
+    const bool runtimeOk = WebWallpaper::runtimeAvailable(&version);
 
     auto *hint = new QLabel(
-        QStringLiteral("计划支持将网页(HTML5)作为桌面动态壁纸，基于浏览器内核离屏渲染，低资源占用。"),
+        runtimeOk
+            ? QStringLiteral("把网页(HTML5)挂到桌面当壁纸，浏览器内核直接渲染到桌面层。"
+                             "本地页面放在程序目录 data/web 下。运行时 %1。").arg(version)
+            : QStringLiteral("WebView2 运行时不可用：%1\n"
+                             "请到微软官网安装「Evergreen WebView2 Runtime」后重启软件。").arg(version),
         card);
     hint->setObjectName(QStringLiteral("HintLabel"));
     hint->setWordWrap(true);
     cardLay->addWidget(hint);
 
-    auto *urlRow = new QHBoxLayout();
-    auto *urlEdit = new QLineEdit(card);
-    urlEdit->setPlaceholderText(QStringLiteral("网页地址 https://… 或本地 HTML 文件路径"));
-    urlEdit->setDisabled(true);
-    auto *pickBtn = new QPushButton(QStringLiteral("选择 HTML…"), card);
-    pickBtn->setDisabled(true);
-    urlRow->addWidget(urlEdit, 1);
-    urlRow->addWidget(pickBtn);
-    cardLay->addLayout(urlRow);
+    auto *srcRow = new QHBoxLayout();
+    m_webSourceEdit = new QLineEdit(card);
+    m_webSourceEdit->setPlaceholderText(
+        QStringLiteral("网页地址 https://… 或 data/web 下的文件名"));
+    m_webSourceEdit->setText(WebWallpaper::instance().source());
+    connect(m_webSourceEdit, &QLineEdit::editingFinished, this, [this] {
+        // 只记录不启动：地址写进配置，「应用」或下次启动时才生效。
+        AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Web::Source),
+                                       m_webSourceEdit->text().trimmed());
+    });
+    srcRow->addWidget(m_webSourceEdit, 1);
+    auto *pickBtn = new QPushButton(QStringLiteral("选择页面…"), card);
+    connect(pickBtn, &QPushButton::clicked, this, [this] {
+        const QString dir = QCoreApplication::applicationDirPath()
+                            + QStringLiteral("/data/web");
+        const QString file = QFileDialog::getOpenFileName(
+            this, QStringLiteral("选择本地网页"), dir,
+            QStringLiteral("网页 (*.html *.htm);;所有文件 (*)"));
+        if (file.isEmpty())
+            return;
+        m_webSourceEdit->setText(QDir::toNativeSeparators(file));
+        AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Web::Source), file);
+    });
+    srcRow->addWidget(pickBtn);
+    cardLay->addLayout(srcRow);
+
+    // 本地页面库：data/web 下的 *.html 一键直达。目录是用户资产区，构建只补缺。
+    auto *openDirBtn = new QPushButton(QStringLiteral("打开 data/web 页面目录"), card);
+    connect(openDirBtn, &QPushButton::clicked, this, [] {
+        const QString dir = QCoreApplication::applicationDirPath()
+                            + QStringLiteral("/data/web");
+        QDir().mkpath(dir);
+        QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
+    });
+    cardLay->addWidget(openDirBtn);
 
     auto *grid = new QGridLayout();
     grid->setHorizontalSpacing(10);
     grid->setVerticalSpacing(8);
     grid->addWidget(new QLabel(QStringLiteral("刷新策略"), card), 0, 0);
-    auto *refreshCombo = new QComboBox(card);
-    refreshCombo->addItems({QStringLiteral("实时渲染"), QStringLiteral("每分钟刷新"),
-                            QStringLiteral("每小时刷新")});
-    refreshCombo->setDisabled(true);
-    styleCombo(refreshCombo);
-    grid->addWidget(refreshCombo, 0, 1);
+    m_webRefreshCombo = new QComboBox(card);
+    m_webRefreshCombo->addItems({QStringLiteral("实时渲染"), QStringLiteral("快照·每分钟"),
+                                 QStringLiteral("快照·每小时")});
+    m_webRefreshCombo->setCurrentIndex(WebWallpaper::instance().refreshMode());
+    styleCombo(m_webRefreshCombo);
+    m_webRefreshCombo->setToolTip(tooltipstyle::format(
+        QStringLiteral("快照模式：准静态页面(时钟/天气)定时截一张图贴桌面，"
+                       "两次刷新之间几乎零 CPU/GPU；实时渲染则让页面持续动画")));
+    connect(m_webRefreshCombo, &QComboBox::currentIndexChanged, this, [](int idx) {
+        WebWallpaper::instance().setRefreshMode(idx);
+    });
+    grid->addWidget(m_webRefreshCombo, 0, 1);
+
     grid->addWidget(new QLabel(QStringLiteral("交互模式"), card), 1, 0);
-    auto *interCombo = new QComboBox(card);
-    interCombo->addItems({QStringLiteral("允许鼠标交互"), QStringLiteral("仅展示(穿透点击)")});
-    interCombo->setDisabled(true);
-    styleCombo(interCombo);
-    grid->addWidget(interCombo, 1, 1);
+    m_webInteractCombo = new QComboBox(card);
+    m_webInteractCombo->addItems({QStringLiteral("允许鼠标交互"), QStringLiteral("仅展示(穿透点击)")});
+    m_webInteractCombo->setCurrentIndex(WebWallpaper::instance().interactive() ? 0 : 1);
+    styleCombo(m_webInteractCombo);
+    connect(m_webInteractCombo, &QComboBox::currentIndexChanged, this, [](int idx) {
+        WebWallpaper::instance().setInteractive(idx == 0);
+    });
+    grid->addWidget(m_webInteractCombo, 1, 1);
+
+    grid->addWidget(new QLabel(QStringLiteral("帧率上限"), card), 2, 0);
+    m_webFpsCombo = new QComboBox(card);
+    m_webFpsCombo->addItems({QStringLiteral("跟随页面"), QStringLiteral("24 fps"),
+                             QStringLiteral("30 fps"), QStringLiteral("60 fps")});
+    const int capVals[4] = {0, 24, 30, 60};
+    const int curCap = WebWallpaper::instance().fpsCap();
+    int capIdx = 0;
+    for (int i = 0; i < 4; ++i)
+        if (capVals[i] == curCap)
+            capIdx = i;
+    m_webFpsCombo->setCurrentIndex(capIdx);
+    styleCombo(m_webFpsCombo);
+    m_webFpsCombo->setToolTip(tooltipstyle::format(
+        QStringLiteral("限制页面脚本的动画帧率(requestAnimationFrame)，页面动效越少越省 GPU/CPU；"
+                       "对 CSS 过渡类动画不起作用")));
+    connect(m_webFpsCombo, &QComboBox::currentIndexChanged, this, [](int idx) {
+        const int vals[4] = {0, 24, 30, 60};
+        WebWallpaper::instance().setFpsCap(idx >= 0 && idx < 4 ? vals[idx] : 0);
+    });
+    grid->addWidget(m_webFpsCombo, 2, 1);
+
+    grid->addWidget(new QLabel(QStringLiteral("音量"), card), 3, 0);
+    auto *volRow = new QHBoxLayout();
+    m_webVolumeSlider = new QSlider(Qt::Horizontal, card);
+    m_webVolumeSlider->setRange(0, 100);
+    m_webVolumeSlider->setValue(WebWallpaper::instance().volume());
+    m_webVolumeVal = new QLabel(QStringLiteral("%1%").arg(WebWallpaper::instance().volume()), card);
+    m_webVolumeVal->setObjectName(QStringLiteral("FieldLabel"));
+    m_webVolumeVal->setMinimumWidth(44);
+    m_webVolumeVal->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    connect(m_webVolumeSlider, &QSlider::valueChanged, this, [this](int v) {
+        m_webVolumeVal->setText(QStringLiteral("%1%").arg(v));
+        WebWallpaper::instance().setVolume(v);
+    });
+    m_webVolumeSlider->setToolTip(tooltipstyle::format(
+        QStringLiteral("WebView2 只能整体静音/取消静音，没有音量级：拉到 0 即静音，"
+                       "大于 0 为出声(音量跟随系统)")));
+    volRow->addWidget(m_webVolumeSlider, 1);
+    volRow->addWidget(m_webVolumeVal);
+    grid->addLayout(volRow, 3, 1);
+
+    grid->addWidget(new QLabel(QStringLiteral("页面缩放"), card), 4, 0);
+    auto *zoomRow = new QHBoxLayout();
+    m_webZoomSlider = new QSlider(Qt::Horizontal, card);
+    m_webZoomSlider->setRange(50, 200);
+    m_webZoomSlider->setValue(WebWallpaper::instance().zoomPercent());
+    m_webZoomVal = new QLabel(QStringLiteral("%1%").arg(WebWallpaper::instance().zoomPercent()), card);
+    m_webZoomVal->setObjectName(QStringLiteral("FieldLabel"));
+    m_webZoomVal->setMinimumWidth(44);
+    m_webZoomVal->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    connect(m_webZoomSlider, &QSlider::valueChanged, this, [this](int v) {
+        m_webZoomVal->setText(QStringLiteral("%1%").arg(v));
+        WebWallpaper::instance().setZoomPercent(v);
+    });
+    zoomRow->addWidget(m_webZoomSlider, 1);
+    zoomRow->addWidget(m_webZoomVal);
+    grid->addLayout(zoomRow, 4, 1);
+    grid->setColumnStretch(1, 1);
     cardLay->addLayout(grid);
 
     auto *btnRow = new QHBoxLayout();
     btnRow->setSpacing(10);
-    auto *applyBtn = new QPushButton(QStringLiteral("应用网页壁纸"), card);
-    applyBtn->setObjectName(QStringLiteral("PrimaryButton"));
-    applyBtn->setDisabled(true);
-    auto *resetBtn = new QPushButton(QStringLiteral("恢复"), card);
-    resetBtn->setObjectName(QStringLiteral("DangerButton"));
-    resetBtn->setDisabled(true);
-    btnRow->addWidget(applyBtn, 1);
-    btnRow->addWidget(resetBtn, 1);
+    m_webStartBtn = new QPushButton(QStringLiteral("▶ 应用网页壁纸"), card);
+    m_webStartBtn->setObjectName(QStringLiteral("PrimaryButton"));
+    m_webStartBtn->setMinimumHeight(40);
+    connect(m_webStartBtn, &QPushButton::clicked, this, [this] {
+        auto &web = WebWallpaper::instance();
+        if (web.isRunning()) {
+            web.stop();
+        } else {
+            QString err;
+            if (!web.start(&err, m_webSourceEdit->text().trimmed()) && !err.isEmpty())
+                setLog(err, true);
+        }
+        updateWebWallpaperControls();
+    });
+    btnRow->addWidget(m_webStartBtn, 1);
     cardLay->addLayout(btnRow);
 
-    lay->addWidget(card);
+    m_webStateLabel = new QLabel(WebWallpaper::instance().stateText(), card);
+    m_webStateLabel->setObjectName(QStringLiteral("LogLabel"));
+    m_webStateLabel->setWordWrap(true);
+    cardLay->addWidget(m_webStateLabel);
+    connect(&WebWallpaper::instance(), &WebWallpaper::stateChanged, this, [this](const QString &text) {
+        if (m_webStateLabel)
+            m_webStateLabel->setText(text);
+    });
+    connect(&WebWallpaper::instance(), &WebWallpaper::runningChanged, this,
+            [this](bool) { updateWebWallpaperControls(); });
+
+    if (!runtimeOk) {
+        m_webSourceEdit->setDisabled(true);
+        m_webStartBtn->setDisabled(true);
+        pickBtn->setDisabled(true);
+    }
+    updateWebWallpaperControls();
+
+    lay->addWidget(card, 0, Qt::AlignTop | Qt::AlignLeft);
     lay->addStretch(1);
     scroll->setWidget(page);
     return scroll;
+}
+
+// 网页壁纸页按钮/状态与运行态保持一致(启动后变「停止」)。
+void MainWindow::updateWebWallpaperControls()
+{
+    if (!m_webStartBtn)
+        return;
+    auto &web = WebWallpaper::instance();
+    const bool running = web.isRunning();
+    m_webStartBtn->setText(running ? QStringLiteral("■ 停止网页壁纸")
+                                   : QStringLiteral("▶ 应用网页壁纸"));
+    if (m_webStateLabel)
+        m_webStateLabel->setText(web.stateText());
 }
 
 QWidget *MainWindow::buildWallpaperPage()

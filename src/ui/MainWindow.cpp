@@ -14,6 +14,7 @@
 #include "platform/windows/desktopmount.h"
 #include "tray/SystemTrayController.h"
 #include "wallpaper/VideoWallpaper.h"
+#include "wallpaper/WebWallpaper.h"
 
 #include <QAbstractScrollArea>
 #include <QApplication>
@@ -141,6 +142,15 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
         videodiag::stage(earlyWasPlaying && !earlyPlaylist.isEmpty()
                              ? QStringLiteral("壁纸状态恢复已发起(视频管线后台起跑)")
                              : QStringLiteral("壁纸状态恢复跳过(上次未播放)"));
+    }
+
+    // 网页壁纸的启动恢复：与视频壁纸互斥，视频已起跑就让位。两者写同一个
+    // 「壁纸在跑」的运行时状态，谁后启动谁说了算。
+    if (WebWallpaper::instance().wasRunningLastTime()
+        && !VideoWallpaper::instance().isStarted()) {
+        QString err;
+        if (!WebWallpaper::instance().start(&err) && !err.isEmpty())
+            QTimer::singleShot(0, this, [this, err] { setLog(err, true); });
     }
 
     // Effect presets 取自三个开源项目的默认配置。
@@ -566,6 +576,7 @@ bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr
                 return false;
             }
             VideoWallpaper::instance().setMonitorOn(monitorOn);
+            WebWallpaper::instance().setMonitorOn(monitorOn);
             // 同一条判据的第二个消费者：看板娘也是「看不见就别画」的对象，
             // 而它有自己的挂起阈值(见 KanbanController::evaluateSuspend)。
             if (m_kanban) {

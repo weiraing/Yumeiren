@@ -2,6 +2,7 @@
 #include "VideoWallpaper.h"
 
 #include "app/AppInfo.h"
+#include "wallpaper/WebWallpaper.h"
 #include "config/AppConfig.h"
 #include "core/Diagnostics.h"
 #include "platform/windows/desktopmount.h"
