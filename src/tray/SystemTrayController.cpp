@@ -61,7 +61,7 @@ bool SystemTrayController::initialize()
 
     if (!AppConfig::instance()
              .value(ConfigKeys::Tray::Enabled, true).toBool()) {
-        videodiag::log(videodiag::Level::Info,
+        applog::log(applog::Level::Info,
                        QStringLiteral("托盘: 设置中已关闭，不创建托盘图标"),
                        QStringLiteral("Tray"));
         ApplicationRuntimeState::instance().setTrayAvailable(false);
@@ -70,7 +70,7 @@ bool SystemTrayController::initialize()
 
     // 先探测再创建：不可用时只降级，不阻止启动。
     if (!QSystemTrayIcon::isSystemTrayAvailable()) {
-        videodiag::log(videodiag::Level::Warning,
+        applog::log(applog::Level::Warning,
                        QStringLiteral("托盘: 系统托盘不可用，主窗口关闭将按正常退出处理"),
                        QStringLiteral("Tray"));
         ApplicationRuntimeState::instance().setTrayAvailable(false);
@@ -88,7 +88,7 @@ bool SystemTrayController::initialize()
 
     m_available = true;
     ApplicationRuntimeState::instance().setTrayAvailable(true);
-    videodiag::log(videodiag::Level::Info, QStringLiteral("托盘: 已就绪(常驻显示)"),
+    applog::log(applog::Level::Info, QStringLiteral("托盘: 已就绪(常驻显示)"),
                    QStringLiteral("Tray"));
 
     // 单一订阅点：后台状态变化时刷菜单文字与 tooltip。
@@ -116,7 +116,7 @@ void SystemTrayController::buildContextMenu()
         }
         QString err;
         if (!wall.startPlaying(&err)) {
-            videodiag::log(videodiag::Level::Warning,
+            applog::log(applog::Level::Warning,
                            QStringLiteral("托盘启动动态壁纸失败: %1").arg(err),
                            QStringLiteral("Tray"));
             return;
@@ -145,7 +145,7 @@ void SystemTrayController::buildContextMenu()
             return;
         }
         if (!m_kanban->start()) {
-            videodiag::log(videodiag::Level::Warning,
+            applog::log(applog::Level::Warning,
                            QStringLiteral("托盘启动看板娘失败: %1")
                                .arg(m_kanban->lastError().isEmpty()
                                         ? QStringLiteral("未知原因")
@@ -280,7 +280,7 @@ void SystemTrayController::showTray()
         return;
     if (!m_trayIcon->isVisible()) {
         m_trayIcon->show();
-        videodiag::log(videodiag::Level::Debug, QStringLiteral("托盘: 显示"),
+        applog::log(applog::Level::Debug, QStringLiteral("托盘: 显示"),
                        QStringLiteral("Tray"));
     }
 }
@@ -291,7 +291,7 @@ void SystemTrayController::hideTray()
         return;
     if (m_trayIcon->isVisible()) {
         m_trayIcon->hide();
-        videodiag::log(videodiag::Level::Debug, QStringLiteral("托盘: 隐藏"),
+        applog::log(applog::Level::Debug, QStringLiteral("托盘: 隐藏"),
                        QStringLiteral("Tray"));
     }
 }
@@ -327,7 +327,7 @@ QIcon SystemTrayController::buildTrayIcon() const
     if (!icon.isNull())
         return icon;
 
-    videodiag::log(videodiag::Level::Warning,
+    applog::log(applog::Level::Warning,
                    QStringLiteral("托盘: 图标资源缺失，退化成占位圆点"),
                    QStringLiteral("Tray"));
     QPixmap pixmap(64, 64);

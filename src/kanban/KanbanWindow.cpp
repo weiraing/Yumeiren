@@ -177,12 +177,12 @@ KanbanWindow::KanbanWindow(QWidget *parent)
     m_taskbarCreatedMsg = RegisterWindowMessageW(L"TaskbarCreated");
 #endif
 
-    videodiag::logObjectEvent("create", this, QStringLiteral("kanban window"));
+    applog::logObjectEvent("create", this, QStringLiteral("kanban window"));
 }
 
 KanbanWindow::~KanbanWindow()
 {
-    videodiag::logObjectEvent("destroy", this, QStringLiteral("kanban window"));
+    applog::logObjectEvent("destroy", this, QStringLiteral("kanban window"));
 }
 
 // —— 视图选型 ——
@@ -194,7 +194,7 @@ void KanbanWindow::attachRenderer(KanbanRenderer *renderer)
 #ifndef YUMEIREN_WITH_LIVE2D
     // 本构建未接入 SDK 时 GL 渲染器不会被选中；真走到这里说明接线错了，留日志而非静默黑屏。
     if (wantGl) {
-        videodiag::log(videodiag::Level::Error,
+        applog::log(applog::Level::Error,
                        QStringLiteral("[KanbanWindow] 渲染器要求 GL 宿主，但本构建未编译 GL 视图"),
                        QLatin1String(kModule));
     }
@@ -292,7 +292,7 @@ void KanbanWindow::setAlwaysOnTop(bool onTop)
     }
     m_alwaysOnTop = onTop;
     applyTopmostStyle();
-    videodiag::log(videodiag::Level::Info,
+    applog::log(applog::Level::Info,
                    QStringLiteral("[KanbanWindow] 窗口置顶=%1").arg(onTop),
                    QLatin1String(kModule));
 }
@@ -325,7 +325,7 @@ void KanbanWindow::setMouseThrough(bool through)
     if (through) {
         emit pointerLeft();
     }
-    videodiag::log(videodiag::Level::Info,
+    applog::log(applog::Level::Info,
                    QStringLiteral("[KanbanWindow] 鼠标穿透=%1").arg(through),
                    QLatin1String(kModule));
 }
@@ -475,7 +475,7 @@ void KanbanWindow::applyMenuStyle(QMenu *menu)
         const UINT abgr = (alpha << 24) | (UINT(bg.blue()) << 16)
                           | (UINT(bg.green()) << 8) | UINT(bg.red());
         if (!applyWindowAcrylic(menu->winId(), abgr)) {
-            videodiag::log(videodiag::Level::Info,
+            applog::log(applog::Level::Info,
                            QStringLiteral("[KanbanWindow] 菜单亚克力不可用(系统不支持)，保留半透明底色"),
                            QLatin1String(kModule));
         }
@@ -485,7 +485,7 @@ void KanbanWindow::applyMenuStyle(QMenu *menu)
         // 旧版只有 `m_menuGlass > 0` 才碰原生合成，于是 gl=0 时透明度全程失效。
         // bgAlpha==255（tr=0 且 gl=0，默认态）不挂，菜单外观与改造前逐像素一致。
         if (!applyGlassSheet(menu->winId())) {
-            videodiag::log(videodiag::Level::Info,
+            applog::log(applog::Level::Info,
                            QStringLiteral("[KanbanWindow] 菜单玻璃板不可用(系统不支持)，透明度只会朝黑稀释"),
                            QLatin1String(kModule));
         }
@@ -715,7 +715,7 @@ bool KanbanWindow::nativeEvent(const QByteArray &eventType, void *message, qintp
         if (msg->message == UINT(m_taskbarCreatedMsg)) {
             applyTopmostStyle();
             applyMouseThroughStyle();
-            videodiag::log(videodiag::Level::Info,
+            applog::log(applog::Level::Info,
                            QStringLiteral("[KanbanWindow] 收到 TaskbarCreated，已重贴窗口样式"),
                            QLatin1String(kModule));
         }

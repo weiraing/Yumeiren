@@ -81,7 +81,7 @@ void KanbanController::loadSettings()
             config.value(QString::fromLatin1(ConfigKeys::Kanban::GazeTrackingLegacy), true).toBool();
         m_gazeStrength = legacyOn ? KanbanRenderer::GazeMedium : KanbanRenderer::GazeOff;
         config.setValue(strengthKey, m_gazeStrength);
-        videodiag::log(videodiag::Level::Info,
+        applog::log(applog::Level::Info,
                        QStringLiteral("[Kanban] 视线追踪配置迁移: 旧布尔=%1 → 档位=%2")
                            .arg(legacyOn ? QStringLiteral("开") : QStringLiteral("关"))
                            .arg(KanbanRenderer::gazeStrengthName(m_gazeStrength)),
@@ -130,7 +130,7 @@ void KanbanController::placeWindowFromConfig()
     const int y = config.value(QString::fromLatin1(ConfigKeys::Kanban::PosY), -1).toInt();
     const QSize size = windowSizeForScale(m_scalePercent);
     m_window->placeFromConfig(x, y, size.width(), size.height());
-    videodiag::log(videodiag::Level::Debug,
+    applog::log(applog::Level::Debug,
                    QStringLiteral("[Kanban] 窗口首次落位 %1x%2 @(%3,%4)")
                        .arg(m_window->width())
                        .arg(m_window->height())
@@ -306,7 +306,7 @@ void KanbanController::setGazeStrength(int strength)
             feedGazeTarget();
         }
     }
-    videodiag::log(videodiag::Level::Info,
+    applog::log(applog::Level::Info,
                    QStringLiteral("[Kanban] 视线追踪强度=%1(%2)")
                        .arg(KanbanRenderer::gazeStrengthName(next))
                        .arg(next),

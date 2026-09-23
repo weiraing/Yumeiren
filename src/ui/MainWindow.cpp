@@ -158,10 +158,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
             }
         } else if (earlyWasPlaying) {
             // wasPlaying 为真但列表为空：自动恢复被跳过，记录原因避免无声失败
-            videodiag::log(videodiag::Level::Warning,
+            applog::log(applog::Level::Warning,
                 QStringLiteral("自动恢复跳过: 上次标记播放中但播放列表为空"));
         }
-        videodiag::stage(earlyWasPlaying && !earlyPlaylist.isEmpty()
+        applog::stage(earlyWasPlaying && !earlyPlaylist.isEmpty()
                              ? QStringLiteral("壁纸状态恢复已发起(视频管线后台起跑)")
                              : QStringLiteral("壁纸状态恢复跳过(上次未播放)"));
     }
@@ -256,7 +256,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     m_powerNotify = RegisterPowerSettingNotification(reinterpret_cast<HWND>(winId()),
                                                     &kMonitorPowerOnGuid,
                                                     DEVICE_NOTIFY_WINDOW_HANDLE);
-    videodiag::log(m_powerNotify ? videodiag::Level::Info : videodiag::Level::Warning,
+    applog::log(m_powerNotify ? applog::Level::Info : applog::Level::Warning,
                    m_powerNotify ? QStringLiteral("显示器电源通知：订阅成功")
                                  : QStringLiteral("显示器电源通知：订阅失败(%1)，熄屏自动暂停不可用")
                                        .arg(GetLastError()),
@@ -270,9 +270,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     m_nav->setCurrentRow(0);
     m_topStack->setCurrentIndex(0);
     selectHeaderTab(0);
-    videodiag::stage(QStringLiteral("主窗口控件树构建完成(UI 初始化)"));
+    applog::stage(QStringLiteral("主窗口控件树构建完成(UI 初始化)"));
     loadSettings();
-    videodiag::stage(QStringLiteral("设置回填完成(含图库与显示器枚举)"));
+    applog::stage(QStringLiteral("设置回填完成(含图库与显示器枚举)"));
     applyTheme(m_themeCombo->currentIndex());
     refreshStatus();
     // 装在只读目录(如 C:\Program Files)时 .cache 建不起来：明确提示用户，
@@ -288,7 +288,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 
     // 看板娘与托盘放在最后装配：控件树、设置回填、视频壁纸恢复都已就位。
     setupKanbanAndTray();
-    videodiag::logObjectEvent("create", this,
+    applog::logObjectEvent("create", this,
                               QStringLiteral("size=%1x%2").arg(width()).arg(height()));
 }
 
@@ -298,7 +298,7 @@ MainWindow::~MainWindow()
 {
     QMutexLocker guard(&m_thumbTasksMutex);
     m_thumbTasksLive = false;
-    videodiag::logObjectEvent("destroy", this);
+    applog::logObjectEvent("destroy", this);
 }
 
 QWidget *MainWindow::buildTitleBar()
@@ -705,10 +705,10 @@ bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr
             // 也不弹任何确认框。
             ApplicationShutdown::instance().requestQuit(CloseReason::SystemShutdown);
         }
-        if (const unsigned int showMsg = fbswin::showMainWindowMessage();
+        if (const unsigned int showMsg = winhelper::showMainWindowMessage();
             showMsg && msg->message == showMsg) {
             // 二次启动的实例请求唤起：转回主线程走托盘「显示主窗口」同一条路。
-            videodiag::log(videodiag::Level::Info,
+            applog::log(applog::Level::Info,
                            QStringLiteral("收到二次启动唤起请求，从托盘恢复主窗口"),
                            QLatin1String("UI"));
             QMetaObject::invokeMethod(this, &MainWindow::showFromTray, Qt::QueuedConnection);
@@ -810,7 +810,7 @@ void MainWindow::reportDllMigration()
 {
     const ComponentStatus img = Engine::instance().imageStatus();
     const ComponentStatus eff = Engine::instance().effectStatus();
-    videodiag::log(videodiag::Level::Info,
+    applog::log(applog::Level::Info,
                    QStringLiteral("Hook DLL 目录 %1 | 图片 %2 | 特效 %3")
                        .arg(QDir::toNativeSeparators(Engine::dllRoot()),
                             Engine::statusText(img), Engine::statusText(eff)),
@@ -1090,7 +1090,7 @@ void MainWindow::loadSettings()
         int targetFps = saved;
         if (!m_fpsGroup->button(targetFps)) {
             targetFps = snapToFpsOption(saved);   // 为何不吸到 0：见该函数定义处
-            videodiag::log(videodiag::Level::Info,
+            applog::log(applog::Level::Info,
                            QStringLiteral("视频帧率：配置里的 %1 已不在可选档位内，吸附到 %2")
                                .arg(saved).arg(targetFps),
                            QLatin1String("UI"));
@@ -1155,7 +1155,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
 
     saveWindowGeometry();
     if (hideInstead) {
-        videodiag::log(videodiag::Level::Info,
+        applog::log(applog::Level::Info,
                        QStringLiteral("主窗口关闭请求转为隐藏(后台任务运行中)"),
                        QLatin1String("UI"));
         hide();

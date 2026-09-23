@@ -17,7 +17,7 @@
 #include <psapi.h>
 #include <tlhelp32.h>
 
-namespace videodiag {
+namespace applog {
 
 namespace {
 
@@ -251,4 +251,4 @@ void startDiagSampling()
     timer->start(intervalMs);
 }
 
-} // namespace videodiag
+} // namespace applog

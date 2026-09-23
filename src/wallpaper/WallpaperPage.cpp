@@ -7,7 +7,7 @@
 #include "config/ConfigKeys.h"
 #include "core/Diagnostics.h"
 #include "platform/windows/shellfileops.h"
-#include "ui/LibraryCard.h"
+#include "ui/MediaLibraryCard.h"
 #include "ui/TooltipStyle.h"
 #include "ui/UiStyle.h"
 #include "ui/UiMetrics.h" // 左右列宽度：与看板娘页共用同一个常量
@@ -290,11 +290,11 @@ void MainWindow::removeCheckedWebItems()
                 target = QFileInfo(projectDir);
         }
         QString err;
-        if (fbswin::moveToRecycleBin(target.absoluteFilePath(), &err)) {
+        if (winhelper::moveToRecycleBin(target.absoluteFilePath(), &err)) {
             ++done;
         } else {
             failed << QStringLiteral("%1(%2)").arg(p.label, err);
-            videodiag::log(videodiag::Level::Warning,
+            applog::log(applog::Level::Warning,
                            QStringLiteral("网页库删除失败: %1 -> %2")
                                .arg(QDir::toNativeSeparators(target.absoluteFilePath()), err),
                            QStringLiteral("WebLibrary"));
@@ -704,7 +704,7 @@ QWidget *MainWindow::buildWebWallpaperPage()
         const int saved = WebWallpaper::instance().refreshMode();
         const int mode = m_webRefreshGroup->button(saved) ? saved : int(WebWallpaper::Realtime);
         if (mode != saved) {
-            videodiag::log(videodiag::Level::Info,
+            applog::log(applog::Level::Info,
                            QStringLiteral("网页壁纸刷新策略：配置里的 %1 不在可选档位内，回落到实时渲染")
                                .arg(saved),
                            QLatin1String("UI"));
@@ -778,7 +778,7 @@ QWidget *MainWindow::buildWebWallpaperPage()
         int cap = saved;
         if (!m_webFpsGroup->button(cap)) {
             cap = snapToFpsOption(saved);
-            videodiag::log(videodiag::Level::Info,
+            applog::log(applog::Level::Info,
                            QStringLiteral("网页壁纸帧率：配置里的 %1 已不在可选档位内，吸附到 %2")
                                .arg(saved).arg(cap),
                            QLatin1String("UI"));
@@ -1047,7 +1047,7 @@ void MainWindow::removeCheckedVideos()
     QStringList failed;
     for (const QString &p : paths) {
         QString err;
-        if (fbswin::moveToRecycleBin(p, &err))
+        if (winhelper::moveToRecycleBin(p, &err))
             ++done;
         else
             failed << QStringLiteral("%1(%2)").arg(QFileInfo(p).fileName(), err);
@@ -1158,7 +1158,7 @@ void MainWindow::updatePlayingHighlight()
 
 void MainWindow::onVideoStateChanged(const QString &text)
 {
-    videodiag::log(videodiag::Level::Debug,
+    applog::log(applog::Level::Debug,
                    QStringLiteral("UI状态 %1").arg(text));
     // 只存原文，组装交给 updateVideoLibraryInfo() —— 页脚那行有三段，
     // 光有状态拼不出完整一行。

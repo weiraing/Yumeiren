@@ -13,7 +13,7 @@
 
 class QByteArray;
 
-namespace fbswin {
+namespace winhelper {
 
 class GlobalHotkey : public QObject, public QAbstractNativeEventFilter
 {
@@ -40,6 +40,6 @@ private:
     unsigned m_modifiers = 0; // MOD_* 组合
 };
 
-} // namespace fbswin
+} // namespace winhelper
 
 #endif // GLOBALHOTKEY_H

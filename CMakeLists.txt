@@ -150,7 +150,7 @@ set(YUMEIREN_SOURCES
     src/explorerbg/EffectStylePage.cpp
     # ui/ module(主窗口壳 + 共享小部件；三个模块各自的页面在对应模块目录下)
     src/ui/MainWindow.cpp
-    src/ui/LibraryCard.cpp
+    src/ui/MediaLibraryCard.cpp
     src/ui/TooltipStyle.cpp
     # wallpaper/ module(动态壁纸：视频+网页，含壁纸页 UI)
     src/wallpaper/WallpaperPage.cpp

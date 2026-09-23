@@ -876,8 +876,8 @@ void MainWindow::setupKanbanAndTray()
 
     // 全局快捷键：注册在系统层，WM_HOTKEY 由 nativeEventFilter 转成信号。设置页
     // 改键只调 applySequence，这里只在启动时装一次初始值。
-    m_kanbanHotkey = new fbswin::GlobalHotkey(this);
-    connect(m_kanbanHotkey, &fbswin::GlobalHotkey::activated, this, [this] {
+    m_kanbanHotkey = new winhelper::GlobalHotkey(this);
+    connect(m_kanbanHotkey, &winhelper::GlobalHotkey::activated, this, [this] {
         if (m_kanban)
             m_kanban->toggleVisible();
     });
@@ -890,7 +890,7 @@ void MainWindow::setupKanbanAndTray()
         m_kanbanHotkeyEdit->setKeySequence(hotkeySeq);
     m_kanbanSyncing = false;
     if (!m_kanbanHotkey->applySequence(hotkeySeq)) {
-        videodiag::log(videodiag::Level::Warning,
+        applog::log(applog::Level::Warning,
                        QStringLiteral("全局快捷键 %1 注册失败(被占用或组合不合法)，已停用")
                            .arg(storedHotkey),
                        QStringLiteral("Kanban"));
@@ -1017,13 +1017,13 @@ void MainWindow::deleteKanbanModel(QListWidgetItem *item)
     // 模型文件夹 = .model3.json 所在目录，由它推出来，不另外存一份。
     const QString dirPath = QFileInfo(jsonPath).absolutePath();
 
-    // **不弹确认框，点菜单项即删**：前提是删除**走回收站**(见 fbswin::moveToRecycleBin)，
+    // **不弹确认框，点菜单项即删**：前提是删除**走回收站**(见 winhelper::moveToRecycleBin)，
     // 撤销路径在回收站里。代价是没有第二次机会，故无论成败都要写界面提示 + 落盘日志。
     QString error;
-    if (!fbswin::moveToRecycleBin(dirPath, &error)) {
+    if (!winhelper::moveToRecycleBin(dirPath, &error)) {
         // 失败到此为止，**绝不退化成永久删除**。措辞不能说「模型文件未被改动」：重试仍
         // 失败时最可能恰恰是「文件已全进回收站，只剩空目录删不掉」(见 shellfileops.cpp)。
-        videodiag::log(videodiag::Level::Warning,
+        applog::log(applog::Level::Warning,
                        QStringLiteral("删除模型「%1」失败: %2 (目录 %3)")
                            .arg(modelName, error, QDir::toNativeSeparators(dirPath)),
                        QStringLiteral("Kanban"));
@@ -1074,7 +1074,7 @@ void MainWindow::deleteKanbanModel(QListWidgetItem *item)
         log += QStringLiteral(" 放进新模型后点「↻ 刷新」即可。");
     setKanbanLog(log, left.isEmpty());
 
-    videodiag::log(videodiag::Level::Info,
+    applog::log(applog::Level::Info,
                    QStringLiteral("已删除模型「%1」: 目录 %2 已移入回收站，"
                                   "预览图缓存 %3，剩余可用模型 %4 个")
                        .arg(modelName, QDir::toNativeSeparators(dirPath),
@@ -1179,7 +1179,7 @@ void MainWindow::ensureKanbanModelThumbs(bool force)
         if (error != QProcess::FailedToStart)
             return;
         const QString reason = m_kanbanThumbJob ? m_kanbanThumbJob->errorString() : QString();
-        videodiag::log(videodiag::Level::Warning,
+        applog::log(applog::Level::Warning,
                        QStringLiteral("预览图生成进程启动失败: %1").arg(reason),
                        QStringLiteral("Kanban"));
         onKanbanThumbFinished(-1);
@@ -1464,14 +1464,14 @@ void MainWindow::updateKanbanControls()
 
     // 诊断探针：把「启动/取消」按钮的可用性与位置写进日志，让自动化验证能**不问像素**地
     // 拿到「此刻可不可点、在哪」。只在 YUMEIREN_DIAG=1 时落盘(Debug 级)。
-    if (videodiag::diagEnabled()) {
+    if (applog::diagEnabled()) {
         const QSize sz = m_kanbanStartBtn->size();
         // 相对整窗的坐标才是可点的：geometry() 给的是它在**直接父容器**里的位置(实测恒
         // 为 0,0)，mapTo(this) 逐级换算到主窗口客户区。
         const QPoint inWin = m_kanbanStartBtn->mapTo(this, QPoint(0, 0));
         const QPoint inWinCenter = m_kanbanStartBtn->mapTo(
             this, QPoint(sz.width() / 2, sz.height() / 2));
-        videodiag::log(videodiag::Level::Debug,
+        applog::log(applog::Level::Debug,
                        QStringLiteral("[KanbanPage] 启动按钮 enabled=%1 text=%2 "
                                       "尺寸=%3x%4 窗内=%5,%6 窗内中心=%7,%8 "
                                       "可见=%9 状态=%10")
@@ -1488,7 +1488,7 @@ void MainWindow::updateKanbanControls()
             const QSize psz = m_kanbanPauseBtn->size();
             const QPoint pc = m_kanbanPauseBtn->mapTo(
                 this, QPoint(psz.width() / 2, psz.height() / 2));
-            videodiag::log(videodiag::Level::Debug,
+            applog::log(applog::Level::Debug,
                            QStringLiteral("[KanbanPage] 暂停按钮 enabled=%1 text=%2 "
                                           "窗内中心=%3,%4 状态=%5")
                                .arg(m_kanbanPauseBtn->isEnabled() ? 1 : 0)
@@ -1527,7 +1527,7 @@ void MainWindow::updateKanbanControls()
                              .arg(rg.x()).arg(rg.y())
                              .arg(rsz.width()).arg(rsz.height());
             }
-            videodiag::log(videodiag::Level::Debug,
+            applog::log(applog::Level::Debug,
                            QStringLiteral("[KanbanPage] 视线档位=%1(%2) 选中数=%3 可见=%4 | %5")
                                .arg(kanban::KanbanRenderer::gazeStrengthName(
                                         m_kanban->gazeStrength()))
@@ -1546,7 +1546,7 @@ void MainWindow::updateKanbanControls()
                 m_kanbanMeshHideBox->mapTo(this, QPoint(msz.width() / 2, msz.height() / 2));
             const QPoint mg =
                 m_kanbanMeshHideBox->mapToGlobal(QPoint(msz.width() / 2, msz.height() / 2));
-            videodiag::log(videodiag::Level::Debug,
+            applog::log(applog::Level::Debug,
                            QStringLiteral("[KanbanPage] 网格隐藏 checked=%1 enabled=%2 "
                                           "摘要=%3 中心=%4,%5 屏幕=%6,%7 尺寸=%8x%9")
                                .arg(m_kanbanMeshHideBox->isChecked() ? 1 : 0)

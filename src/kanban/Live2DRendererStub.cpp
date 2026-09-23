@@ -144,7 +144,7 @@ void Live2DRenderer::shutdown()
     m_ready = false;
     m_modelLoaded = false;
     m_modelPath.clear();
-    videodiag::log(videodiag::Level::Debug,
+    applog::log(applog::Level::Debug,
                    QStringLiteral("[Live2D] 未接入：shutdown 为空操作"),
                    QStringLiteral("Live2D"));
 }

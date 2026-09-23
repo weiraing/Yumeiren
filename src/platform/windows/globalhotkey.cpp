@@ -7,7 +7,7 @@
 #include <windows.h>
 #endif
 
-namespace fbswin {
+namespace winhelper {
 
 namespace {
 
@@ -148,4 +148,4 @@ bool GlobalHotkey::nativeEventFilter(const QByteArray &eventType, void *message,
     return false;
 }
 
-} // namespace fbswin
+} // namespace winhelper

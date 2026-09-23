@@ -47,15 +47,15 @@ void cubismLogBridge(const char *message)
         return;
     }
     // SDK 仅提供文本回调，从前缀还原日志级别。
-    videodiag::Level level = videodiag::Level::Debug;
+    applog::Level level = applog::Level::Debug;
     if (text.contains(QStringLiteral("[error]"), Qt::CaseInsensitive)) {
-        level = videodiag::Level::Error;
+        level = applog::Level::Error;
     } else if (text.contains(QStringLiteral("[warning]"), Qt::CaseInsensitive)) {
-        level = videodiag::Level::Warning;
+        level = applog::Level::Warning;
     } else if (text.contains(QStringLiteral("[info]"), Qt::CaseInsensitive)) {
-        level = videodiag::Level::Info;
+        level = applog::Level::Info;
     }
-    videodiag::log(level, logLine(text), QLatin1String(kModule));
+    applog::log(level, logLine(text), QLatin1String(kModule));
 }
 
 class CubismAllocator final : public ICubismAllocator
@@ -144,17 +144,17 @@ void resetGlobalGlState()
 
 void logInfo(const QString &text)
 {
-    videodiag::log(videodiag::Level::Info, logLine(text), QLatin1String(kModule));
+    applog::log(applog::Level::Info, logLine(text), QLatin1String(kModule));
 }
 
 void logWarn(const QString &text)
 {
-    videodiag::log(videodiag::Level::Warning, logLine(text), QLatin1String(kModule));
+    applog::log(applog::Level::Warning, logLine(text), QLatin1String(kModule));
 }
 
 void logDebug(const QString &text)
 {
-    videodiag::log(videodiag::Level::Debug, logLine(text), QLatin1String(kModule));
+    applog::log(applog::Level::Debug, logLine(text), QLatin1String(kModule));
 }
 
 bool initializeFramework(QString *outError)

@@ -59,7 +59,7 @@ void Engine::ensureDataDirs()
     // 渲染背景图是可重新生成的缓存，落在 <程序目录>/.cache/rendered-bg。
     QString cacheError;
     if (!CachePaths::ensureDirectories(&cacheError))
-        videodiag::log(videodiag::Level::Error, cacheError, QStringLiteral("Cache"));
+        applog::log(applog::Level::Error, cacheError, QStringLiteral("Cache"));
     QDir().mkpath(dllRoot());
     QDir().mkpath(imageDllDir());
     QDir().mkpath(effectDllDir());

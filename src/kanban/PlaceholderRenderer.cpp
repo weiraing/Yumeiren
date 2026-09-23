@@ -66,7 +66,7 @@ bool PlaceholderRenderer::initialize(QString *outError)
     m_motionIndex = 0;     // 与表情同理：重启后从头开始，不接着上次的序号
     m_currentMotionOrdinal = 1;
     m_expressionIndex = 0; // 重新初始化 = 回到默认脸，免得「重启后还是上次那副表情」
-    videodiag::log(videodiag::Level::Info,
+    applog::log(applog::Level::Info,
                    QStringLiteral("占位渲染器初始化完成(QPainter 直绘，无位图搬运)"),
                    QStringLiteral("Live2D"));
     return true;
@@ -90,7 +90,7 @@ bool PlaceholderRenderer::loadModel(const QString &modelJsonPath, QString *outEr
     m_modelTextureFailedLimit = 0;
     m_modelDir = QFileInfo(modelJsonPath).absoluteDir().absolutePath();
     if (!decodeModelTexture(QDir(m_modelDir))) {
-        videodiag::log(videodiag::Level::Warning,
+        applog::log(applog::Level::Warning,
             QStringLiteral("[Kanban] 占位渲染器未找到纹理，使用默认花朵: %1").arg(modelJsonPath),
             QStringLiteral("Live2D"));
     }
@@ -129,7 +129,7 @@ bool PlaceholderRenderer::decodeModelTexture(const QDir &modelDir)
         m_modelTexturePath = path;
         m_modelSourceSize = sourceSize;
         m_modelTextureLimit = maxDim;
-        videodiag::log(videodiag::Level::Info,
+        applog::log(applog::Level::Info,
             QStringLiteral("[Kanban] 占位渲染器加载纹理: %1 (%2x%3, 上限 %4)")
                 .arg(path)
                 .arg(m_modelTexture.width())
@@ -164,12 +164,12 @@ bool PlaceholderRenderer::rebuildTexturesIfNeeded()
     // 候选纹理名相对**模型目录**，不是纹理文件自己所在的那层(textures/)。
     if (!decodeModelTexture(QDir(m_modelDir))) {
         m_modelTextureFailedLimit = target;
-        videodiag::log(videodiag::Level::Warning,
+        applog::log(applog::Level::Warning,
             QStringLiteral("[Kanban] 占位渲染器按新上限 %1 重建纹理失败，保持原图").arg(target),
             QStringLiteral("Live2D"));
         return false;
     }
-    videodiag::log(videodiag::Level::Info,
+    applog::log(applog::Level::Info,
         QStringLiteral("[Kanban] 占位渲染器绘制面变大到 %1x%2，纹理按新上限 %3 重建")
             .arg(qRound(m_width * m_dpr))
             .arg(qRound(m_height * m_dpr))
@@ -340,7 +340,7 @@ bool PlaceholderRenderer::playNextExpression()
     }
     // 顺序轮转而非随机：随机抽样会连着撞同一个，看起来像没生效。
     m_expressionIndex = (m_expressionIndex + 1) % kExpressionCount;
-    videodiag::log(videodiag::Level::Debug,
+    applog::log(applog::Level::Debug,
                    QStringLiteral("占位渲染器切表情：%1")
                        .arg(QString::fromLatin1(kExpressions[m_expressionIndex].name)),
                    QStringLiteral("Live2D"));

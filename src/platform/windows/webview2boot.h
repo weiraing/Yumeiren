@@ -19,7 +19,7 @@
 struct ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler;
 struct ICoreWebView2EnvironmentOptions;
 
-namespace fbswin {
+namespace winhelper {
 
 // 运行时是否可用；可用时 *version 带回浏览器版本号(可传 nullptr)。
 bool webview2Available(QString *version);
@@ -30,6 +30,6 @@ HRESULT webview2CreateEnvironment(const QString &userDataFolder,
                                   ICoreWebView2EnvironmentOptions *options,
                                   ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler *handler);
 
-} // namespace fbswin
+} // namespace winhelper
 
 #endif // WEBVIEW2BOOT_H

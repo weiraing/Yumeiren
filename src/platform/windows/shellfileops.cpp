@@ -51,7 +51,7 @@ bool directoryHasContent(const QString &dir)
 
 } // namespace
 
-namespace fbswin {
+namespace winhelper {
 
 bool moveToRecycleBin(const QString &absolutePath, QString *error)
 {
@@ -109,4 +109,4 @@ bool moveToRecycleBin(const QString &absolutePath, QString *error)
     return fail(describeShellError(rc));
 }
 
-} // namespace fbswin
+} // namespace winhelper

@@ -47,7 +47,7 @@ class QKeySequenceEdit;
 class QTreeWidget;
 class MediaLibraryCard;
 
-namespace fbswin {
+namespace winhelper {
 class GlobalHotkey;
 }
 
@@ -383,7 +383,7 @@ private:
     QCheckBox *m_trayMinimizeBox = nullptr;
     QCheckBox *m_kanbanAutostartBox = nullptr; // 与壁纸页 m_autostartBox 同一个注册表项
     QKeySequenceEdit *m_kanbanHotkeyEdit = nullptr;
-    fbswin::GlobalHotkey *m_kanbanHotkey = nullptr; // 显示/隐藏看板娘的全局快捷键
+    winhelper::GlobalHotkey *m_kanbanHotkey = nullptr; // 显示/隐藏看板娘的全局快捷键
     // 回填设置时挡住「控件变化 = 用户改动」，否则会把刚读的值再写回去。
     bool m_kanbanSyncing = false;
 };

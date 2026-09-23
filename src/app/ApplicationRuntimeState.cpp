@@ -18,7 +18,7 @@ void ApplicationRuntimeState::setWallpaperState(bool running, bool paused)
         return;
     m_wallpaperRunning = running;
     m_wallpaperPaused = paused;
-    videodiag::log(videodiag::Level::Debug,
+    applog::log(applog::Level::Debug,
                    QStringLiteral("运行状态: 动态壁纸 running=%1 paused=%2")
                        .arg(running)
                        .arg(paused),
@@ -32,7 +32,7 @@ void ApplicationRuntimeState::setKanbanState(bool running, bool paused)
         return;
     m_kanbanRunning = running;
     m_kanbanPaused = paused;
-    videodiag::log(videodiag::Level::Debug,
+    applog::log(applog::Level::Debug,
                    QStringLiteral("运行状态: 看板娘 running=%1 paused=%2")
                        .arg(running)
                        .arg(paused),
@@ -61,7 +61,7 @@ void ApplicationRuntimeState::setQuitting(bool quitting)
     if (m_quitting == quitting)
         return;
     m_quitting = quitting;
-    videodiag::log(videodiag::Level::Info,
+    applog::log(applog::Level::Info,
                    QStringLiteral("运行状态: 退出闸门 %1").arg(quitting ? QStringLiteral("已置位")
                                                                         : QStringLiteral("解除")),
                    QStringLiteral("RuntimeState"));

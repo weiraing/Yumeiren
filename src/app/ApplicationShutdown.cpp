@@ -49,12 +49,12 @@ void ApplicationShutdown::runSteps()
     for (auto it = m_steps.rbegin(); it != m_steps.rend(); ++it) {
         QElapsedTimer timer;
         timer.start();
-        videodiag::log(videodiag::Level::Debug,
+        applog::log(applog::Level::Debug,
                        QStringLiteral("退出清理: %1").arg(it->first),
                        QStringLiteral("Shutdown"));
         it->second();
         if (const qint64 cost = timer.elapsed(); cost >= 50)
-            videodiag::log(videodiag::Level::Info,
+            applog::log(applog::Level::Info,
                            QStringLiteral("退出清理 %1 耗时 %2ms").arg(it->first).arg(cost),
                            QStringLiteral("Shutdown"));
     }
@@ -65,7 +65,7 @@ void ApplicationShutdown::requestQuit(CloseReason reason)
     if (m_started) {
         // 递归闸门：quit() 引发的第二次关闭请求(以及注销/关机同时到达)在这里
         // 被吃掉，不再重复清理，也不改来路文本。
-        videodiag::log(videodiag::Level::Debug,
+        applog::log(applog::Level::Debug,
                        QStringLiteral("退出请求重复(来路=%1)，忽略")
                            .arg(reasonText(reason)),
                        QStringLiteral("Shutdown"));
@@ -76,14 +76,14 @@ void ApplicationShutdown::requestQuit(CloseReason reason)
     // 先落下退出标志：主窗口 closeEvent 里「隐藏而不退出」的判断依赖它。
     ApplicationRuntimeState::instance().setQuitting(true);
 
-    videodiag::log(videodiag::Level::Info,
+    applog::log(applog::Level::Info,
                    QStringLiteral("退出开始，来路: %1").arg(reasonText(reason)),
                    QStringLiteral("Shutdown"));
 
     runSteps();
 
     AppConfig::instance().save();
-    videodiag::log(videodiag::Level::Info, QStringLiteral("退出收口完成，结束事件循环"),
+    applog::log(applog::Level::Info, QStringLiteral("退出收口完成，结束事件循环"),
                    QStringLiteral("Shutdown"));
     QApplication::quit();
 }

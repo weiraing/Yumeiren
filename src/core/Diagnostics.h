@@ -1,11 +1,11 @@
-#ifndef VIDEODIAG_H
-#define VIDEODIAG_H
+#ifndef DIAGNOSTICS_H
+#define DIAGNOSTICS_H
 
 #include <QString>
 
 class QObject;
 
-// 视频壁纸诊断日志：统一入口、分级、文件滚动、可选资源采样。
+// 全应用统一诊断日志：单一入口、分级、文件滚动、可选资源采样。
 //
 //   - 默认 Error+Warning+Info 写文件；Debug 仅诊断模式输出(环境变量
 //     YUMEIREN_DIAG=1 或 HKCU video/diag=true)；
@@ -14,7 +14,7 @@ class QObject;
 //   - 每行 [HH:mm:ss.zzz][LEVEL][tid=NNNN][Module] message —— 线程 ID 与模块名
 //     用于把崩溃前的时序串到具体对象/线程上；
 //   - 媒体只记文件名；不输出完整路径，不记录用户数据。
-namespace videodiag {
+namespace applog {
 
 enum class Level { Error = 0, Warning = 1, Info = 2, Debug = 3 };
 
@@ -41,6 +41,6 @@ qint64 elapsedMs();
 void logObjectEvent(const char *action, const QObject *obj,
                     const QString &detail = QString());
 
-} // namespace videodiag
+} // namespace applog
 
-#endif // VIDEODIAG_H
+#endif // DIAGNOSTICS_H

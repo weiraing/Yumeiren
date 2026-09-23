@@ -66,10 +66,10 @@ void VideoWallpaper::shutdownNow()
     m_shutdownDone = true;
     m_shuttingDown = true; // 此后所有信号回调/延迟任务直接短路
     VW_ASSERT_GUI();
-    videodiag::log(videodiag::Level::Info,
+    applog::log(applog::Level::Info,
         QStringLiteral("退出清理开始: outputs=%1 session=%2 uptime=%3ms")
             .arg(m_outputs.size()).arg(m_playbackSessionId)
-            .arg(videodiag::elapsedMs()),
+            .arg(applog::elapsedMs()),
         QStringLiteral("Lifecycle"));
     stopHeartbeatTimers();
     // 一次性摘掉未触发的延迟任务，避免清理中再被回调拽回播放路径
@@ -81,14 +81,14 @@ void VideoWallpaper::shutdownNow()
         m_probePlayer->setVideoOutput(nullptr);
     }
     if (m_probeWidget)
-        fbswin::unmountWindow(m_probeWidget);
+        winhelper::unmountWindow(m_probeWidget);
     delete m_probeWidget;
     delete m_probePlayer;
     delete m_probeAudio;
     m_probeWidget = nullptr;
     m_probePlayer = nullptr;
     m_probeAudio = nullptr;
-    videodiag::log(videodiag::Level::Info,
+    applog::log(applog::Level::Info,
         QStringLiteral("退出清理完成: players=%1/%2 widgets=%3/%4 audios=%5/%6")
             .arg(m_playersCreated).arg(m_playersDestroyed)
             .arg(m_widgetsCreated).arg(m_widgetsDestroyed)
@@ -130,7 +130,7 @@ VideoWallpaper::VideoWallpaper(QObject *parent) : QObject(parent)
         auto *toggle = new QTimer(this);
         toggle->setInterval(pauseMs);
         connect(toggle, &QTimer::timeout, this, [this] {
-            videodiag::log(videodiag::Level::Info,
+            applog::log(applog::Level::Info,
                 QStringLiteral("自动切换暂停: 即将 manualPaused=%1 → %2")
                     .arg(isPlaying() ? 1 : 0).arg(isPlaying() ? 0 : 1));
             pauseResume();
@@ -145,23 +145,23 @@ VideoWallpaper::VideoWallpaper(QObject *parent) : QObject(parent)
     connect(qGuiApp, &QGuiApplication::screenAdded, this, &VideoWallpaper::scheduleRelayout);
     connect(qGuiApp, &QGuiApplication::screenRemoved, this, &VideoWallpaper::scheduleRelayout);
 
-    videodiag::startDiagSampling();
-    videodiag::log(videodiag::Level::Info,
+    applog::startDiagSampling();
+    applog::log(applog::Level::Info,
         QStringLiteral("VideoWallpaper 初始化完成 uptime=%1ms")
-            .arg(videodiag::elapsedMs()),
+            .arg(applog::elapsedMs()),
         QStringLiteral("Startup"));
-    videodiag::stage(QStringLiteral("视频壁纸单例初始化完成"));
+    applog::stage(QStringLiteral("视频壁纸单例初始化完成"));
 }
 void VideoWallpaper::ensureHeartbeatTimers()
 {
     if (!m_fullscreenTimer->isActive()) {
         m_fullscreenTimer->start();
-        videodiag::logObjectEvent("timer-start", m_fullscreenTimer,
+        applog::logObjectEvent("timer-start", m_fullscreenTimer,
                                   QStringLiteral("1000ms evaluateSuspend"));
     }
     if (!m_reclaimTimer->isActive()) {
         m_reclaimTimer->start();
-        videodiag::logObjectEvent("timer-start", m_reclaimTimer,
+        applog::logObjectEvent("timer-start", m_reclaimTimer,
                                   QStringLiteral("30000ms trimMemory"));
     }
 }
@@ -169,11 +169,11 @@ void VideoWallpaper::stopHeartbeatTimers()
 {
     if (m_fullscreenTimer && m_fullscreenTimer->isActive()) {
         m_fullscreenTimer->stop();
-        videodiag::logObjectEvent("timer-stop", m_fullscreenTimer);
+        applog::logObjectEvent("timer-stop", m_fullscreenTimer);
     }
     if (m_reclaimTimer && m_reclaimTimer->isActive()) {
         m_reclaimTimer->stop();
-        videodiag::logObjectEvent("timer-stop", m_reclaimTimer);
+        applog::logObjectEvent("timer-stop", m_reclaimTimer);
     }
 }
 bool VideoWallpaper::isLiveOutput(const VideoOutput &out) const
@@ -208,13 +208,13 @@ void VideoWallpaper::playIndex(int index, qint64 resumePos)
     m_playbackFinished = false;
     m_watchPosMs = -1;
     m_watchStalls = 0;
-    videodiag::log(videodiag::Level::Info,
+    applog::log(applog::Level::Info,
         QStringLiteral("session=%1 play index=%2/%3 file=%4 resumePos=%5")
             .arg(m_playbackSessionId).arg(m_index + 1).arg(m_playlist.size())
             .arg(QFileInfo(m_playlist[m_index]).fileName()).arg(resumePos));
     QString err;
     if (!ensureOutputs(&err)) {
-        videodiag::log(videodiag::Level::Warning,
+        applog::log(applog::Level::Warning,
             QStringLiteral("session=%1 获取桌面挂载点失败: %2")
                 .arg(m_playbackSessionId).arg(err));
         emit playbackStateChanged(err);
@@ -265,7 +265,7 @@ void VideoWallpaper::restartSingleLoop()
 {
     if (m_shuttingDown || !m_started || m_outputs.isEmpty())
         return;
-    videodiag::log(videodiag::Level::Debug,
+    applog::log(applog::Level::Debug,
         QStringLiteral("session=%1 单视频回绕 player=0x%2")
             .arg(m_playbackSessionId)
             .arg(quintptr(m_outputs.first().player), 0, 16));
@@ -344,7 +344,7 @@ void VideoWallpaper::finishPlaylist()
     m_playbackFinished = true; // 心跳不再自动重新点火
     m_watchPosMs = -1;
     m_watchStalls = 0;
-    videodiag::log(videodiag::Level::Info,
+    applog::log(applog::Level::Info,
         QStringLiteral("session=%1 列表播完收口 index=%2/%3 mode=%4")
             .arg(m_playbackSessionId).arg(m_index + 1).arg(m_playlist.size())
             .arg(m_mode));
@@ -383,7 +383,7 @@ void VideoWallpaper::handleUnplayable(const QString &reason)
     m_fileRetries = 0;
     const int fails = ++m_trackFails[m_index];
     m_deadTracks.insert(m_index);
-    videodiag::log(videodiag::Level::Warning,
+    applog::log(applog::Level::Warning,
         QStringLiteral("session=%1 曲目不可播 track=%2 fails=%3 dead=%4 reason=%5")
             .arg(m_playbackSessionId).arg(m_index + 1).arg(fails)
             .arg(m_deadTracks.size()).arg(reason));
@@ -476,7 +476,7 @@ void VideoWallpaper::stopAll()
     m_resumePosMs = -1;
     if (m_reclaimMemory)
         trimMemory(); // 停止后立即还给系统，不等下一个回收周期
-    videodiag::log(videodiag::Level::Info,
+    applog::log(applog::Level::Info,
         QStringLiteral("stopAll: 管线已卸载 session=%1").arg(m_playbackSessionId));
     // 退出清理中窗口正在销毁，不再广播状态变化
     if (!m_shuttingDown)
@@ -502,21 +502,21 @@ void VideoWallpaper::evaluateSuspend()
 
     int reasons = 0;
     // 判据与"谁在前台"无关：全屏应用前面压着小窗口时桌面依然不可见，只看前台会误判成已回桌面
-    if (m_pauseOnFullscreen && fbswin::isFullscreenWindowPresent())
+    if (m_pauseOnFullscreen && winhelper::isFullscreenWindowPresent())
         reasons |= SuspendFullscreen;
     // 遮挡判定只在主屏铺放时安全(多输出时曾实测每秒反复暂停/恢复)，多屏档位已删、
     // 现在恒为单输出主屏铺放，故无条件启用。
-    if (m_pauseOnFullscreen && fbswin::isDesktopCoveredByWindow())
+    if (m_pauseOnFullscreen && winhelper::isDesktopCoveredByWindow())
         reasons |= SuspendCovered;
-    if (fbswin::isWorkstationLocked())
+    if (winhelper::isWorkstationLocked())
         reasons |= SuspendLocked;
     if (!m_monitorOn)
         reasons |= SuspendMonitorOff;
-    if (m_pauseOnBattery && fbswin::isOnBattery())
+    if (m_pauseOnBattery && winhelper::isOnBattery())
         reasons |= SuspendBattery;
     m_suspendReasons = reasons;
     // 挂载健康检查复用同一条 1s 心跳：Progman 兜底在部分 Win11 不被 DWM 合成，故兜底状态由 scheduleMountFix 持续重查
-    if (mountIsStale() || !fbswin::hasRealWorker())
+    if (mountIsStale() || !winhelper::hasRealWorker())
         scheduleMountFix();
 
     const bool shouldPlay = !m_manualPaused && reasons == 0;
@@ -536,7 +536,7 @@ void VideoWallpaper::evaluateSuspend()
 
     // 只有"被挂起/被手动暂停后才解除"才需要心跳捞回来：列表正常播完(不循环)时播放器停在末尾，照抄恢复逻辑会每秒看到 !isPlaying，几秒后把整个列表从头重新点火
     if (shouldPlay && !wasPlaying && !m_playbackFinished) {
-        videodiag::log(videodiag::Level::Info,
+        applog::log(applog::Level::Info,
             QStringLiteral("恢复播放: reasons=0 manualPaused=%1").arg(m_manualPaused));
         // 无缝循环兜底：后端没遵守 setLoops 时会停在末尾，先回绕再播
         const bool rewindTail = isSeamlessLoop();
@@ -564,7 +564,7 @@ void VideoWallpaper::evaluateSuspend()
             m_watchPosMs = pos;
             m_watchStalls = 0;
         } else if (++m_watchStalls >= 3) {
-            videodiag::log(videodiag::Level::Warning,
+            applog::log(applog::Level::Warning,
                 QStringLiteral("session=%1 单视频循环停滞在 %2ms，看门狗回绕")
                     .arg(m_playbackSessionId).arg(pos));
             restartSingleLoop();
@@ -604,7 +604,7 @@ void VideoWallpaper::evaluateSuspend()
                 emit playbackStateChanged(QStringLiteral("显示器已关闭，已自动暂停"));
             else if (reasons & SuspendBattery)
                 emit playbackStateChanged(QStringLiteral("电池模式，已自动暂停"));
-            videodiag::log(videodiag::Level::Info,
+            applog::log(applog::Level::Info,
                 QStringLiteral("自动挂起: reasons=0x%1").arg(reasons, 0, 16));
         }
     }
@@ -613,7 +613,7 @@ void VideoWallpaper::evaluateSuspend()
     // 循环边界取证：复用同一条 1s 心跳记录进度与对象地址，不新增定时器
     if (!m_outputs.isEmpty() && isLiveOutput(m_outputs.first())) {
         const VideoOutput &out = m_outputs.first();
-        videodiag::log(videodiag::Level::Debug,
+        applog::log(applog::Level::Debug,
             QStringLiteral("snapshot session=%1 media=%2 state=%3 pos=%4/%5 "
                            "player=0x%6 widget=0x%7 hwnd=0x%8 finished=%9")
                 .arg(m_playbackSessionId).arg(int(out.player->mediaStatus()))
@@ -627,7 +627,7 @@ void VideoWallpaper::evaluateSuspend()
 }
 void VideoWallpaper::trimMemory()
 {
-    fbswin::trimProcessMemory();
+    winhelper::trimProcessMemory();
 }
 void VideoWallpaper::emitTrackState()
 {
@@ -666,7 +666,7 @@ void VideoWallpaper::longSuspendRelease()
         }
     }
     m_resumePosMs = pos;
-    videodiag::log(videodiag::Level::Info,
+    applog::log(applog::Level::Info,
         QStringLiteral("长挂起释放管线: resumePos=%1 reasons=0x%2 阈值=%3ms")
             .arg(pos).arg(m_suspendReasons, 0, 16)
             .arg(suspendReleaseThresholdMs(m_suspendReasons)));

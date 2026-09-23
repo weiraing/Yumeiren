@@ -168,7 +168,7 @@ int KanbanModelManager::rescan()
     if (modelDir.exists()) {
         collectModelJsons(modelDir, 1, &files);
     } else {
-        videodiag::log(videodiag::Level::Info,
+        applog::log(applog::Level::Info,
                        QStringLiteral("模型目录不存在，跳过: %1").arg(root),
                        QStringLiteral("KanbanModel"));
     }
@@ -189,7 +189,7 @@ int KanbanModelManager::rescan()
         info.id = info.name;
         info.thumbKey = thumbKeyFor(info.rootDir, root);
         if (!info.valid) {
-            videodiag::log(videodiag::Level::Warning,
+            applog::log(applog::Level::Warning,
                            QStringLiteral("模型不可用: %1 -> %2")
                                .arg(info.name, info.problems.join(QStringLiteral("; "))),
                            QStringLiteral("KanbanModel"));
@@ -199,7 +199,7 @@ int KanbanModelManager::rescan()
         m_models.append(info);
     }
 
-    videodiag::log(videodiag::Level::Info,
+    applog::log(applog::Level::Info,
                    QStringLiteral("模型扫描完成: 共 %1 个，可用 %2 个(扫描目录 %3)")
                        .arg(m_models.size())
                        .arg(validCount)

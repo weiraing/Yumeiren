@@ -88,7 +88,7 @@ int KanbanController::measuredFps() const
 int KanbanController::refreshModels()
 {
     const int n = m_models.rescan();
-    videodiag::log(n > 0 ? videodiag::Level::Info : videodiag::Level::Warning,
+    applog::log(n > 0 ? applog::Level::Info : applog::Level::Warning,
                    QStringLiteral("[Kanban] 可用模型 %1 个(目录 %2)")
                        .arg(n).arg(KanbanModelManager::defaultModelsRoot()),
                    QLatin1String(kModule));
@@ -100,7 +100,7 @@ bool KanbanController::pickRenderer()
 {
     // Live2D 不可用即换占位：两条路径对上层同形，调用方无需分支。
     if (!Live2DRenderer::sdkCompiledIn()) {
-        videodiag::log(videodiag::Level::Info,
+        applog::log(applog::Level::Info,
                        QStringLiteral("[Kanban] %1，改用内置占位动画")
                            .arg(Live2DRenderer::unavailableReason()),
                        QLatin1String(kModule));
@@ -223,7 +223,7 @@ bool KanbanController::start()
         // GL 资源必须在持有上下文的线程创建：先 show 触发 initializeGL，真正的
         // initialize/loadModel 在 onGlContextReady 里做。
         m_waitingGl = true;
-        videodiag::log(videodiag::Level::Info,
+        applog::log(applog::Level::Info,
                        QStringLiteral("[Kanban] 等待 GL 上下文就绪(后端 %1)").arg(m_backendName),
                        QLatin1String(kModule));
         m_window->show();
@@ -234,7 +234,7 @@ bool KanbanController::start()
                 return;
             }
             m_waitingGl = false;
-            videodiag::log(videodiag::Level::Warning,
+            applog::log(applog::Level::Warning,
                            QStringLiteral("[Kanban] 等待 GL 上下文超时(%1ms)，降级为内置占位动画")
                                .arg(kGlReadyTimeoutMs),
                            QLatin1String(kModule));
@@ -254,7 +254,7 @@ bool KanbanController::start()
 
 void KanbanController::onGlContextReady()
 {
-    videodiag::log(videodiag::Level::Debug,
+    applog::log(applog::Level::Debug,
                    QStringLiteral("[Kanban] 收到 GL 上下文就绪信号(waitingGl=%1)").arg(m_waitingGl),
                    QLatin1String(kModule));
     if (!m_waitingGl) {
@@ -287,7 +287,7 @@ bool KanbanController::initializeAndLoad()
     QString err;
     if (!m_renderer->initialize(&err)) {
         m_lastError = err;
-        videodiag::log(videodiag::Level::Warning,
+        applog::log(applog::Level::Warning,
                        QStringLiteral("[Kanban] 渲染后端 %1 初始化失败：%2")
                            .arg(m_backendName, err),
                        QLatin1String(kModule));
@@ -311,13 +311,13 @@ bool KanbanController::initializeAndLoad()
             emit currentModelChanged(m_currentModelName);
         } else {
             m_currentModelName.clear();
-            videodiag::log(videodiag::Level::Warning,
+            applog::log(applog::Level::Warning,
                            QStringLiteral("[Kanban] 模型装载失败：%1").arg(loadErr),
                            QLatin1String(kModule));
         }
     } else {
         m_currentModelName.clear();
-        videodiag::log(videodiag::Level::Info,
+        applog::log(applog::Level::Info,
                        QStringLiteral("[Kanban] 未发现可用模型，使用内置占位形象"),
                        QLatin1String(kModule));
     }
@@ -361,7 +361,7 @@ bool KanbanController::activateKanban()
     m_fakeSuspendClock.invalidate();
     m_suspendTimer->start();
     publishState();
-    videodiag::log(videodiag::Level::Info,
+    applog::log(applog::Level::Info,
                    QStringLiteral("[Kanban] 已启动：后端=%1 模型=%2 目标帧率=%3")
                        .arg(m_backendName,
                             m_currentModelName.isEmpty() ? QStringLiteral("无") : m_currentModelName)
@@ -400,7 +400,7 @@ void KanbanController::enterError(const QString &reason)
     // Error 不是「在跑」：后台任务位必须清掉，否则进程会被一个失败的功能吊着。
     ApplicationRuntimeState::instance().setKanbanState(false, false);
     AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::Enabled), false);
-    videodiag::log(videodiag::Level::Error,
+    applog::log(applog::Level::Error,
                    QStringLiteral("[Kanban] 启动失败：%1").arg(reason),
                    QLatin1String(kModule));
     publishState();
@@ -420,7 +420,7 @@ void KanbanController::pauseResume()
         if (m_suspendReasons == 0) {
             m_clock->start();
         }
-        videodiag::log(videodiag::Level::Info, QStringLiteral("[Kanban] 恢复动画"),
+        applog::log(applog::Level::Info, QStringLiteral("[Kanban] 恢复动画"),
                        QLatin1String(kModule));
     } else if (m_machine.isRunning() && !m_machine.is(State::Starting)) {
         if (!m_machine.transition(State::Paused, "pause")) {
@@ -430,7 +430,7 @@ void KanbanController::pauseResume()
         if (m_renderer) {
             m_renderer->pause();
         }
-        videodiag::log(videodiag::Level::Info, QStringLiteral("[Kanban] 暂停动画(不销毁资源)"),
+        applog::log(applog::Level::Info, QStringLiteral("[Kanban] 暂停动画(不销毁资源)"),
                        QLatin1String(kModule));
     } else {
         return;
@@ -472,7 +472,7 @@ void KanbanController::stop()
     m_machine.transition(State::Stopped, "stop");
     m_backendName.clear();
     m_currentModelName.clear();
-    videodiag::log(videodiag::Level::Info, QStringLiteral("[Kanban] 已停止并释放资源"),
+    applog::log(applog::Level::Info, QStringLiteral("[Kanban] 已停止并释放资源"),
                    QLatin1String(kModule));
     AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::Enabled), false);
     publishState();
@@ -508,7 +508,7 @@ void KanbanController::showWindow()
     }
     if (m_window->isVisible()) {
         const QRect g = m_window->geometry();
-        videodiag::log(videodiag::Level::Debug,
+        applog::log(applog::Level::Debug,
                        QStringLiteral("[Kanban] 窗口已显示 %1x%2 @(%3,%4)")
                            .arg(g.width())
                            .arg(g.height())
@@ -533,7 +533,7 @@ void KanbanController::toggleVisible()
         // 模型与窗口都保留，回来不用重装载。
         m_clock->stop();
         m_window->hide();
-        videodiag::log(videodiag::Level::Info,
+        applog::log(applog::Level::Info,
                        QStringLiteral("[Kanban] 快捷键隐藏：帧时钟已停"),
                        QLatin1String(kModule));
     } else {
@@ -542,7 +542,7 @@ void KanbanController::toggleVisible()
         if (!m_machine.isPaused() && m_suspendReasons == 0) {
             m_clock->start();
         }
-        videodiag::log(videodiag::Level::Info,
+        applog::log(applog::Level::Info,
                        QStringLiteral("[Kanban] 快捷键显示：帧时钟已恢复"),
                        QLatin1String(kModule));
     }
@@ -626,7 +626,7 @@ void KanbanController::evaluateSuspend()
     }
 
     int reasons = 0;
-    if (fbswin::isWorkstationLocked()) {
+    if (winhelper::isWorkstationLocked()) {
         reasons |= SuspendLocked;
     }
     if (!m_monitorOn) {
@@ -640,7 +640,7 @@ void KanbanController::evaluateSuspend()
         if (!wasSuspended) {
             m_clock->stop(); // 停帧：GL 侧不再产生任何 update，GPU 立刻归零
             m_suspendClock->restart();
-            videodiag::log(videodiag::Level::Info,
+            applog::log(applog::Level::Info,
                            QStringLiteral("[Kanban] 挂起(原因 0x%1)：帧时钟已停")
                                .arg(reasons, 0, 16),
                            QLatin1String(kModule));
@@ -664,7 +664,7 @@ void KanbanController::evaluateSuspend()
     if (!m_machine.isPaused() && isVisible()) {
         m_clock->start();
     }
-    videodiag::log(videodiag::Level::Info, QStringLiteral("[Kanban] 挂起解除，恢复绘制"),
+    applog::log(applog::Level::Info, QStringLiteral("[Kanban] 挂起解除，恢复绘制"),
                    QLatin1String(kModule));
 }
 
@@ -676,13 +676,13 @@ void KanbanController::releaseForSuspend()
     // 只拆模型与纹理，不拆渲染器与窗口：前者才是几百 MB 的那一笔。
     m_renderer->unloadModel();
     m_releasedForSuspend = true;
-    videodiag::log(videodiag::Level::Info,
+    applog::log(applog::Level::Info,
                    QStringLiteral("[Kanban] 持续挂起 %1ms(原因 0x%2)，已释放模型与纹理，"
                                   "回到桌面自动装载")
                        .arg(m_suspendClock->elapsed())
                        .arg(m_suspendReasons, 0, 16),
                    QLatin1String(kModule));
-    fbswin::trimProcessMemory(); // 立刻把腾出来的页还给系统，而不是等它慢慢换出
+    winhelper::trimProcessMemory(); // 立刻把腾出来的页还给系统，而不是等它慢慢换出
 }
 
 void KanbanController::restoreFromSuspend()

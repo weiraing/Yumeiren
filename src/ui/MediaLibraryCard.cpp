@@ -1,4 +1,4 @@
-#include "ui/LibraryCard.h"
+#include "ui/MediaLibraryCard.h"
 
 #include "ui/TooltipStyle.h"
 

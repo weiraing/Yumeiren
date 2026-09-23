@@ -77,7 +77,7 @@ void VideoWallpaper::layoutOutputs()
     if (m_shuttingDown)
         return;
     teardownOutputs();
-    if (!fbswin::ensureWorker())
+    if (!winhelper::ensureWorker())
         return;
 
     const QList<QScreen *> screens = QGuiApplication::screens();
@@ -98,7 +98,7 @@ void VideoWallpaper::layoutOutputs()
         ++m_playersCreated;
         ++m_widgetsCreated;
         ++m_audiosCreated;
-        videodiag::log(videodiag::Level::Debug,
+        applog::log(applog::Level::Debug,
             QStringLiteral("创建输出: players=%1/%2 widgets=%3/%4 audios=%5/%6")
                 .arg(m_playersCreated).arg(m_playersDestroyed)
                 .arg(m_widgetsCreated).arg(m_widgetsDestroyed)
@@ -110,12 +110,12 @@ void VideoWallpaper::layoutOutputs()
                 [this, player = out.player](const QVideoFrame &frame) {
             forwardFrame(frame, player);
         });
-        videodiag::logObjectEvent("create", out.player,
+        applog::logObjectEvent("create", out.player,
             QStringLiteral("player widget=%1 audio=%2 sink=%3")
                 .arg(quintptr(out.widget), 0, 16)
                 .arg(quintptr(out.audio), 0, 16)
                 .arg(quintptr(out.tap), 0, 16));
-        videodiag::logObjectEvent("bind", out.widget, QStringLiteral("player=0x%1")
+        applog::logObjectEvent("bind", out.widget, QStringLiteral("player=0x%1")
             .arg(quintptr(out.player), 0, 16));
 
         // 纯音频素材对壁纸无意义：LoadedMedia 时立即 stop(否则音频继续播并重置失败计数)，再跳过
@@ -123,7 +123,7 @@ void VideoWallpaper::layoutOutputs()
                 [this, out](QMediaPlayer::MediaStatus st) {
             if (!isLiveOutput(out))
                 return; // 输出已卸载/正在退出
-            videodiag::log(videodiag::Level::Debug,
+            applog::log(applog::Level::Debug,
                 QStringLiteral("session=%1 mediaStatus=%2 playState=%3 pos=%4/%5 "
                                "file=%6 player=0x%7 widget=0x%8")
                     .arg(m_playbackSessionId).arg(int(st))
@@ -185,7 +185,7 @@ void VideoWallpaper::layoutOutputs()
                 [this, out, carriesAudio = withAudio] {
             if (!isLiveOutput(out))
                 return;
-            videodiag::log(videodiag::Level::Debug,
+            applog::log(applog::Level::Debug,
                 QStringLiteral("session=%1 metaDataChanged file=%2")
                     .arg(m_playbackSessionId)
                     .arg(QFileInfo(out.player->source().toLocalFile()).fileName()));
@@ -210,7 +210,7 @@ void VideoWallpaper::layoutOutputs()
                 m_autoFps = autoFps;
                 resetFramePacing();
                 applyPlaybackRate(out.player);
-                videodiag::log(videodiag::Level::Info,
+                applog::log(applog::Level::Info,
                     QStringLiteral("自动限帧: %1x%2 对屏幕 %3x%4 → 上限=%5")
                         .arg(res.width()).arg(res.height())
                         .arg(screen.width()).arg(screen.height())
@@ -237,7 +237,7 @@ void VideoWallpaper::layoutOutputs()
                 || !isPrimaryOutput(out))
                 return;
             const QString reason = mediaErrorText(err, msg);
-            videodiag::log(videodiag::Level::Warning,
+            applog::log(applog::Level::Warning,
                 QStringLiteral("session=%1 媒体错误 file=%2 reason=%3 detail=%4")
                     .arg(m_playbackSessionId)
                     .arg(m_index >= 0 && m_index < m_playlist.size()
@@ -267,7 +267,7 @@ void VideoWallpaper::layoutOutputs()
 
         out.widget->setGeometry(g);
         out.widget->show();
-        fbswin::mountBehindIcons(out.widget, g);
+        winhelper::mountBehindIcons(out.widget, g);
         m_outputs.append(out);
     };
 
@@ -329,7 +329,7 @@ void VideoWallpaper::remountOutputs()
         VideoOutput &out = m_outputs[i];
         // 桌面宿主被销毁会连带干掉挂在下面的原生窗口，而 Qt 不知道(winId() 已陈旧)。必须换全新 QVideoWidget：其呈现面(D3D 交换链)随旧窗口一起失效，只重建原生窗口播放器仍向旧表面送帧。
         if (!IsWindow(reinterpret_cast<HWND>(out.widget->winId()))) {
-            videodiag::log(videodiag::Level::Info,
+            applog::log(applog::Level::Info,
                 QStringLiteral("壁纸窗口原生句柄已失效(explorer 重启)，更换视频窗口(限帧中转保持不变)"));
             QVideoWidget *old = out.widget;
             QVideoWidget *nw = new QVideoWidget;
@@ -344,9 +344,9 @@ void VideoWallpaper::remountOutputs()
         const QRect phys(int(out.logicalRect.x() * dpr), int(out.logicalRect.y() * dpr),
                          int(out.logicalRect.width() * dpr),
                          int(out.logicalRect.height() * dpr));
-        if (fbswin::isWindowMounted(out.widget, phys))
+        if (winhelper::isWindowMounted(out.widget, phys))
             continue;
-        fbswin::mountBehindIcons(out.widget, out.logicalRect);
+        winhelper::mountBehindIcons(out.widget, out.logicalRect);
     }
 }
 bool VideoWallpaper::mountIsStale() const
@@ -361,7 +361,7 @@ bool VideoWallpaper::mountIsStale() const
     const QRect phys(int(out.logicalRect.x() * dpr), int(out.logicalRect.y() * dpr),
                      int(out.logicalRect.width() * dpr),
                      int(out.logicalRect.height() * dpr));
-    return !fbswin::isWindowMounted(w, phys);
+    return !winhelper::isWindowMounted(w, phys);
 }
 void VideoWallpaper::scheduleMountFix()
 {
@@ -370,7 +370,7 @@ void VideoWallpaper::scheduleMountFix()
     if (m_mountFixClock->isValid() && m_mountFixClock->elapsed() < 10000)
         return;
     // 探测失败(explorer 重启中，Progman 尚未出现)时不重置节流，下个心跳(1s)立即重试，把重启后的黑屏时间从最长 10s 压到 ~2s
-    if (!fbswin::ensureWorker())
+    if (!winhelper::ensureWorker())
         return;
     m_mountFixClock->restart();
     remountOutputs();
@@ -408,7 +408,7 @@ void VideoWallpaper::teardownOutputs()
             out.player->stop();
         }
         if (out.widget) {
-            fbswin::unmountWindow(out.widget);
+            winhelper::unmountWindow(out.widget);
             out.widget->hide();
             out.widget->deleteLater();
             ++m_widgetsDestroyed;
@@ -426,7 +426,7 @@ void VideoWallpaper::teardownOutputs()
             QCoreApplication::sendPostedEvents(out.widget, QEvent::DeferredDelete);
         }
     }
-    videodiag::log(videodiag::Level::Info,
+    applog::log(applog::Level::Info,
         QStringLiteral("管线卸载 n=%1%2 累计 players=%3/%4 widgets=%5/%6 audios=%7/%8")
             .arg(torn)
             .arg(flushNow ? QStringLiteral("(退出模式·就地销毁)") : QString())
@@ -479,7 +479,7 @@ void VideoWallpaper::runProbeStage(const QString &stage)
         const QRect g = QGuiApplication::primaryScreen()->geometry();
         m_probeWidget->setGeometry(g);
         m_probeWidget->show();
-        fbswin::mountBehindIcons(m_probeWidget, g);
+        winhelper::mountBehindIcons(m_probeWidget, g);
     }
     m_probePlayer->setSource(url);
     if (stage == QLatin1String("D"))

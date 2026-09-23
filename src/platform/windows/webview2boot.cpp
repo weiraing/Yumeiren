@@ -10,7 +10,7 @@
 #include <objidl.h>
 #include "WebView2.h"
 
-namespace fbswin {
+namespace winhelper {
 
 namespace {
 
@@ -91,11 +91,11 @@ HRESULT webview2CreateEnvironment(const QString &userDataFolder,
     return fn(nullptr, path.c_str(), options, handler);
 }
 
-} // namespace fbswin
+} // namespace winhelper
 
 #else // !Q_OS_WIN
 
-namespace fbswin {
+namespace winhelper {
 bool webview2Available(QString *version)
 {
     if (version)
@@ -108,6 +108,6 @@ HRESULT webview2CreateEnvironment(const QString &,
 {
     return E_NOTIMPL;
 }
-} // namespace fbswin
+} // namespace winhelper
 
 #endif

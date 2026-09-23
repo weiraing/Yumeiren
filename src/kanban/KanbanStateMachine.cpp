@@ -56,7 +56,7 @@ bool KanbanStateMachine::transition(State to, const char *caller)
 {
     const State from = m_state;
     if (!allowed(from, to)) {
-        videodiag::log(videodiag::Level::Warning,
+        applog::log(applog::Level::Warning,
                        QStringLiteral("[Kanban] 拒绝非法状态转移 %1 -> %2 (caller=%3)")
                            .arg(kanban::stateText(from), kanban::stateText(to),
                                 QString::fromUtf8(caller ? caller : "?")),
@@ -65,7 +65,7 @@ bool KanbanStateMachine::transition(State to, const char *caller)
     }
 
     m_state = to;
-    videodiag::log(videodiag::Level::Debug,
+    applog::log(applog::Level::Debug,
                    QStringLiteral("[Kanban] 状态 %1 -> %2 (caller=%3)")
                        .arg(kanban::stateText(from), kanban::stateText(to),
                             QString::fromUtf8(caller ? caller : "?")),

@@ -79,7 +79,7 @@ void VideoWallpaper::applyPlaybackRate(QMediaPlayer *player)
         if (src > fps + 0.5)
             rate = fps / src;
     }
-    videodiag::log(videodiag::Level::Debug,
+    applog::log(applog::Level::Debug,
         QStringLiteral("setPlaybackRate(%1) keepSpeed=%2 fps=%3")
             .arg(rate).arg(m_keepSpeed ? 1 : 0).arg(fps));
     player->setPlaybackRate(rate);
@@ -110,7 +110,7 @@ void VideoWallpaper::applyLoopPolicy(QMediaPlayer *player)
         return;
     const bool seamlessLoop = isSeamlessLoop();
     player->setLoops(seamlessLoop ? QMediaPlayer::Infinite : QMediaPlayer::Once);
-    videodiag::log(videodiag::Level::Debug,
+    applog::log(applog::Level::Debug,
         QStringLiteral("setLoops(%1) player=%2 widget=%3 source=%4")
             .arg(seamlessLoop ? QStringLiteral("Infinite") : QStringLiteral("Once"))
             .arg(quintptr(player), 0, 16)

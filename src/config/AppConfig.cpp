@@ -189,7 +189,7 @@ bool AppConfig::load()
     // 读取诊断: 文件是否存在/大小/键数(排查"读不到配置"类问题)
     {
         QFileInfo fi(configFilePath());
-        videodiag::log(videodiag::Level::Info,
+        applog::log(applog::Level::Info,
             QStringLiteral("配置读取: path=%1 exists=%2 size=%3 keys=%4 wasPlaying=%5")
                 .arg(fi.absoluteFilePath()).arg(fi.exists())
                 .arg(fi.size()).arg(m_settings->allKeys().size())
@@ -199,7 +199,7 @@ bool AppConfig::load()
 
     const QString dir = configDirectory();
     if (!QDir().mkpath(dir)) {
-        videodiag::log(videodiag::Level::Error,
+        applog::log(applog::Level::Error,
             QStringLiteral("配置目录创建失败: %1 (将以默认配置运行)").arg(dir),
             QStringLiteral("Config"));
     }
@@ -209,7 +209,7 @@ bool AppConfig::load()
         m_settings->setValue(ConfigKeys::Meta::ConfigVersion, kCurrentConfigVersion);
 
     save();
-    videodiag::log(videodiag::Level::Info,
+    applog::log(applog::Level::Info,
         QStringLiteral("配置已加载: %1").arg(configFilePath()),
         QStringLiteral("Config"));
     return true;
@@ -316,7 +316,7 @@ void AppConfig::ensureDefaultsAndFix()
     }
 
     if (missing + fixed > 0)
-        videodiag::log(videodiag::Level::Info,
+        applog::log(applog::Level::Info,
             QStringLiteral("配置校验: 补齐缺失 %1 项, 修复非法 %2 项").arg(missing).arg(fixed),
             QStringLiteral("Config"));
 }
@@ -325,7 +325,7 @@ bool AppConfig::save()
 {
     m_settings->sync();
     if (m_settings->status() != QSettings::NoError) {
-        videodiag::log(videodiag::Level::Error,
+        applog::log(applog::Level::Error,
             QStringLiteral("配置保存失败: %1 status=%2")
                 .arg(configFilePath()).arg(int(m_settings->status())),
             QStringLiteral("Config"));

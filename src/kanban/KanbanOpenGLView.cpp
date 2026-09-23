@@ -58,7 +58,7 @@ void KanbanOpenGLView::initializeGL()
     // 先领新世代号再发 contextReady：控制器在 contextReady 里装载模型，会碰那份进程级
     // 着色器缓存，它必须已经能看到新世代号，否则会把上个上下文的死 id 当成自己的。
     m_contextGeneration = nextGlContextGeneration();
-    videodiag::log(videodiag::Level::Info,
+    applog::log(applog::Level::Info,
                    QStringLiteral("[KanbanGL] initializeGL 上下文就绪：%1 / %2 / 绘制面 %3x%4")
                        .arg(QString::fromLatin1(reinterpret_cast<const char *>(
                                 glGetString(GL_VERSION))),
@@ -123,7 +123,7 @@ void KanbanOpenGLView::paintGL()
     if (firstPaint) {
         m_firstPaintDone = true;
         // 「initializeGL 触发了」不等于「画面出来了」，中间还隔着一次 paintGL。
-        videodiag::log(videodiag::Level::Info,
+        applog::log(applog::Level::Info,
                        QStringLiteral("[KanbanGL] 首帧 paintGL(绘制面 %1x%2)")
                            .arg(glPixelSize().width())
                            .arg(glPixelSize().height()),
@@ -133,7 +133,7 @@ void KanbanOpenGLView::paintGL()
         m_renderer->render();
     }
     if (firstPaint) {
-        videodiag::log(videodiag::Level::Debug, QStringLiteral("[KanbanGL] 首帧 paintGL 返回"),
+        applog::log(applog::Level::Debug, QStringLiteral("[KanbanGL] 首帧 paintGL 返回"),
                        QStringLiteral("KanbanGL"));
     }
 }

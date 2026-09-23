@@ -9,7 +9,7 @@ class QWidget;
 class QRect;
 class QScreen;
 
-namespace fbswin {
+namespace winhelper {
 
 // 定位(必要时经 Progman 0x052C 唤起)图标层之后的 WorkerW；explorer 不在时返回 false
 bool ensureWorker();
@@ -46,6 +46,6 @@ unsigned int showMainWindowMessage();
 
 void trimProcessMemory();
 
-} // namespace fbswin
+} // namespace winhelper
 
 #endif // DESKTOPMOUNT_H

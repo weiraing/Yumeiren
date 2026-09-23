@@ -11,7 +11,7 @@
 #include <tlhelp32.h>
 
 // 渲染顺序：图标层 -> 壁纸 WorkerW -> 纯色背景。向 Progman 发 0x052C 会让 shell 额外生成一个位于图标层之后的 WorkerW，挂到它下面即插在图标与纯色之间
-namespace fbswin {
+namespace winhelper {
 
 namespace {
 
@@ -425,4 +425,4 @@ void trimProcessMemory()
     SetProcessWorkingSetSize(GetCurrentProcess(), SIZE_T(-1), SIZE_T(-1));
 }
 
-} // namespace fbswin
+} // namespace winhelper

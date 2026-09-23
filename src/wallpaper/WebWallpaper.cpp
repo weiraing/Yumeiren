@@ -441,7 +441,7 @@ WebWallpaper::WebWallpaper(QObject *parent)
             return;
         m_creating = false;
         setState(QStringLiteral("网页壁纸启动超时(浏览器内核未响应)"));
-        videodiag::log(videodiag::Level::Warning,
+        applog::log(applog::Level::Warning,
                        QStringLiteral("WebView2 创建超时，已放弃本次启动"),
                        QStringLiteral("WebWallpaper"));
         // 与其他失败路径对称地整场复位：只拆管线不清 m_running 的话，界面会一直
@@ -469,7 +469,7 @@ WebWallpaper::~WebWallpaper()
 
 bool WebWallpaper::runtimeAvailable(QString *version)
 {
-    return fbswin::webview2Available(version);
+    return winhelper::webview2Available(version);
 }
 
 bool WebWallpaper::wasRunningLastTime() const
@@ -632,10 +632,10 @@ bool WebWallpaper::start(QString *error, const QString &source)
         return false;
     }
     QString version;
-    if (!fbswin::webview2Available(&version)) {
+    if (!winhelper::webview2Available(&version)) {
         if (error)
             *error = QStringLiteral("WebView2 运行时不可用：") + version;
-        videodiag::log(videodiag::Level::Warning,
+        applog::log(applog::Level::Warning,
                        QStringLiteral("网页壁纸启动失败：") + version,
                        QStringLiteral("WebWallpaper"));
         return false;
@@ -691,7 +691,7 @@ bool WebWallpaper::start(QString *error, const QString &source)
     m_host->setGeometry(QGuiApplication::primaryScreen()->geometry());
     // 先拿到桌面挂载点再挂载：g_workerW 为空时 SetParent(hwnd,null) 会把窗口挂成
     // 普通顶层窗口，之后心跳里的「未挂载→重挂」就变成每秒一次的 z 序搅动(桌面闪动)。
-    if (!fbswin::ensureWorker()) {
+    if (!winhelper::ensureWorker()) {
         m_running = false;
         AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Web::Enabled), false);
         publishRuntimeState();
@@ -701,7 +701,7 @@ bool WebWallpaper::start(QString *error, const QString &source)
         return false;
     }
     m_host->show();
-    fbswin::mountBehindIcons(m_host, m_host->geometry());
+    winhelper::mountBehindIcons(m_host, m_host->geometry());
 
     // 浏览器用户数据目录：登录态/缓存都落在 .cache/web-profile(清缓存可带走)。
     m_creating = true;
@@ -711,7 +711,7 @@ bool WebWallpaper::start(QString *error, const QString &source)
     // 否则新旧两代环境/控制器先后落到成员上(COM 泄漏 + 双管线叠加)。
     const quint32 epoch = m_epoch;
     auto *options = new EnvironmentOptions;
-    const HRESULT hr = fbswin::webview2CreateEnvironment(
+    const HRESULT hr = winhelper::webview2CreateEnvironment(
         CachePaths::webProfile(), options,
         new ComHandler<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler,
                        ICoreWebView2Environment *>(
@@ -784,7 +784,7 @@ void WebWallpaper::onEnvironmentReady(HRESULT code, ICoreWebView2Environment *en
         publishRuntimeState();
         emit runningChanged(false);
         setState(QStringLiteral("网页壁纸启动失败(浏览器内核创建失败)"));
-        videodiag::log(videodiag::Level::Warning,
+        applog::log(applog::Level::Warning,
                        QStringLiteral("WebView2 环境创建失败 hr=0x%1").arg(uint(code), 8, 16, QChar('0')),
                        QStringLiteral("WebWallpaper"));
         return;
@@ -832,7 +832,7 @@ void WebWallpaper::onControllerReady(HRESULT code, ICoreWebView2Controller *cont
         publishRuntimeState();
         emit runningChanged(false);
         setState(QStringLiteral("网页壁纸启动失败(无法挂载到桌面)"));
-        videodiag::log(videodiag::Level::Warning,
+        applog::log(applog::Level::Warning,
                        QStringLiteral("WebView2 控制器创建失败 hr=0x%1").arg(uint(code), 8, 16, QChar('0')),
                        QStringLiteral("WebWallpaper"));
         return;
@@ -906,7 +906,7 @@ void WebWallpaper::attachController()
         beginSnapshotRefresh(); // 快照模式：首图等导航完成后再出图
         navigateReal();
     }
-    videodiag::log(videodiag::Level::Info,
+    applog::log(applog::Level::Info,
                    QStringLiteral("网页壁纸已挂载: %1 (refresh=%2 interactive=%3)")
                        .arg(m_source).arg(m_refreshMode).arg(m_interactive),
                    QStringLiteral("WebWallpaper"));
@@ -1132,11 +1132,11 @@ void WebWallpaper::onCapturePreview(HRESULT code, IStream *stream)
     }
 
     if (image.isNull()) {
-        videodiag::log(videodiag::Level::Warning,
+        applog::log(applog::Level::Warning,
                        QStringLiteral("网页快照截图失败 hr=0x%1").arg(uint(code), 8, 16, QChar('0')),
                        QStringLiteral("WebWallpaper"));
     } else if (blank) {
-        videodiag::log(videodiag::Level::Info,
+        applog::log(applog::Level::Info,
                        QStringLiteral("网页快照是全黑(页面未出首帧)，保持实时渲染并等下一拍"),
                        QStringLiteral("WebWallpaper"));
     } else {
@@ -1151,7 +1151,7 @@ void WebWallpaper::onCapturePreview(HRESULT code, IStream *stream)
             if (writeSnapshotPage())
                 navigateSnapshotPage();
             else
-                videodiag::log(videodiag::Level::Warning,
+                applog::log(applog::Level::Warning,
                                QStringLiteral("快照静态页写入失败，本拍保持实时渲染"),
                                QStringLiteral("WebWallpaper"));
         }
@@ -1178,11 +1178,11 @@ void WebWallpaper::evaluateSuspend()
     // 全屏/遮挡**不挂起**：网页壁纸原先有个「全屏自动暂停」开关，2026-09-23 连同设置项一起
     // 移除。保持渲染的好处是退出全屏立刻可见，不会出现「退出全屏后壁纸消失很久」的重建空窗。
     // ⚠️ 视频壁纸那边仍有这个开关，别把两边的判据当成一套。
-    if (fbswin::isWorkstationLocked())
+    if (winhelper::isWorkstationLocked())
         reasons |= kSuspendLocked;
     if (!m_monitorOn)
         reasons |= kSuspendMonitorOff;
-    if (fbswin::isOnBattery())
+    if (winhelper::isOnBattery())
         reasons |= kSuspendBattery;
     m_suspendReasons = reasons;
 
@@ -1190,7 +1190,7 @@ void WebWallpaper::evaluateSuspend()
     // 连带销毁时只能整树重建。
     if (m_host) {
         if (!IsWindow(reinterpret_cast<HWND>(m_host->winId()))) {
-            videodiag::log(videodiag::Level::Info,
+            applog::log(applog::Level::Info,
                            QStringLiteral("网页壁纸宿主窗口失效，整树重建"),
                            QStringLiteral("WebWallpaper"));
             destroyPipeline();
@@ -1203,15 +1203,15 @@ void WebWallpaper::evaluateSuspend()
                          int(m_host->geometry().y() * dpr),
                          int(m_host->geometry().width() * dpr),
                          int(m_host->geometry().height() * dpr));
-        if (!fbswin::isWindowMounted(m_host, phys)) {
+        if (!winhelper::isWindowMounted(m_host, phys)) {
             // 重挂节流(10s)：WorkerW 短暂不可用/挂载未生效时，每秒重试会把
             // z 序搅得桌面闪动。m_mountFixClock 构造时已启动，首次检查即刻可用。
             if (!m_mountFixClock->isValid() || m_mountFixClock->elapsed() >= 10000) {
                 m_mountFixClock->restart();
-                videodiag::log(videodiag::Level::Info,
+                applog::log(applog::Level::Info,
                                QStringLiteral("网页壁纸重新挂载到桌面层"),
                                QStringLiteral("WebWallpaper"));
-                fbswin::mountBehindIcons(m_host, m_host->geometry());
+                winhelper::mountBehindIcons(m_host, m_host->geometry());
             }
         }
     }
@@ -1238,7 +1238,7 @@ void WebWallpaper::evaluateSuspend()
         m_releasedForSuspend = true;
         destroyPipeline();
         setState(QStringLiteral("暂停较久，已释放网页壁纸资源；回到桌面自动恢复"));
-        videodiag::log(videodiag::Level::Info,
+        applog::log(applog::Level::Info,
                        QStringLiteral("网页壁纸长挂起释放: reasons=0x%1")
                            .arg(reasons, 0, 16),
                        QStringLiteral("WebWallpaper"));
@@ -1251,7 +1251,7 @@ void WebWallpaper::evaluateSuspend()
             && (!m_suspendClock->isValid() || m_suspendClock->elapsed() >= 5000);
         if (m_releasedForSuspend && rebuildDue) {
             m_releasedForSuspend = false;
-            videodiag::log(videodiag::Level::Info,
+            applog::log(applog::Level::Info,
                            QStringLiteral("挂起解除，重建网页壁纸管线"),
                            QStringLiteral("WebWallpaper"));
             QString err;
@@ -1313,7 +1313,7 @@ void WebWallpaper::destroyPipeline()
         m_environment = nullptr;
     }
     if (m_host) {
-        fbswin::unmountWindow(m_host);
+        winhelper::unmountWindow(m_host);
         m_host->hide();
         m_host->deleteLater();
         m_host = nullptr;
