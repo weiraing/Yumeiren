@@ -43,7 +43,7 @@ const NumericRule kNumericRules[] = {
     // 看板娘位置 -1 表示「尚未放置」(首次显示时按主屏右下角自动摆放)，下界必须留 -1，
     // 否则钳位会把「未放置」改写成 0，等于把窗口钉死在屏幕左上角。
     {ConfigKeys::Kanban::Scale, 100, 20, 300},
-    {ConfigKeys::Kanban::Opacity, 100, 20, 100},
+    {ConfigKeys::Kanban::Transparency, 0, 0, 80},
     {ConfigKeys::Kanban::Width, 320, 160, 2560},
     {ConfigKeys::Kanban::Height, 480, 160, 2560},
     {ConfigKeys::Kanban::PosX, -1, -1, 8192},

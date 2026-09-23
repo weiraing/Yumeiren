@@ -5,10 +5,14 @@
 // 传（那是把一个核烧在 GPU→CPU 回读上的错误路线，见模块评审结论）。
 //
 // 资源策略（与视频壁纸同一套心智）：
-//   - 五类挂起（全屏/遮挡/锁屏/熄屏/电池）→ TrySuspend(掉到接近零渲染)，恢复即回；
+//   - 挂起五因：锁屏/熄屏/电池常开；全屏/遮挡由「全屏自动暂停」开关控制(默认
+//     关——关闭时全屏/最大化窗口下壁纸保持渲染，退出全屏立刻可见)
+//     → TrySuspend(掉到接近零渲染)，恢复即回；
 //   - 持续挂起超阈值 → 整树销毁(控制器/环境)，回桌面自动重建；
-//   - 快照模式(分钟/小时)：两次刷新间控制器不可见 + 挂起，桌面显示最近一次截图，
-//     刷新 = 短暂唤醒渲染 → CapturePreview → 回到不可见。准静态页面的常态占用≈0；
+//   - 快照模式(分钟/小时)：两次刷新间 WebView2 停在本地静态快照页(纯截图，无脚本
+//     无动画，渲染归零)；刷新 = 导航回真实页 → CapturePreview → 再回到静态页。
+//     准静态页面的常态占用≈0。注意 TrySuspend 契约要求控制器 IsVisible=false 才
+//     生效，所以它只用于上面的五类挂起(挂起本来就要隐藏)，可见状态下省电靠静态页；
 //   - 音频只有 静音/取消静音 两档(WebView2 的 IsMuted 无音量级)，0 音量即静音；
 //   - rAF 限帧：向页面注入脚本把 requestAnimationFrame 压到设定帧率，页面自身动效
 //     (canvas/WebGL)随之降载；CSS 动画不受它管，压不到合成器层。
@@ -52,7 +56,8 @@ public:
     void setZoomPercent(int percent); // 50~200
     void setRefreshMode(int mode);
     void setFpsCap(int fps);          // 0=跟随页面,24/30/60
-    void navigateTo(const QString &source); // 运行中换页
+    void setPauseOnFullscreen(bool on); // 全屏时自动暂停(默认关)
+    bool navigateTo(const QString &source, QString *error = nullptr); // 运行中换页
     // 显示器电源状态(WM_POWERBROADCAST 投递，与视频/看板娘同一事件源)。
     void setMonitorOn(bool on);
 
@@ -69,6 +74,7 @@ public:
     int volume() const { return m_volume; }
     int zoomPercent() const { return m_zoomPercent; }
     int fpsCap() const { return m_fpsCap; }
+    bool pauseOnFullscreen() const { return m_pauseOnFullscreen; }
     QString stateText() const { return m_stateText; }
 
 signals:
@@ -98,18 +104,29 @@ private:
     void applySuspend(bool suspend);
     void destroyPipeline();
     void setState(const QString &text);
-    QString resolveSource(const QString &source) const; // → url
+    QString resolveSource(const QString &source, QString *error = nullptr) const; // → url
     void loadSettings();
     void evaluateSuspend();
     void startSnapshotCycle();
     void stopSnapshotCycle();
-    void captureSnapshot();
+    void captureSnapshot();       // 快照周期入口：导航回真实页重新渲染
+    void doCapturePreview();      // 出图步：页面已渲染，发起 CapturePreview
+    bool writeSnapshotPage();     // 快照落盘为缓存里的静态页，失败返回 false
+    void navigateReal();          // 带用户缩放导航到真实来源
+    void navigateSnapshotPage();  // 缩放归位后导航到静态快照页
+    void beginSnapshotRefresh();  // 快照模式标记一次刷新在途
+    QString runtimeStateText() const; // 运行态状态文本(实时/快照)
     void publishRuntimeState();
 
     QString m_source;
+    QString m_resolvedSource; // 真正交给 WebView2 的 http(s)/file URL
     bool m_running = false;
     bool m_shuttingDown = false;
     bool m_creating = false;     // 环境/控制器创建在途
+    // 管线代数：destroyPipeline 每次递增。创建是异步 COM 回调，「创建中 stop()
+    // 又立刻 start()」会让新旧两代回调先后抵达，按代鉴别后旧代直接丢弃 ——
+    // 否则两代会同时落到成员上（COM 泄漏 + 双管线叠加）。
+    quint32 m_epoch = 0;
     QString m_stateText;
 
     // —— 设置镜像(单一来源在配置；这里只是缓存) ——
@@ -118,6 +135,7 @@ private:
     int m_volume = 0;  // 0=静音(默认：壁纸别出声，用户要声音自己开)
     int m_zoomPercent = 100;
     int m_fpsCap = 0;
+    bool m_pauseOnFullscreen = false; // 全屏时自动暂停(默认关闭)
 
     // —— COM 管线 ——
     ICoreWebView2Environment *m_environment = nullptr;
@@ -127,7 +145,10 @@ private:
     void *m_webview3 = nullptr;  // ICoreWebView2_3：TrySuspend/Resume
     void *m_webview8 = nullptr;  // ICoreWebView2_8：IsMuted
     QWidget *m_host = nullptr;   // 挂到桌面的宿主窗口
-    QImage m_snapshot;           // 快照模式显示的最后一帧
+    QImage m_snapshot;           // 快照模式截到的最近一帧
+    bool m_snapshotShowing = false;    // 当前停在静态快照页上
+    bool m_snapshotRefreshing = false; // 快照刷新在途(真实页已导航、等出图)
+    QString m_snapshotPageUrl;         // 静态快照页(缓存目录)的 file:// URL
     qint64 m_navToken = -1;       // EventRegistrationToken{INT64}，卸载事件用
     qint64 m_newWindowToken = -1; // 拦弹窗事件的注销令牌
 

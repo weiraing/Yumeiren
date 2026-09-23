@@ -20,6 +20,7 @@ const QStringList &subDirNames()
         QStringLiteral("image-pool"),
         QStringLiteral("logs"),
         QStringLiteral("web-profile"),
+        QStringLiteral("web-snapshot"),
     };
     return dirs;
 }
@@ -97,6 +98,11 @@ QString CachePaths::webProfile()
     // WebView2 浏览器配置/缓存(登录态、磁盘缓存)。归清缓存管：它是可再生缓存，
     // 代价只是网页要重新登录。磁盘缓存大小由启动参数另行限幅(见 WebWallpaper)。
     return QDir(root()).filePath(QStringLiteral("web-profile"));
+}
+
+QString CachePaths::webSnapshot()
+{
+    return QDir(root()).filePath(QStringLiteral("web-snapshot"));
 }
 
 QString CachePaths::logs()

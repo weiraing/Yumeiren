@@ -11,11 +11,27 @@
 #ifndef KANBANWINDOW_H
 #define KANBANWINDOW_H
 
+#include <QColor>
 #include <QWidget>
+
+class QMenu;
 
 namespace kanban {
 
 class KanbanRenderer;
+
+// 给原生窗口挂亚克力毛玻璃（Windows 未公开 API；非 Windows 恒 false）。
+// 参数用 `WId` 而不是 `HWND`，是为了让调用方不必 include <windows.h>。
+// tintAbgr 是 **0xAABBGGRR**（Windows 的通道顺序，不是常见的 ARGB），
+// 其中的 alpha 就是「玻璃效果度」；传 0 表示关掉亚克力。
+// 探针 KanbanProbe --acrylic 直接调它验收，别在别处复制一份实现。
+bool applyWindowAcrylic(WId windowId, unsigned tintAbgr);
+
+// 把窗口客户区变成「玻璃板」：按自身 alpha 与桌面合成，**不加模糊**。
+// 玻璃效果关掉时靠它让「透明度」真能透出桌面 —— QMenu 的原生窗口不是分层窗口，
+// 不挂这个的话 QSS 背景的 alpha 只会朝黑色稀释。实现与取证见 .cpp 里那段注释。
+// 探针 KanbanProbe --acrylic 直接调它验收，别在别处复制一份实现。
+bool applyGlassSheet(WId windowId);
 
 class KanbanWindow : public QWidget
 {
@@ -44,11 +60,27 @@ public:
 
     // 窗口不透明度(0.2..1.0)。用 setWindowOpacity 而不是绘制时乘 alpha：
     // 前者由合成器做，后者每帧都要重算所有颜色。
-    void setOpacityPercent(int percent);
-    int opacityPercent() const { return m_opacityPercent; }
+    // 窗口透明度(0=不透明，80=最透)。合成器级实时生效，运行中拖动立即可见。
+    void setTransparencyPercent(int percent);
+    int transparencyPercent() const { return m_transparencyPercent; }
+
+    // 右键菜单外观：底色(无效=沿用主题 palette)、菜单透明度(0=不透明..80=最透)、
+    // 玻璃效果(0=关)。
+    // 每次右键弹菜单时套用；玻璃用原生亚克力，开着的必须让菜单底色半透明。
+    // ⚠️ 由 KanbanWindow::applyMenuStyle 在**菜单条目加完之后**调用，改调用点前先看那里的注释。
+    void setMenuAppearance(const QColor &menuBg, int menuTransparencyPercent, int glassLevel);
 
     // 首次显示落位：x/y 为 -1 表示「还没摆放过」→ 贴主屏可用区右下角。
     void placeFromConfig(int x, int y, int width, int height);
+
+    // —— 以下两个只给探针用(KanbanProbe --menu-style) ——
+    // 右键菜单外观这件事没有窗口能截图：它只作用在鼠标右键弹出的那个 QMenu 上，
+    // 失效方式是纯静默的。探针需要走**真实的 applyMenuStyle** 然后读 QMenu 自身的
+    // 窗口透明度来断言，所以给一个只暴露调用入口的钩子 —— 它不改任何状态，
+    // 与右键菜单事件里走的是同一段代码，不会出现"探针过了产品没过"。
+    void applyMenuStyleForProbe(QMenu *menu) { applyMenuStyle(menu); }
+    int menuTransparencyForProbe() const { return m_menuTransparency; }
+    int menuGlassForProbe() const { return m_menuGlass; }
 
     void setPausedVisual(bool paused);
     void setModelDisplayName(const QString &name);
@@ -93,6 +125,7 @@ private:
     void releaseViewRenderer();
     void applyTopmostStyle();
     void applyMouseThroughStyle();
+    void applyMenuStyle(QMenu *menu);
 
     KanbanRenderer *m_renderer = nullptr;
     QWidget *m_view = nullptr;
@@ -101,7 +134,12 @@ private:
     bool m_mouseThrough = false;
     bool m_interactionEnabled = true;
     bool m_pausedVisual = false;
-    int m_opacityPercent = 100;
+    int m_transparencyPercent = 0;
+    QColor m_menuBg;         // 菜单底色(无效 = 主题默认)
+    /// 菜单透明度：0=不透明，80=最透。别和上面的 m_transparencyPercent 搞混 ——
+    /// 那个管看板娘窗口本体，这个只管右键菜单。
+    int m_menuTransparency = 0;
+    int m_menuGlass = 0;     // 0=关
 
     // 拖动与「点击还是拖动」判定
     bool m_pressSeen = false;

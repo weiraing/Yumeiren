@@ -157,7 +157,7 @@ QWidget *MainWindow::buildImagePage()
     folderBtn->setToolTip(tooltipstyle::format(QStringLiteral("读取文件夹内所有符合格式的图片并展示到图库")));
     connect(folderBtn, &QPushButton::clicked, this, &MainWindow::pickPresetFolder);
     auto *refreshBtn = new QPushButton(QStringLiteral("↻ 刷新"), leftCard);
-    refreshBtn->setObjectName(QStringLiteral("VideoScanButton"));
+    refreshBtn->setObjectName(QStringLiteral("LibraryScanButton"));
     refreshBtn->setToolTip(tooltipstyle::format(QStringLiteral("重新加载当前文件夹的图片")));
     connect(refreshBtn, &QPushButton::clicked, this, [this] {
         rebuildGallery();

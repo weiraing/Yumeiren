@@ -152,6 +152,7 @@ set(YUMEIREN_SOURCES
     src/ui/MainWindowEffectPage.cpp
     src/ui/MainWindowVideoPage.cpp
     src/ui/MainWindowKanbanPage.cpp
+    src/ui/LibraryCard.cpp
     src/ui/TooltipStyle.cpp
     # wallpaper/ module
     src/wallpaper/VideoWallpaper.cpp

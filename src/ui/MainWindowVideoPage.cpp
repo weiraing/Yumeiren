@@ -5,27 +5,310 @@
 #include "config/AppConfig.h"
 #include "config/ConfigKeys.h"
 #include "core/Diagnostics.h"
+#include "platform/windows/shellfileops.h"
+#include "ui/LibraryCard.h"
 #include "ui/TooltipStyle.h"
-#include "ui/UiMetrics.h" // 左列宽度：与看板娘页共用同一个常量
+#include "ui/UiMetrics.h" // 左右列宽度：与看板娘页共用同一个常量
 #include "wallpaper/VideoWallpaper.h"
 #include "wallpaper/WebWallpaper.h"
 
+#include <QElapsedTimer>
+#include <algorithm>
+#include <functional>
+#include <memory>
+
 #include <QButtonGroup>
-#include <QDesktopServices>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QDirIterator>
-#include <QFileDialog>
+#include <QFileInfo>
+#include <QGridLayout>
 #include <QLabel>
 #include <QLineEdit>
-#include <QListWidget>
+#include <QMenu>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QScrollArea>
+#include <QSignalBlocker>
 #include <QSlider>
 #include <QStackedWidget>
+#include <QTreeWidget>
+#include <QTreeWidgetItem>
+#include <QTreeWidgetItemIterator>
+#include <QUrl>
 #include <QVBoxLayout>
+
+namespace {
+
+constexpr int kWebSourceRole = Qt::UserRole;
+constexpr int kWebKindRole = Qt::UserRole + 1;
+
+enum WebLibraryKind {
+    WebLibraryDirectory = 0,
+    WebLibraryPage,
+    WebLibraryProject,
+};
+
+QString webLibraryRoot()
+{
+    return QDir(QCoreApplication::applicationDirPath())
+        .filePath(QStringLiteral("data/web"));
+}
+
+QString findWebEntryDocument(const QDir &dir)
+{
+    const QFileInfoList files =
+        dir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot, QDir::Name);
+    for (const QString &preferred :
+         {QStringLiteral("index.html"), QStringLiteral("index.htm")}) {
+        for (const QFileInfo &file : files) {
+            if (file.fileName().compare(preferred, Qt::CaseInsensitive) == 0)
+                return file.absoluteFilePath();
+        }
+    }
+    return QString();
+}
+
+QString cleanWebSourceKey(const QString &source)
+{
+    QString key = source.trimmed();
+    if (key.startsWith(QLatin1String("http://"), Qt::CaseInsensitive)
+        || key.startsWith(QLatin1String("https://"), Qt::CaseInsensitive)) {
+        return key.toLower();
+    }
+    if (key.startsWith(QLatin1String("file://"), Qt::CaseInsensitive)) {
+        const QUrl url(key);
+        if (url.isLocalFile())
+            key = url.toLocalFile();
+    }
+    key = QDir::fromNativeSeparators(key);
+    return QDir::cleanPath(key).toLower();
+}
+
+// 库根下的顶层条目直接挂树上(parent 为空)，分类内部的条目挂分类行下 ——
+// 不再包一层「data/web」根行：根行只是目录本身没有功能，还会在每行左侧
+// 顶出一块缩进空位。
+void addWebLibraryDirectory(MediaLibraryCard *card, QTreeWidgetItem *parent,
+                            const QDir &dir, const QString &relative, bool root,
+                            int depth, int *pageCount, int *projectCount)
+{
+    if (depth > 12)
+        return;
+    auto addRow = [card, parent](const QString &name, const QString &type,
+                                 const QString &path, bool checkable) {
+        return card->addRow(parent, name, type, path, checkable);
+    };
+
+    const QString entry = findWebEntryDocument(dir);
+    if (!entry.isEmpty()) {
+        QTreeWidgetItem *project =
+            addRow(root ? QStringLiteral("默认 Web 项目") : dir.dirName(),
+                   QStringLiteral("Web 项目"), entry, true);
+        project->setData(0, kWebSourceRole,
+                         root ? QStringLiteral(".") : QDir::fromNativeSeparators(relative));
+        project->setData(0, kWebKindRole, int(WebLibraryProject));
+        ++(*projectCount);
+        if (!root)
+            return;
+    }
+
+    QTreeWidgetItem *container = parent;
+    if (!root)
+        container = addRow(dir.dirName(), QStringLiteral("分类"), dir.absolutePath(), false);
+
+    const QFileInfoList childDirs =
+        dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    for (const QFileInfo &child : childDirs) {
+        const QString childRel =
+            relative.isEmpty() ? child.fileName()
+                               : relative + QLatin1Char('/') + child.fileName();
+        addWebLibraryDirectory(card, container, QDir(child.absoluteFilePath()), childRel,
+                               false, depth + 1, pageCount, projectCount);
+    }
+
+    // 含 index 的目录整体作为 Web 项目：其余 HTML/子目录是项目资源，不重复展开。
+    if (!entry.isEmpty())
+        return;
+    const QFileInfoList files =
+        dir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot, QDir::Name);
+    for (const QFileInfo &file : files) {
+        const QString suffix = file.suffix().toLower();
+        if (suffix != QLatin1String("html") && suffix != QLatin1String("htm"))
+            continue;
+        QTreeWidgetItem *page =
+            addRow(file.fileName(), QStringLiteral("页面"), file.absoluteFilePath(), true);
+        const QString pageRel =
+            relative.isEmpty() ? file.fileName()
+                               : relative + QLatin1Char('/') + file.fileName();
+        page->setData(0, kWebSourceRole, QDir::fromNativeSeparators(pageRel));
+        page->setData(0, kWebKindRole, int(WebLibraryPage));
+        ++(*pageCount);
+    }
+
+    if (!root && container->childCount() == 0)
+        delete container;
+}
+
+} // namespace
+
+
+void MainWindow::refreshWebLibrary()
+{
+    if (!m_webTree)
+        return;
+    m_webTree->clear();
+
+    const QString root = webLibraryRoot();
+    QDir().mkpath(root);
+    QDir rootDir(root);
+    int pageCount = 0;
+    int projectCount = 0;
+    // 不再包「data/web」根行：顶层页面/项目直接从行首开始，勾选框前没有缩进空位
+    addWebLibraryDirectory(m_webLib, nullptr, rootDir, QString(), true, 0,
+                           &pageCount, &projectCount);
+    const QString current = WebWallpaper::instance().source();
+    bool matched = false;
+    if (!current.isEmpty()) {
+        QTreeWidgetItemIterator it(m_webTree);
+        while (*it) {
+            QTreeWidgetItem *item = *it;
+            const int kind = item->data(0, kWebKindRole).toInt();
+            if (kind == WebLibraryPage || kind == WebLibraryProject) {
+                const QString key = item->data(0, kWebSourceRole).toString();
+                if (cleanWebSourceKey(key) == cleanWebSourceKey(current)) {
+                    m_webTree->setCurrentItem(item);
+                    if (item->parent())
+                        item->parent()->setExpanded(true);
+                    matched = true;
+                    break;
+                }
+            }
+            ++it;
+        }
+    }
+    if (!matched)
+        m_webTree->setCurrentItem(nullptr);
+
+    QStringList summary;
+    if (pageCount > 0)
+        summary << QStringLiteral("%1 个页面").arg(pageCount);
+    if (projectCount > 0)
+        summary << QStringLiteral("%1 个 Web 项目").arg(projectCount);
+    const QString text = summary.isEmpty()
+        ? QStringLiteral("data/web 还没有网页。放进 HTML 或整个 Web 项目后点“刷新”即可。")
+        : summary.join(QLatin1String(" · "));
+    if (m_webLibraryStatus)
+        m_webLibraryStatus->setText(text);
+}
+
+
+void MainWindow::setWebSource(const QString &source, bool activate)
+{
+    QString key = source.trimmed();
+    if (!key.isEmpty() && !key.startsWith(QLatin1String("http://"), Qt::CaseInsensitive)
+        && !key.startsWith(QLatin1String("https://"), Qt::CaseInsensitive)) {
+        const QFileInfo info(key);
+        const QDir root(webLibraryRoot());
+        if (info.isAbsolute()) {
+            const QString rel = root.relativeFilePath(info.absoluteFilePath());
+            if (!rel.startsWith(QLatin1String("..")) && !QDir::isAbsolutePath(rel))
+                key = QDir::fromNativeSeparators(rel);
+        }
+    }
+    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Web::Source), key);
+    if (activate) {
+        auto &web = WebWallpaper::instance();
+        if (web.isRunning()) {
+            QString err;
+            if (!web.navigateTo(key, &err) && !err.isEmpty()) {
+                setLog(err, true);
+                if (m_webStateLabel)
+                    m_webStateLabel->setText(err);
+            }
+        } else {
+            QString err;
+            if (!web.start(&err, key) && !err.isEmpty()) {
+                setLog(err, true);
+                if (m_webStateLabel)
+                    m_webStateLabel->setText(err);
+            }
+        }
+    }
+    updateWebWallpaperControls();
+}
+
+
+// 删除网页库里勾选的页面/Web 项目(移入回收站，可撤销)。Web 项目删的是整个
+// 项目目录(index.html 所在文件夹，只删 index 会留下孤儿资源，重扫后又以坏
+// 项目出现)；库根上的「默认 Web 项目」只删它的 index.html —— data/web 本身
+// 是库根，绝不能整目录删掉。
+void MainWindow::removeCheckedWebItems()
+{
+    if (!m_webTree)
+        return;
+    struct Pending {
+        QString path;      // 页面文件 / 项目 index.html 的绝对路径
+        bool isProject;
+        QString sourceKey; // 配置里记的相对来源(匹配清理用)
+        QString label;     // 失败提示用
+    };
+    QList<Pending> pending;
+    QTreeWidgetItemIterator checked(m_webTree, QTreeWidgetItemIterator::Checked);
+    while (*checked) {
+        QTreeWidgetItem *item = *checked;
+        const int kind = item->data(0, kWebKindRole).toInt();
+        if (kind == WebLibraryPage || kind == WebLibraryProject) {
+            pending.append({item->data(0, MediaLibraryCard::PathRole).toString(),
+                            kind == WebLibraryProject,
+                            item->data(0, kWebSourceRole).toString(),
+                            item->text(0)});
+        }
+        ++checked;
+    }
+    if (pending.isEmpty())
+        return;
+
+    const QString rootPath = QDir(webLibraryRoot()).canonicalPath();
+    int done = 0;
+    QStringList failed;
+    for (const Pending &p : pending) {
+        QFileInfo target(p.path);
+        if (p.isProject) {
+            const QString projectDir = target.dir().canonicalPath();
+            if (projectDir != rootPath)
+                target = QFileInfo(projectDir);
+        }
+        QString err;
+        if (fbswin::moveToRecycleBin(target.absoluteFilePath(), &err)) {
+            ++done;
+        } else {
+            failed << QStringLiteral("%1(%2)").arg(p.label, err);
+            videodiag::log(videodiag::Level::Warning,
+                           QStringLiteral("网页库删除失败: %1 -> %2")
+                               .arg(QDir::toNativeSeparators(target.absoluteFilePath()), err),
+                           QStringLiteral("WebLibrary"));
+        }
+    }
+
+    // 删掉的若是当前配置来源，清掉它，避免下次启动撞「本地网页不存在」
+    const QString current = WebWallpaper::instance().source();
+    if (!current.isEmpty()) {
+        for (const Pending &p : pending) {
+            if (cleanWebSourceKey(p.sourceKey) == cleanWebSourceKey(current)) {
+                AppConfig::instance().remove(QString::fromLatin1(ConfigKeys::Web::Source));
+                break;
+            }
+        }
+    }
+
+    refreshWebLibrary(); // 重建树(勾选集随之清空，删除键经 itemChanged 置灰)
+    if (done > 0)
+        setLog(QStringLiteral("已删除 %1 项(移入回收站，可在回收站还原)。").arg(done), false);
+    if (!failed.isEmpty())
+        setLog(QStringLiteral("删除失败：%1").arg(failed.join(QStringLiteral("；"))), true);
+    updateWebWallpaperControls();
+}
 
 
 QWidget *MainWindow::buildHelpPage()
@@ -248,10 +531,15 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     });
     leftLay->addWidget(m_fpsKeepSpeedBox);
 
-    // 列宽固定、不参与拉伸：窗口变宽时多出来的空间全给右侧播放列表；宽度与看板娘页
-    // 共用同一个常量，免得切页时左卡横向跳。卡片高度随内容收缩，空白集中到列尾。
+    // 左列**不再固定宽度**，而是拿到一个可收缩的下限：窗口变宽时多出来的空间依然
+    // 全给右侧播放列表(左列被 stretch 压到最小)，窗口变窄时左列能跟着收。
+    //
+    // 原来是 setFixedWidth(300)：向右拉伸没问题，但窗口一窄，整页的最小宽度就等于
+    // 「左列 300 + 右侧内容宽」且左列一个像素不让，页面很快顶到底、再拖窗口边框
+    // 页面纹丝不动 —— 表现出来就是"右侧栏缩不动，内容被边上盖住"。
+    // 下限取「左列内容恰好放得下」的宽度：再窄一点左侧的勾选框和下拉框就开始截字。
     auto *leftCol = new QWidget(page);
-    leftCol->setFixedWidth(uimetrics::kPageLeftColWidth);
+    leftCol->setMinimumWidth(uimetrics::kPageLeftColWidth);
     auto *leftColLay = new QVBoxLayout(leftCol);
     leftColLay->setContentsMargins(0, 0, 0, 0);
     leftColLay->setSpacing(18);
@@ -259,58 +547,44 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     leftColLay->addStretch(1);
     lay->addWidget(leftCol);
 
-    auto *rightCard = new QFrame(page);
-    rightCard->setObjectName(QStringLiteral("PageCard"));
-    auto *rightLay = new QVBoxLayout(rightCard);
-    rightLay->setContentsMargins(14, 12, 14, 14);
-    rightLay->setSpacing(8);
+    // 右侧多包一层容器，卡片在里面吃满 —— 卡片于是与右边界严格对齐，
+    // 拖窗口边框时右侧模块宽度跟着变。
+    auto *rightCol = new QWidget(page);
+    rightCol->setMinimumWidth(uimetrics::kPageRightColMinWidth);
+    auto *rightColLay = new QVBoxLayout(rightCol);
+    rightColLay->setContentsMargins(0, 0, 0, 0);
+    rightColLay->setSpacing(0);
 
-    auto *listRow = new QHBoxLayout();
-    listRow->setSpacing(8);
-    m_videoList = new QListWidget(rightCard);
-    m_videoList->setObjectName(QStringLiteral("VideoList"));
-    m_videoList->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    m_videoList->setUniformItemSizes(false);
-    m_videoList->setSpacing(4);
-    m_videoList->setToolTip(tooltipstyle::format(QStringLiteral(
-            "运行中双击条目：立即切换该视频为壁纸；选中条目后点“启动”：从该视频开始播放")));
+    // 右侧复用统一的媒体库卡片：标题 → 刷新/打开目录/删除 → 双列列表 → 状态 → 注释
+    auto *rightCard = new MediaLibraryCard(
+        QStringLiteral("data/video 视频库"), QStringLiteral("视频"),
+        QCoreApplication::applicationDirPath() + QStringLiteral("/data/video"),
+        QStringLiteral("「刷新」以 data/video(含子目录)为准重建视频列表；\n"
+                       "「✕ 删除」把勾选的视频文件移入回收站(可还原)。\n"
+                       "运行中双击条目：立即切换该视频为壁纸；"
+                       "选中条目后点「启动」：从该视频开始播放。"),
+        QStringLiteral("视频文件放在程序目录 data/video 下；「✕ 删除」会把勾选的视频移入回收站。"));
+    m_videoLib = rightCard;
+    m_videoList = rightCard->tree();
+    m_videoStatus = rightCard->statusLabel();
+    connect(rightCard, &MediaLibraryCard::scanRequested, this,
+            [this] { scanVideoDir(); });
+    connect(rightCard, &MediaLibraryCard::deleteCheckedRequested, this,
+            &MainWindow::removeCheckedVideos);
+
     // 运行中双击列表条目 → 立即切换该视频为动态壁纸
-    connect(m_videoList, &QListWidget::itemDoubleClicked, this,
-            [this](QListWidgetItem *item) {
+    connect(m_videoList, &QTreeWidget::itemDoubleClicked, this,
+            [this](QTreeWidgetItem *item, int) {
         auto &vp = VideoWallpaper::instance();
         if (!vp.isStarted() || vp.playlist().isEmpty())
             return; // 未启动时双击仅作选中
-        const int row = m_videoList->row(item);
+        const int row = item ? m_videoList->indexOfTopLevelItem(item) : -1;
         if (row >= 0 && row < vp.playlist().size())
             vp.switchToTrack(row);
     });
-    listRow->addWidget(m_videoList, 1);
 
-    auto *strip = new QVBoxLayout();
-    strip->setSpacing(8);
-    auto addStripBtn = [&](const QString &text, const char *objectName, auto slot) {
-        auto *b = new QPushButton(text, rightCard);
-        b->setObjectName(QString::fromUtf8(objectName)); // 语义配色见 style.qss/light.qss
-        b->setMinimumWidth(72);
-        b->setMinimumHeight(38);
-        connect(b, &QPushButton::clicked, this, slot);
-        strip->addWidget(b);
-        return b;
-    };
-    addStripBtn(QStringLiteral("↻ 扫描"), "VideoScanButton", [this] { scanVideoDir(); });
-    strip->addSpacing(46); // 扫描(发现类)与列表管理三键之间空一个按键距离
-    addStripBtn(QStringLiteral("＋ 添加"), "VideoAddButton", [this] { addVideos(); });
-    addStripBtn(QStringLiteral("✕ 删除"), "VideoDeleteButton", [this] { removeSelectedVideos(); });
-    addStripBtn(QStringLiteral("⌫ 清空"), "VideoClearButton", [this] { clearVideos(); });
-    strip->addStretch(1);
-    listRow->addLayout(strip);
-    rightLay->addLayout(listRow, 1);
-
-    m_videoStatus = new QLabel(QStringLiteral("共 0 个视频 · 停止"), rightCard);
-    m_videoStatus->setObjectName(QStringLiteral("HintLabel"));
-    rightLay->addWidget(m_videoStatus);
-
-    lay->addWidget(rightCard, 1);
+    rightColLay->addWidget(rightCard, 1);
+    lay->addWidget(rightCol, 1);
 
     // 选项改动立即生效
     connect(m_fullscreenPauseBox, &QCheckBox::toggled, this, [this](bool on) {
@@ -358,24 +632,25 @@ QWidget *MainWindow::buildWebWallpaperPage()
     scroll->setWidgetResizable(true);
     scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     auto *page = new QWidget(scroll);
-    auto *lay = new QVBoxLayout(page);
+    auto *lay = new QHBoxLayout(page);
     lay->setContentsMargins(18, 16, 18, 16);
+    lay->setSpacing(14);
 
-    auto *card = new QFrame(page);
-    card->setObjectName(QStringLiteral("PageCard"));
-    card->setFixedWidth(uimetrics::kPageLeftColWidth);
-    auto *cardLay = new QVBoxLayout(card);
-    cardLay->setContentsMargins(18, 14, 18, 18);
-    cardLay->setSpacing(10);
+    auto *leftCard = new QFrame(page);
+    leftCard->setObjectName(QStringLiteral("PageCard"));
+    auto *leftLay = new QVBoxLayout(leftCard);
+    leftLay->setContentsMargins(14, 14, 14, 14);
+    leftLay->setSpacing(10);
 
-    auto *t = new QLabel(QStringLiteral("动态网页壁纸"), card);
+    auto *t = new QLabel(QStringLiteral("动态网页壁纸"), leftCard);
     t->setObjectName(QStringLiteral("GroupTitle"));
-    cardLay->addWidget(t);
+    leftLay->addWidget(t);
 
     // 运行时体检：WebView2 是系统组件，缺了就把整页置灰并说明装法 —— 与 Live2D
     // 后端缺失同一套「明确告诉你为什么不能用」的处理。
     QString version;
     const bool runtimeOk = WebWallpaper::runtimeAvailable(&version);
+    m_webRuntimeOk = runtimeOk;
 
     auto *hint = new QLabel(
         runtimeOk
@@ -383,52 +658,40 @@ QWidget *MainWindow::buildWebWallpaperPage()
                              "本地页面放在程序目录 data/web 下。运行时 %1。").arg(version)
             : QStringLiteral("WebView2 运行时不可用：%1\n"
                              "请到微软官网安装「Evergreen WebView2 Runtime」后重启软件。").arg(version),
-        card);
+        leftCard);
     hint->setObjectName(QStringLiteral("HintLabel"));
     hint->setWordWrap(true);
-    cardLay->addWidget(hint);
+    leftLay->addWidget(hint);
 
-    auto *srcRow = new QHBoxLayout();
-    m_webSourceEdit = new QLineEdit(card);
-    m_webSourceEdit->setPlaceholderText(
-        QStringLiteral("网页地址 https://… 或 data/web 下的文件名"));
-    m_webSourceEdit->setText(WebWallpaper::instance().source());
-    connect(m_webSourceEdit, &QLineEdit::editingFinished, this, [this] {
-        // 只记录不启动：地址写进配置，「应用」或下次启动时才生效。
-        AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Web::Source),
-                                       m_webSourceEdit->text().trimmed());
+    m_webStartBtn = new QPushButton(QStringLiteral("▶ 启动"), leftCard);
+    m_webStartBtn->setObjectName(QStringLiteral("PrimaryButton"));
+    m_webStartBtn->setMinimumHeight(40);
+    m_webStartBtn->setProperty("data-active", 0);
+    connect(m_webStartBtn, &QPushButton::clicked, this, [this] {
+        auto &web = WebWallpaper::instance();
+        if (web.isRunning()) {
+            web.stop();
+        } else {
+            // 来源由右侧网页库单选/双击写入配置；启动沿用当前配置来源。
+            QString err;
+            if (!web.start(&err) && !err.isEmpty()) {
+                setLog(err, true);
+                if (m_webStateLabel)
+                    m_webStateLabel->setText(err);
+            }
+        }
+        updateWebWallpaperControls();
     });
-    srcRow->addWidget(m_webSourceEdit, 1);
-    auto *pickBtn = new QPushButton(QStringLiteral("选择页面…"), card);
-    connect(pickBtn, &QPushButton::clicked, this, [this] {
-        const QString dir = QCoreApplication::applicationDirPath()
-                            + QStringLiteral("/data/web");
-        const QString file = QFileDialog::getOpenFileName(
-            this, QStringLiteral("选择本地网页"), dir,
-            QStringLiteral("网页 (*.html *.htm);;所有文件 (*)"));
-        if (file.isEmpty())
-            return;
-        m_webSourceEdit->setText(QDir::toNativeSeparators(file));
-        AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Web::Source), file);
-    });
-    srcRow->addWidget(pickBtn);
-    cardLay->addLayout(srcRow);
+    leftLay->addWidget(m_webStartBtn);
 
-    // 本地页面库：data/web 下的 *.html 一键直达。目录是用户资产区，构建只补缺。
-    auto *openDirBtn = new QPushButton(QStringLiteral("打开 data/web 页面目录"), card);
-    connect(openDirBtn, &QPushButton::clicked, this, [] {
-        const QString dir = QCoreApplication::applicationDirPath()
-                            + QStringLiteral("/data/web");
-        QDir().mkpath(dir);
-        QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
-    });
-    cardLay->addWidget(openDirBtn);
+    // 来源选择只在右侧「data/web 网页库」里做：单选记忆、双击应用。
+    // (旧的地址输入框与「打开目录」按钮已由网页库覆盖，按用户要求移除。)
 
     auto *grid = new QGridLayout();
     grid->setHorizontalSpacing(10);
     grid->setVerticalSpacing(8);
-    grid->addWidget(new QLabel(QStringLiteral("刷新策略"), card), 0, 0);
-    m_webRefreshCombo = new QComboBox(card);
+    grid->addWidget(new QLabel(QStringLiteral("刷新策略"), leftCard), 0, 0);
+    m_webRefreshCombo = new QComboBox(leftCard);
     m_webRefreshCombo->addItems({QStringLiteral("实时渲染"), QStringLiteral("快照·每分钟"),
                                  QStringLiteral("快照·每小时")});
     m_webRefreshCombo->setCurrentIndex(WebWallpaper::instance().refreshMode());
@@ -441,8 +704,8 @@ QWidget *MainWindow::buildWebWallpaperPage()
     });
     grid->addWidget(m_webRefreshCombo, 0, 1);
 
-    grid->addWidget(new QLabel(QStringLiteral("交互模式"), card), 1, 0);
-    m_webInteractCombo = new QComboBox(card);
+    grid->addWidget(new QLabel(QStringLiteral("交互模式"), leftCard), 1, 0);
+    m_webInteractCombo = new QComboBox(leftCard);
     m_webInteractCombo->addItems({QStringLiteral("允许鼠标交互"), QStringLiteral("仅展示(穿透点击)")});
     m_webInteractCombo->setCurrentIndex(WebWallpaper::instance().interactive() ? 0 : 1);
     styleCombo(m_webInteractCombo);
@@ -451,8 +714,8 @@ QWidget *MainWindow::buildWebWallpaperPage()
     });
     grid->addWidget(m_webInteractCombo, 1, 1);
 
-    grid->addWidget(new QLabel(QStringLiteral("帧率上限"), card), 2, 0);
-    m_webFpsCombo = new QComboBox(card);
+    grid->addWidget(new QLabel(QStringLiteral("帧率上限"), leftCard), 2, 0);
+    m_webFpsCombo = new QComboBox(leftCard);
     m_webFpsCombo->addItems({QStringLiteral("跟随页面"), QStringLiteral("24 fps"),
                              QStringLiteral("30 fps"), QStringLiteral("60 fps")});
     const int capVals[4] = {0, 24, 30, 60};
@@ -473,12 +736,12 @@ QWidget *MainWindow::buildWebWallpaperPage()
     });
     grid->addWidget(m_webFpsCombo, 2, 1);
 
-    grid->addWidget(new QLabel(QStringLiteral("音量"), card), 3, 0);
+    grid->addWidget(new QLabel(QStringLiteral("音量"), leftCard), 3, 0);
     auto *volRow = new QHBoxLayout();
-    m_webVolumeSlider = new QSlider(Qt::Horizontal, card);
+    m_webVolumeSlider = new QSlider(Qt::Horizontal, leftCard);
     m_webVolumeSlider->setRange(0, 100);
     m_webVolumeSlider->setValue(WebWallpaper::instance().volume());
-    m_webVolumeVal = new QLabel(QStringLiteral("%1%").arg(WebWallpaper::instance().volume()), card);
+    m_webVolumeVal = new QLabel(QStringLiteral("%1%").arg(WebWallpaper::instance().volume()), leftCard);
     m_webVolumeVal->setObjectName(QStringLiteral("FieldLabel"));
     m_webVolumeVal->setMinimumWidth(44);
     m_webVolumeVal->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
@@ -493,12 +756,12 @@ QWidget *MainWindow::buildWebWallpaperPage()
     volRow->addWidget(m_webVolumeVal);
     grid->addLayout(volRow, 3, 1);
 
-    grid->addWidget(new QLabel(QStringLiteral("页面缩放"), card), 4, 0);
+    grid->addWidget(new QLabel(QStringLiteral("页面缩放"), leftCard), 4, 0);
     auto *zoomRow = new QHBoxLayout();
-    m_webZoomSlider = new QSlider(Qt::Horizontal, card);
+    m_webZoomSlider = new QSlider(Qt::Horizontal, leftCard);
     m_webZoomSlider->setRange(50, 200);
     m_webZoomSlider->setValue(WebWallpaper::instance().zoomPercent());
-    m_webZoomVal = new QLabel(QStringLiteral("%1%").arg(WebWallpaper::instance().zoomPercent()), card);
+    m_webZoomVal = new QLabel(QStringLiteral("%1%").arg(WebWallpaper::instance().zoomPercent()), leftCard);
     m_webZoomVal->setObjectName(QStringLiteral("FieldLabel"));
     m_webZoomVal->setMinimumWidth(44);
     m_webZoomVal->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
@@ -509,32 +772,24 @@ QWidget *MainWindow::buildWebWallpaperPage()
     zoomRow->addWidget(m_webZoomSlider, 1);
     zoomRow->addWidget(m_webZoomVal);
     grid->addLayout(zoomRow, 4, 1);
+
+    // 全屏自动暂停：默认不勾选(勾选后检测到全屏应用即挂起，退出全屏自动恢复)
+    grid->addWidget(new QLabel(QStringLiteral("全屏自动暂停"), leftCard), 5, 0);
+    auto *fsBox = new QCheckBox(leftCard);
+    fsBox->setChecked(WebWallpaper::instance().pauseOnFullscreen());
+    fsBox->setToolTip(tooltipstyle::format(QStringLiteral(
+        "检测到全屏应用时自动暂停网页壁纸以省电，\n退出全屏后自动恢复。")));
+    connect(fsBox, &QCheckBox::toggled, this,
+            [](bool on) { WebWallpaper::instance().setPauseOnFullscreen(on); });
+    grid->addWidget(fsBox, 5, 1);
+
     grid->setColumnStretch(1, 1);
-    cardLay->addLayout(grid);
+    leftLay->addLayout(grid);
 
-    auto *btnRow = new QHBoxLayout();
-    btnRow->setSpacing(10);
-    m_webStartBtn = new QPushButton(QStringLiteral("▶ 应用网页壁纸"), card);
-    m_webStartBtn->setObjectName(QStringLiteral("PrimaryButton"));
-    m_webStartBtn->setMinimumHeight(40);
-    connect(m_webStartBtn, &QPushButton::clicked, this, [this] {
-        auto &web = WebWallpaper::instance();
-        if (web.isRunning()) {
-            web.stop();
-        } else {
-            QString err;
-            if (!web.start(&err, m_webSourceEdit->text().trimmed()) && !err.isEmpty())
-                setLog(err, true);
-        }
-        updateWebWallpaperControls();
-    });
-    btnRow->addWidget(m_webStartBtn, 1);
-    cardLay->addLayout(btnRow);
-
-    m_webStateLabel = new QLabel(WebWallpaper::instance().stateText(), card);
+    m_webStateLabel = new QLabel(WebWallpaper::instance().stateText(), leftCard);
     m_webStateLabel->setObjectName(QStringLiteral("LogLabel"));
     m_webStateLabel->setWordWrap(true);
-    cardLay->addWidget(m_webStateLabel);
+    leftLay->addWidget(m_webStateLabel);
     connect(&WebWallpaper::instance(), &WebWallpaper::stateChanged, this, [this](const QString &text) {
         if (m_webStateLabel)
             m_webStateLabel->setText(text);
@@ -542,37 +797,116 @@ QWidget *MainWindow::buildWebWallpaperPage()
     connect(&WebWallpaper::instance(), &WebWallpaper::runningChanged, this,
             [this](bool) { updateWebWallpaperControls(); });
 
-    if (!runtimeOk) {
-        m_webSourceEdit->setDisabled(true);
-        m_webStartBtn->setDisabled(true);
-        pickBtn->setDisabled(true);
-    }
-    updateWebWallpaperControls();
+    // 与视频壁纸页同一套：左列给可收缩的下限(不是固定宽)，右侧包容器吃满。
+    auto *leftCol = new QWidget(page);
+    leftCol->setMinimumWidth(uimetrics::kPageLeftColWidth);
+    auto *leftColLay = new QVBoxLayout(leftCol);
+    leftColLay->setContentsMargins(0, 0, 0, 0);
+    leftColLay->setSpacing(18);
+    leftColLay->addWidget(leftCard);
+    leftColLay->addStretch(1);
+    lay->addWidget(leftCol);
 
-    lay->addWidget(card, 0, Qt::AlignTop | Qt::AlignLeft);
-    lay->addStretch(1);
+    auto *rightCol = new QWidget(page);
+    rightCol->setMinimumWidth(uimetrics::kPageRightColMinWidth);
+    auto *rightColLay = new QVBoxLayout(rightCol);
+    rightColLay->setContentsMargins(0, 0, 0, 0);
+    rightColLay->setSpacing(0);
+
+    // 右侧复用统一的媒体库卡片：标题 → 刷新/打开目录/删除 → 双列列表 → 状态 → 注释
+    auto *rightCard = new MediaLibraryCard(
+        QStringLiteral("data/web 网页库"), QStringLiteral("页面 / 项目"),
+        webLibraryRoot(),
+        QStringLiteral("data/web 下每个子文件夹都是一个分类。\n"
+                       "分类里的 .html/.htm 会作为页面列出；\n"
+                       "包含 index.html 或 index.htm 的文件夹会作为完整 Web 项目列出，"
+                       "其余 js/css/图片资源不用手动挑选。"),
+        QStringLiteral("目录里还可放嵌套分类；含 index.html/index.htm 的目录自动识别为 Web 项目。"));
+    m_webLib = rightCard;
+    m_webTree = rightCard->tree();
+    m_webLibraryStatus = rightCard->statusLabel();
+    m_webLibraryStatus->setText(QStringLiteral("正在刷新 data/web…"));
+    m_webLibraryStatus->setWordWrap(true);
+    connect(rightCard, &MediaLibraryCard::scanRequested, this,
+            [this] { refreshWebLibrary(); });
+    connect(rightCard, &MediaLibraryCard::deleteCheckedRequested, this,
+            &MainWindow::removeCheckedWebItems);
+
+    // 勾选框点击与「单击记忆来源」的区分：按下(itemPressed)先记录勾选态，
+    // 释放(itemClicked)发现状态变了即视为点了勾选框 —— 只影响删除集，不改来源。
+    struct PressTrack {
+        QTreeWidgetItem *item = nullptr;
+        Qt::CheckState state = Qt::Unchecked;
+        bool checkToggled = false;
+        QElapsedTimer clock;
+    };
+    const auto press = std::make_shared<PressTrack>();
+    connect(m_webTree, &QTreeWidget::itemPressed, this, [press](QTreeWidgetItem *item, int) {
+        press->item = item;
+        press->state = item ? item->checkState(0) : Qt::Unchecked;
+    });
+    connect(m_webTree, &QTreeWidget::itemDoubleClicked, this,
+            [this, press](QTreeWidgetItem *item, int) {
+        if (!item)
+            return;
+        // 连续双击勾选框时，双击不应触发「应用来源」
+        if (press->checkToggled && press->clock.elapsed() < 400)
+            return;
+        const int kind = item->data(0, kWebKindRole).toInt();
+        if (kind != WebLibraryPage && kind != WebLibraryProject)
+            return;
+        setWebSource(item->data(0, kWebSourceRole).toString(), true);
+    });
+    connect(m_webTree, &QTreeWidget::itemClicked, this,
+            [this, press](QTreeWidgetItem *item, int) {
+        if (!item)
+            return;
+        // 点击的是勾选框(勾选态在按下→释放间变化)：只影响删除集，不改来源
+        if (item == press->item && item->checkState(0) != press->state) {
+            press->checkToggled = true;
+            press->clock.start();
+            return;
+        }
+        press->checkToggled = false;
+        const int kind = item->data(0, kWebKindRole).toInt();
+        if (kind == WebLibraryPage || kind == WebLibraryProject)
+            setWebSource(item->data(0, kWebSourceRole).toString(), false);
+    });
+
+    rightColLay->addWidget(rightCard, 1);
+    lay->addWidget(rightCol, 1);
+
+    if (!runtimeOk) {
+        m_webStartBtn->setDisabled(true);
+        m_webLib->setLibraryEnabled(false);
+    }
+    refreshWebLibrary();
+    updateWebWallpaperControls();
     scroll->setWidget(page);
     return scroll;
 }
 
-// 网页壁纸页按钮/状态与运行态保持一致(启动后变「停止」)。
+// 网页壁纸页按钮/状态与运行态保持一致：启动键切换「▶ 启动/■ 停止」+ data-active 换色。
 void MainWindow::updateWebWallpaperControls()
 {
     if (!m_webStartBtn)
         return;
     auto &web = WebWallpaper::instance();
     const bool running = web.isRunning();
+    const bool runtimeOk = m_webRuntimeOk;
     // 与视频壁纸互斥的界面侧：视频在跑时应用入口锁死并说明原因。
     const bool videoRunning = VideoWallpaper::instance().isStarted();
-    m_webStartBtn->setEnabled(!videoRunning || running);
+    m_webStartBtn->setEnabled(runtimeOk && (!videoRunning || running));
     m_webStartBtn->setToolTip(videoRunning && !running
                                   ? tooltipstyle::format(
                                         QStringLiteral("视频壁纸运行中，两者只能应用一个。\n"
 
                                                        "先到「视频壁纸」页取消它，再回来应用网页壁纸"))
                                   : QString());
-    m_webStartBtn->setText(running ? QStringLiteral("■ 停止网页壁纸")
-                                   : QStringLiteral("▶ 应用网页壁纸"));
+    m_webStartBtn->setText(running ? QStringLiteral("■ 停止") : QStringLiteral("▶ 启动"));
+    m_webStartBtn->setProperty("data-active", running ? 1 : 0);
+    m_webStartBtn->style()->unpolish(m_webStartBtn);
+    m_webStartBtn->style()->polish(m_webStartBtn);
     if (m_webStateLabel)
         m_webStateLabel->setText(web.stateText());
 }
@@ -589,33 +923,12 @@ QWidget *MainWindow::buildWallpaperPage()
     lay->addWidget(m_wallStack);
     return page;
 }
-void MainWindow::addVideos()
-{
-    // 同图库目录：data/video 只用于定位，不创建(运行目录的 data 归构建期复制管)。
-    const QString videoDir = QCoreApplication::applicationDirPath()
-                             + QStringLiteral("/data/video");
-
-    QStringList files = QFileDialog::getOpenFileNames(
-        this, QStringLiteral("选择视频文件"), videoDir,
-        QStringLiteral("视频文件 (*.mp4 *.webm *.mkv *.avi *.mov *.wmv);;所有文件 (*)"));
-
-    if (files.isEmpty())
-        return;
-    QStringList list = VideoWallpaper::instance().playlist();
-    for (const QString &f : files)
-        if (!list.contains(f))
-            list.append(f);
-    VideoWallpaper::instance().setPlaylist(list);
-    AppConfig &st = AppConfig::instance();
-    st.setValue(ConfigKeys::Video::Playlist, list);
-    refreshVideoList();
-}
-
-// 扫描 data/video(含子目录)下的视频，去重后并入播放列表；只增不删。
+// 以 data/video(含子目录)为准重建视频列表 —— 与网页库刷新同语义：列表即目录镜像。
 void MainWindow::scanVideoDir()
 {
     const QString videoDir = QCoreApplication::applicationDirPath()
                              + QStringLiteral("/data/video");
+    QDir().mkpath(videoDir);
     const QStringList nameFilters = {
         QStringLiteral("*.mp4"),  QStringLiteral("*.webm"), QStringLiteral("*.mkv"),
         QStringLiteral("*.avi"),  QStringLiteral("*.mov"),  QStringLiteral("*.wmv")};
@@ -623,81 +936,62 @@ void MainWindow::scanVideoDir()
     QDirIterator it(videoDir, nameFilters, QDir::Files, QDirIterator::Subdirectories);
     while (it.hasNext())
         found << it.next();
+    found.sort();
 
-    QStringList list = VideoWallpaper::instance().playlist();
-    int added = 0;
-    for (const QString &f : found) {
-        if (!list.contains(f)) {
-            list.append(f);
-            ++added;
-        }
-    }
-    if (added == 0) {
-        setLog(QStringLiteral("扫描完成：未发现新视频"), false);
+    VideoWallpaper::instance().setPlaylist(found);
+    AppConfig &st = AppConfig::instance();
+    st.setValue(ConfigKeys::Video::Playlist, found);
+    refreshVideoList();
+    setLog(QStringLiteral("刷新完成：data/video 共 %1 个视频").arg(found.size()), false);
+}
+
+// 删除勾选的视频：文件移入回收站(可撤销)并同步移出播放列表。若正在播放其中
+// 之一，先停止视频壁纸再删，避免文件被占用导致回收失败。
+void MainWindow::removeCheckedVideos()
+{
+    const QStringList paths = m_videoLib->checkedPaths();
+    if (paths.isEmpty())
         return;
+
+    auto &vp = VideoWallpaper::instance();
+    const QString playingPath =
+        (vp.currentIndex() >= 0 && vp.currentIndex() < vp.playlist().size())
+            ? vp.playlist().at(vp.currentIndex()) : QString();
+    if (vp.isStarted() && paths.contains(playingPath))
+        vp.stopAll();
+
+    int done = 0;
+    QStringList failed;
+    for (const QString &p : paths) {
+        QString err;
+        if (fbswin::moveToRecycleBin(p, &err))
+            ++done;
+        else
+            failed << QStringLiteral("%1(%2)").arg(QFileInfo(p).fileName(), err);
     }
-    VideoWallpaper::instance().setPlaylist(list);
+
+    QStringList list = vp.playlist();
+    for (const QString &p : paths)
+        list.removeAll(p);
+    vp.setPlaylist(list);
     AppConfig &st = AppConfig::instance();
     st.setValue(ConfigKeys::Video::Playlist, list);
     refreshVideoList();
-    setLog(QStringLiteral("扫描完成：新增 %1 个视频(共 %2 个)")
-               .arg(added).arg(list.size()), false);
-}
 
-void MainWindow::removeSelectedVideos()
-{
-    if (!m_videoList)
-        return;
-    const QList<QListWidgetItem *> selected = m_videoList->selectedItems();
-    if (selected.isEmpty())
-        return;
-
-    int firstRow = m_videoList->count();
-    QStringList list = VideoWallpaper::instance().playlist();
-    for (QListWidgetItem *item : selected) {
-        firstRow = qMin(firstRow, m_videoList->row(item));
-        list.removeAll(item->data(Qt::UserRole).toString());
-    }
-    m_videoList->clearSelection();
-    m_videoList->setCurrentRow(-1);
-    for (QListWidgetItem *item : selected) {
-        const int row = m_videoList->row(item);
-        delete m_videoList->takeItem(row);
-    }
-    VideoWallpaper::instance().setPlaylist(list);
-    AppConfig &st = AppConfig::instance();
-    st.setValue(ConfigKeys::Video::Playlist, list);
-    // 选中迁移到同位置(删的是末项则为新的末项)；scrollToItem 对已可见行不动滚动
-    const int target = qMin(firstRow, m_videoList->count() - 1);
-    if (target >= 0) {
-        m_videoList->setCurrentRow(target, QItemSelectionModel::SelectCurrent);
-        m_videoList->scrollToItem(m_videoList->item(target),
-                                  QAbstractItemView::EnsureVisible);
-    }
-    // 就地删除不重建列表，计数标签需要单独刷新
-    if (m_videoStatus)
-        m_videoStatus->setText(QStringLiteral("共 %1 个视频 · %2")
-                                   .arg(list.size())
-                                   .arg(VideoWallpaper::instance().isPlaying()
-                                            ? QStringLiteral("播放中") : QStringLiteral("停止")));
+    if (done > 0)
+        setLog(QStringLiteral("已删除 %1 个视频(移入回收站，可在回收站还原)。").arg(done), false);
+    if (!failed.isEmpty())
+        setLog(QStringLiteral("删除失败：%1").arg(failed.join(QStringLiteral("；"))), true);
     updateVideoButtons();
-    updatePlayingHighlight();
-}
-
-void MainWindow::clearVideos()
-{
-    VideoWallpaper::instance().clearPlaylist();
-    AppConfig &st = AppConfig::instance();
-    st.remove(ConfigKeys::Video::Playlist);
-    refreshVideoList();
-    setLog(QStringLiteral("已清空视频播放列表。"), false);
 }
 
 void MainWindow::startVideo()
 {
     QString err;
     // 列表中选中了条目时，从选中项开始播放壁纸；未选中则沿用上次进度
-    const int selected = m_videoList ? m_videoList->currentRow() : -1;
+    const int selected = (m_videoList && m_videoList->currentItem())
+                             ? m_videoList->indexOfTopLevelItem(m_videoList->currentItem())
+                             : -1;
     if (!VideoWallpaper::instance().startPlaying(&err, selected)) {
         setLog(err.isEmpty() ? QStringLiteral("视频壁纸启动失败") : err, true);
         return;
@@ -724,26 +1018,8 @@ void MainWindow::refreshVideoList()
         return;
     m_videoList->clear();
     for (const QString &f : VideoWallpaper::instance().playlist()) {
-        auto *item = new QListWidgetItem(m_videoList);
-        item->setData(Qt::UserRole, f);
         QFileInfo fi(f);
-        auto *box = new QWidget;
-        box->setProperty("data-playing", false); // 播放中的条目高亮(QSS 按 property 着色)
-        box->setProperty("data-path", f);
-        auto *boxLay = new QVBoxLayout(box);
-        boxLay->setContentsMargins(8, 5, 8, 5);
-        boxLay->setSpacing(1);
-        auto *name = new QLabel(fi.fileName(), box);
-        QFont nf = name->font();
-        nf.setBold(true);
-        name->setFont(nf);
-        auto *path = new QLabel(QDir::toNativeSeparators(f), box);
-        path->setObjectName(QStringLiteral("VideoItemPath"));
-        path->setWordWrap(false);
-        boxLay->addWidget(name);
-        boxLay->addWidget(path);
-        item->setSizeHint(QSize(0, 52));
-        m_videoList->setItemWidget(item, box);
+        m_videoLib->addRow(nullptr, fi.fileName(), fi.suffix().toUpper(), f, true, true);
     }
     if (m_videoStatus)
         m_videoStatus->setText(QStringLiteral("共 %1 个视频 · %2")
@@ -765,16 +1041,14 @@ void MainWindow::updatePlayingHighlight()
                                 ? pl.at(vp.currentIndex())
                                 : QString();
     const bool highlight = vp.isStarted() && !current.isEmpty();
-    for (int i = 0; i < m_videoList->count(); ++i) {
-        QWidget *w = m_videoList->itemWidget(m_videoList->item(i));
-        if (!w)
-            continue;
-        const bool playing = highlight && w->property("data-path").toString() == current;
-        if (w->property("data-playing") != playing) {
-            w->setProperty("data-playing", playing);
-            w->style()->unpolish(w);
-            w->style()->polish(w);
-            w->update();
+    for (int i = 0; i < m_videoList->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *item = m_videoList->topLevelItem(i);
+        const bool playing =
+            highlight && item->data(0, MediaLibraryCard::PathRole).toString() == current;
+        const QBrush bg = playing ? QBrush(QColor(64, 118, 227, 46)) : QBrush();
+        if (item->background(0) != bg || item->background(1) != bg) {
+            item->setBackground(0, bg);
+            item->setBackground(1, bg);
         }
     }
 }
@@ -834,4 +1108,3 @@ void MainWindow::saveWindowGeometry()
     }
     cfg.save();
 }
-

@@ -73,6 +73,7 @@ inline constexpr auto Interactive = "web/interactive";   // 允许鼠标交互(�
 inline constexpr auto Volume = "web/volume";             // 0=静音；WebView2 只有静音两档
 inline constexpr auto Zoom = "web/zoom";                 // 50~200
 inline constexpr auto FpsCap = "web/fpsCap";             // 默认24:壁纸不需要满刷新率,0=跟随页面
+inline constexpr auto PauseFullscreen = "web/pauseFullscreen"; // 全屏时自动暂停(默认关)
 }
 
 namespace Window {
@@ -92,7 +93,12 @@ namespace Kanban {
 inline constexpr auto Enabled = "kanban/enabled";         // 用户最后一次是否让它在跑
 inline constexpr auto ModelPath = "kanban/modelPath";     // 当前模型 model3.json 绝对路径
 inline constexpr auto Scale = "kanban/scale";             // 显示缩放(%)，相对模型基准高度
-inline constexpr auto Opacity = "kanban/opacity";         // 窗口不透明度(%)
+inline constexpr auto Transparency = "kanban/transparency"; // 窗口透明度(%)，0=不透明
+inline constexpr auto OpacityLegacy = "kanban/opacity";     // 旧版「不透明度」，仅迁移用
+inline constexpr auto MenuBgColor = "kanban/menuBgColor";     // 右键菜单底色(空=主题默认)
+inline constexpr auto MenuTransparency = "kanban/menuTransparency"; // 右键菜单透明度(%)，0=不透明
+inline constexpr auto MenuOpacityLegacy = "kanban/menuOpacity"; // 旧版「不透明度」，仅迁移用
+inline constexpr auto MenuGlass = "kanban/menuGlass";         // 右键菜单玻璃效果(0=关)
 inline constexpr auto Width = "kanban/width";             // 窗口宽(逻辑像素)
 inline constexpr auto Height = "kanban/height";           // 窗口高(逻辑像素)
 inline constexpr auto PosX = "kanban/x";                  // 窗口左上角(逻辑像素)

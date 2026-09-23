@@ -578,63 +578,56 @@ QPushButton#DangerButton:hover { background: #2a1c1f; border: 1px solid #6b3a40;
 #LogLabel[data-err="1"] { color: #e58a92; }
 
 /* ---------- video playlist ---------- */
-QListWidget#VideoList {
+/* 视频列表操作键: 按语义配色(扫描=青绿查找/添加=蓝主操作/删除=红危险/清空=橙批量) */
+QPushButton#LibraryScanButton {
+    background: #0e8074; border: none; color: #ffffff;
+    font-weight: 600; border-radius: 10px; padding: 8px 14px; font-size: 13px;
+}
+QPushButton#LibraryScanButton:hover { background: #129084; }
+QPushButton#LibraryScanButton:pressed { background: #0b665d; }
+
+QPushButton#LibraryDeleteButton {
+    background: #d0403a; border: none; color: #ffffff;
+    font-weight: 600; border-radius: 10px; padding: 8px 14px; font-size: 13px;
+}
+QPushButton#LibraryDeleteButton:hover { background: #e0524c; }
+QPushButton#LibraryDeleteButton:pressed { background: #b0332e; }
+QPushButton#LibraryDeleteButton:disabled { background: #3a3b42; color: #7a7d88; }
+
+/* 媒体库卡片(视频/网页两页共用)：扫描=青绿、删除=红、无勾选置灰 */
+/* 网页库/视频库共用同一套树形列表外观 */
+QTreeWidget#LibraryTree {
+    font-size: 14px;
     background: #17181d;
     border: 1px solid #2a2b31;
     border-radius: 10px;
     padding: 4px;
+    color: #c9ccd4;
 }
 
-QListWidget#VideoList::item {
+QTreeWidget#LibraryTree::item {
     border-radius: 8px;
-    margin: 1px 1px;
+    margin: 2px 2px;
+    padding: 13px 12px;
 }
 
-QListWidget#VideoList::item:selected { background: #33477f; }
+QTreeWidget#LibraryTree::item:hover { background: #24252c; }
+QTreeWidget#LibraryTree::item:selected { background: #33477f; color: #ffffff; }
 
-/* 视频列表操作键: 按语义配色(扫描=青绿查找/添加=蓝主操作/删除=红危险/清空=橙批量) */
-QPushButton#VideoScanButton {
-    background: #0e8074; border: none; color: #ffffff;
-    font-weight: 600; border-radius: 10px; padding: 8px 14px; font-size: 13px;
-}
-QPushButton#VideoScanButton:hover { background: #129084; }
-QPushButton#VideoScanButton:pressed { background: #0b665d; }
+/* 分支格透明：原生样式会在选中行的分支格上画一块空的高亮圆角块(行首的怪方框) */
+QTreeWidget#LibraryTree::branch { background: transparent; }
 
-QPushButton#VideoAddButton {
-    background: #3d6fd6; border: none; color: #ffffff;
-    font-weight: 600; border-radius: 10px; padding: 8px 14px; font-size: 13px;
-}
-QPushButton#VideoAddButton:hover { background: #4a7ce4; }
-QPushButton#VideoAddButton:pressed { background: #3561bd; }
-
-QPushButton#VideoDeleteButton {
-    background: #d0403a; border: none; color: #ffffff;
-    font-weight: 600; border-radius: 10px; padding: 8px 14px; font-size: 13px;
-}
-QPushButton#VideoDeleteButton:hover { background: #e0524c; }
-QPushButton#VideoDeleteButton:pressed { background: #b0332e; }
-
-QPushButton#VideoClearButton {
-    background: #d98a26; border: none; color: #ffffff;
-    font-weight: 600; border-radius: 10px; padding: 8px 14px; font-size: 13px;
-}
-QPushButton#VideoClearButton:hover { background: #e89a33; }
-QPushButton#VideoClearButton:pressed { background: #b8731c; }
-
-
-QListWidget#VideoList::item:hover { background: #26272e; }
-
-/* 正在播放的视频条目(由条目容器上的 data-playing 属性驱动) */
-QWidget[data-playing="true"] {
-    background: rgba(64, 118, 227, 0.20);
-    border: 1px solid rgba(64, 118, 227, 0.55);
-    border-radius: 8px;
-}
-
-QLabel#VideoItemPath {
-    color: #7c7f8a;
+QTreeWidget#LibraryTree QHeaderView::section {
+    font-size: 12px;
+    background: #202127;
+    border: none;
+    border-bottom: 1px solid #2a2b31;
+    color: #9a9daa;
+    padding: 5px 8px;
     font-size: 11px;
+    font-weight: 600;
 }
+
 
 /* ---------- gallery list ---------- */
 QListWidget#GalleryList {

@@ -129,7 +129,8 @@ bool KanbanController::ensureWindow()
     m_window->setAlwaysOnTop(m_alwaysOnTop);
     m_window->setMouseThrough(m_mouseThrough);
     m_window->setInteractionEnabled(m_interactionEnabled);
-    m_window->setOpacityPercent(m_opacityPercent);
+    m_window->setTransparencyPercent(m_transparencyPercent);
+    m_window->setMenuAppearance(m_menuBg, m_menuTransparency, m_menuGlass);
 
     connect(m_window, &KanbanWindow::pointerEntered, this, [this] {
         if (m_machine.is(State::Idle)) {

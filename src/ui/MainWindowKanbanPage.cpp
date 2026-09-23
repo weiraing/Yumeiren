@@ -24,6 +24,7 @@
 #include <QAction>
 #include <QButtonGroup>
 #include <QCheckBox>
+#include <QColorDialog>
 #include <QComboBox>
 #include <QCoreApplication>
 // QDir 是给 QDir::toNativeSeparators 用的，别当成遗留 include 删掉。
@@ -207,8 +208,13 @@ QWidget *MainWindow::buildKanbanMainPage()
 
     // 左列定宽装两张卡(与动态壁纸页同一套写法)：多出的宽度全给右侧，卡片随内容收缩、
     // 空白集中列尾 —— 所以**卡内不要 addStretch**，否则撑成一大片空框。
+    //
+    // ⚠️ 必须用 `setMinimumWidth` 而不是 `setFixedWidth`：`setFixedWidth` 让左列一个像素
+    // 不让，整页的横向最小宽度被钉死在「左列 + 右列内容固有宽」，**窗口再窄就缩不动** ——
+    // 表现出来是「右侧栏到某宽度停住、内容被边上盖住」，极易误判成右卡没跟手。
+    // （2026-09-23 与动态壁纸页同一处 bug，那边的取证与前后对比见 MEMORY.md「界面约定」。）
     auto *leftCol = new QWidget(page);
-    leftCol->setFixedWidth(uimetrics::kPageLeftColWidth);
+    leftCol->setMinimumWidth(uimetrics::kPageLeftColWidth);
     auto *leftColLay = new QVBoxLayout(leftCol);
     leftColLay->setContentsMargins(0, 0, 0, 0);
     leftColLay->setSpacing(18);
@@ -284,7 +290,11 @@ QWidget *MainWindow::buildKanbanMainPage()
 
     // 与左列相反，右卡要**占满高度**(带 stretch=1、列尾不留 stretch)：卡里是网格墙，
     // 高度不够时该由网格自己滚动，而不是卡片缩成几行、下面留一大片空白。
+    // 右列同样要给个下限（`kPageRightColMinWidth`）并**多包一层容器**：卡片裸进
+    // `QHBoxLayout` 时，`QFrame` 的样式表背景/边框在布局项被对齐后会按 sizeHint 收缩，
+    // 边框与实际内容对不齐。卡片在容器里 `addWidget(card, 1)` 吃满才平。
     auto *right = new QWidget(page);
+    right->setMinimumWidth(uimetrics::kPageRightColMinWidth);
     auto *rightLay = new QVBoxLayout(right);
     rightLay->setContentsMargins(0, 0, 0, 0);
     rightLay->setSpacing(14);
@@ -309,16 +319,107 @@ QWidget *MainWindow::buildKanbanLabPage()
     cardLay->setContentsMargins(14, 14, 14, 14);
     cardLay->setSpacing(10);
 
-    auto *title = new QLabel(QStringLiteral("设置"), card);
+    auto *title = new QLabel(QStringLiteral("右键菜单设置"), card);
     title->setObjectName(QStringLiteral("GroupTitle"));
     cardLay->addWidget(title);
 
     auto *hint = new QLabel(
-        QStringLiteral("这里是看板娘扩展功能的入口。下面每一条都在规划中、尚未实装，"
-                       "做完一个就会在这里变成真的设置项。"), card);
+        QStringLiteral("美化看板娘的右键菜单：底色、透明度与玻璃效果，改动立即生效；\n"
+                       "底色选「无（主题默认）」即恢复原观感。其余条目仍在规划中。"), card);
     hint->setObjectName(QStringLiteral("HintLabel"));
     hint->setWordWrap(true);
     cardLay->addWidget(hint);
+
+    // —— 外观：透明度 / 玻璃效果 / 背景色 ——
+    auto *grid = new QGridLayout();
+    grid->setContentsMargins(0, 0, 0, 0);
+    grid->setHorizontalSpacing(10);
+    grid->setVerticalSpacing(6);
+
+    // 透明度：0=不透明，80=最透。方向与看板娘窗口的「透明度」一致(数值越大越透)，
+    // 免得两个同名滑杆一个往左透一个往右透。
+    auto *menuOpacityLbl = new QLabel(QStringLiteral("透明度"), card);
+    m_kanbanMenuOpacity = makeSlider(0, 80, 0, &m_kanbanMenuOpacityVal, QStringLiteral("%"));
+    m_kanbanMenuOpacity->setToolTip(tooltipstyle::format(
+        QStringLiteral("右键菜单的透明度：0% 完全不透明，80% 是最透一档。\n"
+                       "数值越大菜单本身越淡，能透出后面的画面")));
+    connect(m_kanbanMenuOpacity, &QSlider::valueChanged, this, [this](int v) {
+        if (!m_kanbanSyncing)
+            m_kanban->setMenuTransparency(v);
+    });
+    grid->addWidget(menuOpacityLbl, 0, 0);
+    grid->addWidget(m_kanbanMenuOpacity, 0, 1);
+    grid->addWidget(m_kanbanMenuOpacityVal, 0, 2);
+
+    auto *glassLbl = new QLabel(QStringLiteral("玻璃效果"), card);
+    m_kanbanGlass = makeSlider(0, 100, 0, &m_kanbanGlassVal, QStringLiteral("%"));
+    m_kanbanGlass->setToolTip(tooltipstyle::format(QStringLiteral(
+        "右键菜单的原生亚克力毛玻璃强度。0=关；数值越大磨砂感越强，\n"
+        "玻璃开着时菜单底色会自动转为半透明")));
+    connect(m_kanbanGlass, &QSlider::valueChanged, this, [this](int v) {
+        if (!m_kanbanSyncing)
+            m_kanban->setMenuGlass(v);
+    });
+    grid->addWidget(glassLbl, 1, 0);
+    grid->addWidget(m_kanbanGlass, 1, 1);
+    grid->addWidget(m_kanbanGlassVal, 1, 2);
+
+    auto *bgLbl = new QLabel(QStringLiteral("背景色"), card);
+    grid->addWidget(bgLbl, 2, 0);
+    const QList<QPair<QString, QColor>> bgPresets = {
+        {QStringLiteral("无（主题默认）"), QColor()},
+        {QStringLiteral("白"), QColor(0xf7, 0xf9, 0xfc)},
+        {QStringLiteral("黑"), QColor(0x14, 0x15, 0x1a)},
+        {QStringLiteral("樱粉"), QColor(0xff, 0xd9, 0xe2)},
+        {QStringLiteral("天蓝"), QColor(0xbf, 0xe0, 0xff)},
+        {QStringLiteral("暖黄"), QColor(0xff, 0xe9, 0xc0)},
+    };
+    auto *bgRow = new QHBoxLayout();
+    bgRow->setSpacing(6);
+    for (const auto &preset : bgPresets) {
+        auto *b = new QPushButton(card);
+        b->setCheckable(true);
+        b->setFixedSize(24, 24);
+        b->setToolTip(tooltipstyle::format(preset.first));
+        b->setStyleSheet(preset.second.isValid()
+            ? QStringLiteral(
+                  "QPushButton { background: %1; border: 1px solid rgba(128,128,128,0.55);"
+                  " border-radius: 6px; }"
+                  "QPushButton:checked { border: 2px solid #2f6fd6; }")
+                  .arg(preset.second.name())
+            : QStringLiteral(
+                  "QPushButton { background: rgba(128,128,128,0.14);"
+                  " border: 1px dashed rgba(128,128,128,0.7); border-radius: 6px; }"
+                  "QPushButton:checked { border: 2px solid #2f6fd6; }"));
+        connect(b, &QPushButton::toggled, this, [this, color = preset.second](bool on) {
+            if (!m_kanbanSyncing && on)
+                m_kanban->setMenuBgColor(color);
+        });
+        bgRow->addWidget(b);
+        m_kanbanBgSwatches.append({b, preset.second});
+    }
+    auto *customBgBtn = new QPushButton(QStringLiteral("自定义…"), card);
+    customBgBtn->setToolTip(tooltipstyle::format(
+        QStringLiteral("从调色板挑选任意背景色（支持半透明）")));
+    connect(customBgBtn, &QPushButton::clicked, this, [this] {
+        const QColor start = m_kanban->menuBgColor().isValid()
+                                 ? m_kanban->menuBgColor()
+                                 : QColor(0xf7, 0xf9, 0xfc);
+        const QColor c = QColorDialog::getColor(start, this, QStringLiteral("选择菜单底色"),
+                                                QColorDialog::ShowAlphaChannel);
+        if (c.isValid() && !m_kanbanSyncing)
+            m_kanban->setMenuBgColor(c);
+    });
+    bgRow->addWidget(customBgBtn);
+    bgRow->addStretch(1);
+    grid->addLayout(bgRow, 2, 1);
+    grid->setColumnStretch(1, 1);
+    cardLay->addLayout(grid);
+
+    auto *displaySep = new QFrame(card);
+    displaySep->setObjectName(QStringLiteral("SideCardSep"));
+    displaySep->setFrameShape(QFrame::HLine);
+    cardLay->addWidget(displaySep);
 
     const QStringList plannedNames = {
         QStringLiteral("悬停提示"),
@@ -348,7 +449,9 @@ QWidget *MainWindow::buildKanbanLabPage()
     }
     cardLay->addStretch(1);
 
-    card->setFixedWidth(uimetrics::kPageLeftColWidth);
+    // 同左列：`setMinimumWidth` 而不是 `setFixedWidth`，否则窗口收窄时这一页缩不动。
+    // 宽度上限仍由 kPageLeftColWidth 之外的 stretch 决定：卡在 AlignLeft 下不会被拉宽。
+    card->setMinimumWidth(uimetrics::kPageLeftColWidth);
     lay->addWidget(card, 0, Qt::AlignTop | Qt::AlignLeft);
     lay->addStretch(1);
     return page;
@@ -472,6 +575,19 @@ QWidget *MainWindow::buildKanbanParamCard(QWidget *parent)
     grid->setHorizontalSpacing(10);
     grid->setVerticalSpacing(6);
 
+    auto *transparencyLbl = new QLabel(QStringLiteral("透明度"), card);
+    m_kanbanTransparency = makeSlider(0, 80, 0, &m_kanbanTransparencyVal, QStringLiteral("%"));
+    m_kanbanTransparency->setToolTip(tooltipstyle::format(
+        QStringLiteral("0 = 完全不透明，数值越大越透明，80% 是最透一档。\n"
+                       "看板娘运行中拖动立即生效")));
+    connect(m_kanbanTransparency, &QSlider::valueChanged, this, [this](int v) {
+        if (!m_kanbanSyncing)
+            m_kanban->setTransparencyPercent(v);
+    });
+    grid->addWidget(transparencyLbl, 0, 0);
+    grid->addWidget(m_kanbanTransparency, 0, 1);
+    grid->addWidget(m_kanbanTransparencyVal, 0, 2);
+
     auto *scaleLbl = new QLabel(QStringLiteral("缩放"), card);
     m_kanbanScale = makeSlider(20, 300, 100, &m_kanbanScaleVal, QStringLiteral("%"));
     m_kanbanScale->setToolTip(tooltipstyle::format(
@@ -480,21 +596,10 @@ QWidget *MainWindow::buildKanbanParamCard(QWidget *parent)
         if (!m_kanbanSyncing)
             m_kanban->setScalePercent(v);
     });
-    grid->addWidget(scaleLbl, 0, 0);
-    grid->addWidget(m_kanbanScale, 0, 1);
-    grid->addWidget(m_kanbanScaleVal, 0, 2);
+    grid->addWidget(scaleLbl, 1, 0);
+    grid->addWidget(m_kanbanScale, 1, 1);
+    grid->addWidget(m_kanbanScaleVal, 1, 2);
 
-    auto *opacityLbl = new QLabel(QStringLiteral("不透明度"), card);
-    m_kanbanOpacity = makeSlider(20, 100, 100, &m_kanbanOpacityVal, QStringLiteral("%"));
-    m_kanbanOpacity->setToolTip(tooltipstyle::format(
-        QStringLiteral("整个窗口不透明度，20% 是最淡一档")));
-    connect(m_kanbanOpacity, &QSlider::valueChanged, this, [this](int v) {
-        if (!m_kanbanSyncing)
-            m_kanban->setOpacityPercent(v);
-    });
-    grid->addWidget(opacityLbl, 1, 0);
-    grid->addWidget(m_kanbanOpacity, 1, 1);
-    grid->addWidget(m_kanbanOpacityVal, 1, 2);
 
     auto *fpsLbl = new QLabel(QStringLiteral("动画帧率"), card);
     m_kanbanFps = makeSlider(10, 60, 30, &m_kanbanFpsVal, QStringLiteral(" fps"));
@@ -507,6 +612,7 @@ QWidget *MainWindow::buildKanbanParamCard(QWidget *parent)
     grid->addWidget(fpsLbl, 2, 0);
     grid->addWidget(m_kanbanFps, 2, 1);
     grid->addWidget(m_kanbanFpsVal, 2, 2);
+
     grid->setColumnStretch(1, 1);
     lay->addLayout(grid);
 
@@ -806,8 +912,16 @@ void MainWindow::setupKanbanAndTray()
     shutdown.addStep(QStringLiteral("停止视频壁纸"), [] {
         VideoWallpaper::instance().stopAll();
     });
+    // 退出不等于用户主动停用：按退出时刻的真实运行态落盘，下次启动才能恢复。
+    // (先写回再 stop() 是没用的 —— stop() 会把 web/enabled 一律清成 false。)
     shutdown.addStep(QStringLiteral("停止网页壁纸"), [] {
-        WebWallpaper::instance().stop();
+        WebWallpaper &web = WebWallpaper::instance();
+        const bool runningAtExit = web.isRunning();
+        web.stop();
+        if (runningAtExit) {
+            AppConfig::instance().setValue(
+                QString::fromLatin1(ConfigKeys::Web::Enabled), true);
+        }
     });
     shutdown.addStep(QStringLiteral("停止看板娘"), [this] {
         if (m_kanban)
@@ -1295,8 +1409,25 @@ void MainWindow::updateKanbanControls()
 
     m_kanbanSyncing = true;
     m_kanbanScale->setValue(m_kanban->scalePercent());
-    m_kanbanOpacity->setValue(m_kanban->opacityPercent());
+    m_kanbanMenuOpacity->setValue(m_kanban->menuTransparency());
     m_kanbanFps->setValue(m_kanban->targetFps());
+    m_kanbanGlass->setValue(m_kanban->menuGlass());
+    // 玻璃滑杆的字面档位：0 是关，其余按强度给个词 —— 纯数字看不出"磨砂到哪一档"。
+    m_kanbanGlassVal->setText(m_kanban->menuGlass() == 0
+                                  ? QStringLiteral("关")
+                                  : (m_kanban->menuGlass() < 40
+                                         ? QStringLiteral("弱")
+                                         : (m_kanban->menuGlass() < 75
+                                                ? QStringLiteral("中")
+                                                : QStringLiteral("强"))));
+    // 背景色色块同步：自定义色不命中任何预设时全部弹起
+    const QColor kanbanBg = m_kanban->menuBgColor();
+    for (const auto &sw : m_kanbanBgSwatches) {
+        const bool on = sw.second == kanbanBg
+                        || (!kanbanBg.isValid() && !sw.second.isValid());
+        if (sw.first->isChecked() != on)
+            sw.first->setChecked(on);
+    }
     m_kanbanTopBox->setChecked(m_kanban->alwaysOnTop());
     m_kanbanThroughBox->setChecked(m_kanban->mouseThrough());
     m_kanbanInteractBox->setChecked(m_kanban->interactionEnabled());

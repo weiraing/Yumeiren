@@ -11,6 +11,8 @@
 #include "wallpaper/VideoWallpaper.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QSet>
 #include <QPaintEvent>
@@ -187,10 +189,12 @@ private:
 // —— user-data 目录默认会无限涨。
 constexpr wchar_t kBrowserArguments[] =
     L"--disable-background-networking --disable-component-update --disk-cache-size=134217728";
-// 与 vendored SDK(1.0.4191.47) 对应的兼容版本。升级 SDK 时要同步这里的值
-// (参考 third_party/webview2/include/WebView2EnvironmentOptions.h 的
+// 运行时兼容版本下限：低于它的 Evergreen 会被拒绝创建环境。有意低于 vendored
+// SDK 的 152.0.4191.47 —— 本模块只用到 ICoreWebView2_8 及更早的接口，放宽一档
+// 可以多覆盖旧的运行时安装。将来用到更新接口时再同步抬高(参考
+// third_party/webview2/include/WebView2EnvironmentOptions.h 的
 // CORE_WEBVIEW_TARGET_PRODUCT_VERSION)。
-constexpr wchar_t kTargetCompatibleVersion[] = L"152.0.4191.47";
+constexpr wchar_t kTargetCompatibleVersion[] = L"148.0.3967.54";
 
 // ICoreWebView2EnvironmentOptions 的最小实现：只实现 v1 的 8 个属性(顺序必须与
 // MIDL 声明一致，乱序=虚表错位)，运行时对 Options2+ 的 QI 拿到 E_NOINTERFACE 后
@@ -241,6 +245,10 @@ private:
     {
         if (!out)
             return E_POINTER;
+        // Language 的默认值是空字符串，不是 nullptr；WebView2 运行时会直接读取
+        // 返回的字符串，传 nullptr 进去会在 wcslen 处触发访问冲突并终止进程。
+        if (!src)
+            src = L"";
         const size_t bytes = (wcslen(src) + 1) * sizeof(wchar_t);
         *out = static_cast<LPWSTR>(CoTaskMemAlloc(bytes));
         if (!*out)
@@ -367,6 +375,12 @@ qint64 suspendReleaseThresholdMs(int reasons)
     return kReleaseDefaultMs;
 }
 
+// 快照节拍间隔；排程点有三处(周期入口/失败重排/挂起跳过)，统一从这里取。
+int snapshotIntervalMs(int refreshMode)
+{
+    return refreshMode == WebWallpaper::SnapshotMinute ? 60000 : 3600000;
+}
+
 QString reasonText(int reasons)
 {
     if (reasons & kSuspendCovered)
@@ -383,6 +397,27 @@ QString reasonText(int reasons)
 }
 
 #endif // Q_OS_WIN
+
+QString findIndexDocument(const QString &directory)
+{
+    const QDir dir(directory);
+    const QFileInfoList files =
+        dir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot, QDir::Name);
+    for (const QString &preferred :
+         {QStringLiteral("index.html"), QStringLiteral("index.htm")}) {
+        for (const QFileInfo &file : files) {
+            if (file.fileName().compare(preferred, Qt::CaseInsensitive) == 0)
+                return file.absoluteFilePath();
+        }
+    }
+    return QString();
+}
+
+// 快照静态页在缓存里的落盘位置(writeSnapshotPage 写、attachController 查)。
+QString snapshotPageFile()
+{
+    return QDir(CachePaths::webSnapshot()).filePath(QStringLiteral("page.html"));
+}
 
 } // namespace
 
@@ -406,14 +441,22 @@ WebWallpaper::WebWallpaper(QObject *parent)
     m_createWatchdog->setSingleShot(true);
     m_createWatchdog->setInterval(20000);
     connect(m_createWatchdog, &QTimer::timeout, this, [this] {
-        if (m_creating) {
-            m_creating = false;
-            setState(QStringLiteral("网页壁纸启动超时(浏览器内核未响应)"));
-            videodiag::log(videodiag::Level::Warning,
-                           QStringLiteral("WebView2 创建超时，已放弃本次启动"),
-                           QStringLiteral("WebWallpaper"));
-            destroyPipeline();
-        }
+        if (!m_creating)
+            return;
+        m_creating = false;
+        setState(QStringLiteral("网页壁纸启动超时(浏览器内核未响应)"));
+        videodiag::log(videodiag::Level::Warning,
+                       QStringLiteral("WebView2 创建超时，已放弃本次启动"),
+                       QStringLiteral("WebWallpaper"));
+        // 与其他失败路径对称地整场复位：只拆管线不清 m_running 的话，界面会一直
+        // 显示「运行中/停止」状态而管线已死，且永远不会自愈或自动重试。
+        destroyPipeline();
+        m_running = false;
+        AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Web::Enabled), false);
+        m_heartbeat->stop();
+        m_snapshotTimer->stop();
+        publishRuntimeState();
+        emit runningChanged(false);
     });
     m_snapshotTimer = new QTimer(this);
     m_snapshotTimer->setSingleShot(true);
@@ -447,6 +490,8 @@ void WebWallpaper::loadSettings()
     m_volume = config.value(QString::fromLatin1(ConfigKeys::Web::Volume), 0).toInt();
     m_zoomPercent = config.value(QString::fromLatin1(ConfigKeys::Web::Zoom), 100).toInt();
     m_fpsCap = config.value(QString::fromLatin1(ConfigKeys::Web::FpsCap), 24).toInt();
+    m_pauseOnFullscreen =
+        config.value(QString::fromLatin1(ConfigKeys::Web::PauseFullscreen), false).toBool();
     m_source = config.value(QString::fromLatin1(ConfigKeys::Web::Source)).toString();
 }
 
@@ -458,22 +503,127 @@ QWidget *WebWallpaper::ensureHostWindow()
     return m_host;
 }
 
-QString WebWallpaper::resolveSource(const QString &source) const
+QString WebWallpaper::resolveSource(const QString &source, QString *error) const
 {
+    if (error)
+        error->clear();
     QString s = source.trimmed();
     if (s.isEmpty())
         s = m_source;
-    if (s.isEmpty())
+    if (s.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("还没有设置网页地址或本地页面");
         return s;
-    if (s.startsWith(QLatin1String("http://")) || s.startsWith(QLatin1String("https://"))
-        || s.startsWith(QLatin1String("file://")))
+    }
+    if (s.startsWith(QLatin1String("http://"), Qt::CaseInsensitive)
+        || s.startsWith(QLatin1String("https://"), Qt::CaseInsensitive)) {
         return s;
-    // 本地：绝对路径原样转 file://；相对路径/文件名相对 data/web 解析。
-    QFileInfo info(s);
-    if (!info.isAbsolute())
+    }
+
+    // 本地：绝对路径转 file://；相对路径/文件名相对 data/web 解析。目录来源
+    // 按完整 Web 项目处理，自动找 index.html 或 index.htm。
+    QFileInfo info;
+    if (s.startsWith(QLatin1String("file://"), Qt::CaseInsensitive)) {
+        const QUrl url(s);
+        if (!url.isLocalFile())
+            return s;
+        info = QFileInfo(url.toLocalFile());
+    } else {
+        info = QFileInfo(s);
+    }
+    if (!info.isAbsolute()) {
         info = QFileInfo(QCoreApplication::applicationDirPath()
                          + QStringLiteral("/data/web/") + s);
+    }
+    info = QFileInfo(QDir::cleanPath(info.absoluteFilePath()));
+    if (!info.exists()) {
+        if (error)
+            *error = QStringLiteral("本地网页不存在：%1")
+                         .arg(QDir::toNativeSeparators(info.absoluteFilePath()));
+        return QString();
+    }
+    if (info.isDir()) {
+        const QString entry = findIndexDocument(info.absoluteFilePath());
+        if (entry.isEmpty()) {
+            if (error)
+                *error = QStringLiteral("所选 Web 项目目录缺少 index.html 或 index.htm：%1")
+                             .arg(QDir::toNativeSeparators(info.absoluteFilePath()));
+            return QString();
+        }
+        info = QFileInfo(entry);
+    }
+    if (!info.isFile()) {
+        if (error)
+            *error = QStringLiteral("所选来源不是网页文件：%1")
+                         .arg(QDir::toNativeSeparators(info.absoluteFilePath()));
+        return QString();
+    }
     return QUrl::fromLocalFile(info.absoluteFilePath()).toString();
+}
+
+// 带用户缩放地导航到真实来源；首挂/换页/快照刷新/恢复实时共用。
+void WebWallpaper::navigateReal()
+{
+#ifdef Q_OS_WIN
+    m_snapshotShowing = false; // 离开静态快照页(刷新/换页/切实时共用)
+    if (m_controller)
+        m_controller->put_ZoomFactor(m_zoomPercent / 100.0);
+    if (m_webview)
+        m_webview->Navigate(reinterpret_cast<LPCWSTR>(m_resolvedSource.utf16()));
+#endif
+}
+
+// 导航到本地静态快照页(稳态)。缩放必须归位 100%：截图是按用户缩放渲染后的
+// 结果，再叠一层缩放会把画面放大变形。
+void WebWallpaper::navigateSnapshotPage()
+{
+#ifdef Q_OS_WIN
+    // 导航在途即按稳态记账：完成回调只补状态文本，不再触发出图。
+    m_snapshotShowing = true;
+    m_snapshotRefreshing = false;
+    if (m_controller)
+        m_controller->put_ZoomFactor(1.0);
+    if (m_webview && !m_snapshotPageUrl.isEmpty())
+        m_webview->Navigate(reinterpret_cast<LPCWSTR>(m_snapshotPageUrl.utf16()));
+#endif
+}
+
+// 快照模式标记一次刷新在途：导航完成后由 onNavigationCompleted 接力出图。
+void WebWallpaper::beginSnapshotRefresh()
+{
+    if (m_refreshMode == Realtime)
+        return;
+    m_snapshotShowing = false;
+    m_snapshotRefreshing = true;
+}
+
+// 把最近一张快照落成 .cache/web-snapshot/{snapshot.png,page.html}。失败时调用方
+// 保持实时渲染等下一拍重试，绝不让桌面黑屏。
+bool WebWallpaper::writeSnapshotPage()
+{
+    const QString dir = CachePaths::webSnapshot();
+    if (!QDir().mkpath(dir))
+        return false;
+    const QString png = QDir(dir).filePath(QStringLiteral("snapshot.png"));
+    if (!m_snapshot.save(png, "PNG"))
+        return false;
+    // 时间戳同时落在文档 URL 与 <img> 上：文件名不变，浏览器缓存同名资源时
+    // 也能拿到新图，稳态刷新才不会停在旧一帧。
+    const QString stamp = QString::number(QDateTime::currentMSecsSinceEpoch());
+    const QByteArray page = QStringLiteral(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><style>"
+        "html,body{margin:0;height:100%;background:#000;overflow:hidden}"
+        "img{position:fixed;left:0;top:0;width:100vw;height:100vh}"
+        "</style></head><body><img src=\"snapshot.png?t=%1\"></body></html>")
+        .arg(stamp).toUtf8();
+    QFile file(QDir(dir).filePath(QStringLiteral("page.html")));
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return false;
+    if (file.write(page) != page.size())
+        return false;
+    m_snapshotPageUrl = QUrl::fromLocalFile(file.fileName()).toString()
+                        + QStringLiteral("?t=") + stamp;
+    return true;
 }
 
 bool WebWallpaper::start(QString *error, const QString &source)
@@ -495,24 +645,37 @@ bool WebWallpaper::start(QString *error, const QString &source)
         return false;
     }
 
-    const QString resolved = resolveSource(source);
+    QString requested = source.trimmed();
+    if (requested.isEmpty())
+        requested = m_source;
+    const QString resolved = resolveSource(requested, error);
     if (resolved.isEmpty()) {
-        if (error)
+        if (error && error->isEmpty())
             *error = QStringLiteral("还没有设置网页地址或本地页面");
         return false;
     }
-    // 网页壁纸与视频壁纸共用同一块桌面层，谁启动谁独占。
-    if (VideoWallpaper::instance().isStarted())
+    // 网页壁纸与视频壁纸共用同一块桌面层，谁启动谁独占。视频侧 startPlaying
+    // 会 stop() 掉网页壁纸并清 web/enabled；这里反向接管也要清掉它的恢复标志
+    // —— 否则「看过视频→改用网页→退出」的用户，下次启动会被恢复成视频壁纸。
+    if (VideoWallpaper::instance().isStarted()) {
         VideoWallpaper::instance().stopAll();
+        AppConfig::instance().setValue(
+            QString::fromLatin1(ConfigKeys::Video::WasPlaying), false);
+    }
 
-    const bool sourceChanged = resolved != m_source;
-    m_source = resolved;
+    const bool sourceChanged = resolved != m_resolvedSource;
+    // 运行态用解析后的 URL，配置和界面保留用户选择的原始相对路径/URL。
+    m_source = requested;
+    m_resolvedSource = resolved;
+    if (sourceChanged)
+        m_snapshotPageUrl.clear(); // 缓存静态页属于旧来源：作废，重建后先走真实页
     AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Web::Source), m_source);
 
     // 已在跑：只换页(本地文件内容变了也可用「应用」重触发)。
     if (m_running && m_webview) {
         if (sourceChanged) {
-            m_webview->Navigate(reinterpret_cast<LPCWSTR>(m_source.utf16()));
+            beginSnapshotRefresh(); // 快照模式：换页后出图再回到静态页
+            navigateReal();
             setState(QStringLiteral("切换页面中…"));
         }
         if (error)
@@ -546,13 +709,22 @@ bool WebWallpaper::start(QString *error, const QString &source)
 
     // 浏览器用户数据目录：登录态/缓存都落在 .cache/web-profile(清缓存可带走)。
     m_creating = true;
+    m_releasedForSuspend = false; // 全新管线，旧的「长挂起已释放待重建」作废
     m_createWatchdog->start();
+    // 创建回调带代数：stop() 后立刻 start() 时，上一代迟到的回调必须丢弃，
+    // 否则新旧两代环境/控制器先后落到成员上(COM 泄漏 + 双管线叠加)。
+    const quint32 epoch = m_epoch;
     auto *options = new EnvironmentOptions;
     const HRESULT hr = fbswin::webview2CreateEnvironment(
         CachePaths::webProfile(), options,
         new ComHandler<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler,
                        ICoreWebView2Environment *>(
-            [this](HRESULT code, ICoreWebView2Environment *env) {
+            [this, epoch](HRESULT code, ICoreWebView2Environment *env) {
+                if (epoch != m_epoch) { // 管线已被停止/超时/重建，回调过期
+                    if (env)
+                        env->Release();
+                    return;
+                }
                 onEnvironmentReady(code, env);
             },
             IID_ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler));
@@ -584,6 +756,9 @@ void WebWallpaper::stop()
 #ifdef Q_OS_WIN
     VW_ASSERT_GUI();
     m_running = false;
+    // 创建在途也要清：滞留的 m_creating 会让下一次 start 走「创建在途」分支
+    // 空转返回 true，网页壁纸从此起不来。迟到的创建回调由代数鉴别丢弃。
+    m_creating = false;
     AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Web::Enabled), false);
     destroyPipeline();
     m_heartbeat->stop();
@@ -623,11 +798,19 @@ void WebWallpaper::onEnvironmentReady(HRESULT code, ICoreWebView2Environment *en
     // 之下再调 put_IsVisible 就是 use-after-free(实测段错误就在这一步)。
     m_environment = env;
     env->AddRef();
+    const quint32 epoch = m_epoch; // 控制器回调同样按代鉴别
     env->CreateCoreWebView2Controller(
         reinterpret_cast<HWND>(m_host->winId()),
         new ComHandler<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler,
                        ICoreWebView2Controller *>(
-            [this](HRESULT hr, ICoreWebView2Controller *controller) {
+            [this, epoch](HRESULT hr, ICoreWebView2Controller *controller) {
+                if (epoch != m_epoch) { // 等控制器期间管线已被回收
+                    if (controller) {
+                        controller->Close();
+                        controller->Release();
+                    }
+                    return;
+                }
                 onControllerReady(hr, controller);
             },
             IID_ICoreWebView2CreateCoreWebView2ControllerCompletedHandler));
@@ -713,12 +896,20 @@ void WebWallpaper::attachController()
             [](HRESULT, LPCWSTR) {},
             IID_ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler));
 
-    m_controller->put_ZoomFactor(m_zoomPercent / 100.0);
     applyAudio();
     applyWebView2ChildPriority();
     startSnapshotCycle();
 
-    m_webview->Navigate(reinterpret_cast<LPCWSTR>(m_source.utf16()));
+    const bool cachedPageReady = !m_snapshotPageUrl.isEmpty()
+        && QFile::exists(snapshotPageFile());
+    if (m_refreshMode != Realtime && cachedPageReady) {
+        // 上一拍落盘的静态快照页还在缓存(同会话整树重建/同来源恢复)：直接落
+        // 稳态，真实页不必先空跑一拍；下一节拍照常刷新。
+        navigateSnapshotPage();
+    } else {
+        beginSnapshotRefresh(); // 快照模式：首图等导航完成后再出图
+        navigateReal();
+    }
     videodiag::log(videodiag::Level::Info,
                    QStringLiteral("网页壁纸已挂载: %1 (refresh=%2 interactive=%3)")
                        .arg(m_source).arg(m_refreshMode).arg(m_interactive),
@@ -795,34 +986,52 @@ void WebWallpaper::onNavigationCompleted(HRESULT code)
     if (m_shuttingDown || !m_running)
         return;
     applyWebView2ChildPriority(); // 换页会拉起新的渲染进程，再降一次级
-    if (FAILED(code)) {
-        setState(QStringLiteral("页面加载失败，已保持黑屏；请检查地址或网络"));
+
+    if (m_refreshMode != Realtime && m_snapshotShowing && !m_snapshotRefreshing) {
+        // 静态快照页落稳。这条完成绝不能触发出图 —— 否则「截→写→导航→
+        // 立刻再截」自激励成 2s 一轮的无限循环，快照节拍形同虚设。
+        setState(runtimeStateText());
         return;
     }
-    setState(m_refreshMode == Realtime
-                 ? QStringLiteral("网页壁纸运行中")
-                 : QStringLiteral("网页壁纸快照模式运行中"));
-    if (m_refreshMode != Realtime)
-        QTimer::singleShot(2000, this, &WebWallpaper::captureSnapshot);
+
+    if (FAILED(code)) {
+        setState(QStringLiteral("页面加载失败，已保持黑屏；请检查地址或网络"));
+        // 这一拍的节拍已被消费：失败也要就地重排，否则一次失败就让快照
+        // 周期永久停摆(恢复可见后再也不刷新)。
+        if (m_refreshMode != Realtime)
+            m_snapshotTimer->start(snapshotIntervalMs(m_refreshMode));
+        return;
+    }
+    setState(runtimeStateText());
+    if (m_refreshMode != Realtime) {
+        // 真实页导航完成(DOM 就绪)：等一拍首帧绘制后出图。首挂与刷新在途
+        // 的导航都汇聚到这一条热路径，不再各自排程。
+        QTimer::singleShot(kSnapshotWarmupMs, this, &WebWallpaper::doCapturePreview);
+    }
 #endif
 }
 
-// —— 快照模式：两次刷新间控制器不可见(浏览器近乎零渲染)，刷新 = 短暂唤醒 →
-// CapturePreview → 回到不可见。实时模式整条链路不参与。 ——
+// —— 快照模式：稳态停在本地静态快照页(整页一张图，无脚本无动画，空闲渲染
+// ≈0，桌面由 Chromium 自己的合成面呈现截图)；刷新 = 回真实页重新渲染 →
+// CapturePreview → 改写静态页并导航回去。实时模式整条链路不参与。 ——
 
 void WebWallpaper::startSnapshotCycle()
 {
 #ifdef Q_OS_WIN
     if (m_refreshMode == Realtime) {
         m_snapshotTimer->stop();
-        if (m_controller)
+        // 挂起期间(锁定/遮挡/熄屏/电池)不能强行可见 —— 可见性归 applySuspend 管；
+        // 快照稳态或挂起可能停在 TrySuspend 冻结态，切回实时必须先 Resume。
+        if (m_controller && !m_suspendReasons) {
+            if (m_webview3)
+                static_cast<ICoreWebView2_3 *>(m_webview3)->Resume();
             m_controller->put_IsVisible(TRUE);
+        }
         return;
     }
     // 节拍在 onCapturePreview 里重排(单发定时器)：这保证「上一拍没截好」不会
-    // 堆积下一拍。这里只负责排下一拍；导航完成后的首次快照另有 2s 快路径。
-    const int intervalMs = m_refreshMode == SnapshotMinute ? 60000 : 3600000;
-    m_snapshotTimer->start(intervalMs);
+    // 堆积下一拍。这里只负责排下一拍；首图走 onNavigationCompleted 的热路径。
+    m_snapshotTimer->start(snapshotIntervalMs(m_refreshMode));
 #endif
 }
 
@@ -831,33 +1040,55 @@ void WebWallpaper::stopSnapshotCycle()
     m_snapshotTimer->stop();
 }
 
+// 节拍入口：从稳态唤醒出真实页重新渲染，或对已在屏的真实页直接出图。
 void WebWallpaper::captureSnapshot()
 {
 #ifdef Q_OS_WIN
     if (m_shuttingDown || !m_running || !m_webview || m_refreshMode == Realtime)
         return;
-    if (m_suspendReasons != 0)
-        return; // 本来就看不见，这轮不截，等下一轮
-    // 唤醒 → 等一拍渲染 → 截图 → 回到不可见。TrySuspend 挂起态先 Resume。
+    if (m_suspendReasons != 0) {
+        // 本来就看不见，这轮不截。单发定时器已消费掉这一拍，必须就地重排
+        // —— 否则挂起期间快照节奏停摆，恢复可见后再也不刷新。
+        m_snapshotTimer->start(snapshotIntervalMs(m_refreshMode));
+        return;
+    }
     if (m_webview3)
-        static_cast<ICoreWebView2_3 *>(m_webview3)->Resume();
+        static_cast<ICoreWebView2_3 *>(m_webview3)->Resume(); // 挂起态先唤醒(兜底)
     if (m_controller)
         m_controller->put_IsVisible(TRUE);
-    QTimer::singleShot(kSnapshotWarmupMs, this, [this] {
-        if (m_shuttingDown || !m_running || !m_webview)
-            return;
-        // IStream 由 CapturePreview 写入 PNG，完成回调里读回。
-        IStream *stream = nullptr;
-        if (FAILED(CreateStreamOnHGlobal(nullptr, TRUE, &stream)) || !stream)
-            return;
-        m_webview->CapturePreview(
-            COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG, stream,
-            new ComHandler1<ICoreWebView2CapturePreviewCompletedHandler>(
-                [this, stream](HRESULT code) {
-                    onCapturePreview(code, stream);
-                },
-                IID_ICoreWebView2CapturePreviewCompletedHandler));
-    });
+    if (m_snapshotShowing) {
+        // 稳态在静态快照页上：回真实页重新渲染，完成后由 onNavigationCompleted
+        // 接力出图(统一走 kSnapshotWarmupMs 热路径)。
+        beginSnapshotRefresh();
+        navigateReal();
+        return;
+    }
+    // 真实页已在屏(首次挂载/上一拍没截好)：等一拍渲染直接出图。
+    QTimer::singleShot(kSnapshotWarmupMs, this, &WebWallpaper::doCapturePreview);
+#endif
+}
+
+// 出图步：真实页已渲染，发起 CapturePreview，完成回调里落盘并回稳态。
+void WebWallpaper::doCapturePreview()
+{
+#ifdef Q_OS_WIN
+    if (m_shuttingDown || !m_running || !m_webview || m_refreshMode == Realtime)
+        return;
+    // IStream 由 CapturePreview 写入 PNG，完成回调里读回。
+    IStream *stream = nullptr;
+    if (FAILED(CreateStreamOnHGlobal(nullptr, TRUE, &stream)) || !stream) {
+        // 系统级异常拿不到流：重排下一拍，别让节奏就此断掉。
+        if (m_running)
+            m_snapshotTimer->start(snapshotIntervalMs(m_refreshMode));
+        return;
+    }
+    m_webview->CapturePreview(
+        COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG, stream,
+        new ComHandler1<ICoreWebView2CapturePreviewCompletedHandler>(
+            [this, stream](HRESULT code) {
+                onCapturePreview(code, stream);
+            },
+            IID_ICoreWebView2CapturePreviewCompletedHandler));
 #endif
 }
 
@@ -880,16 +1111,12 @@ void WebWallpaper::onCapturePreview(HRESULT code, IStream *stream)
     stream->Release();
     if (m_shuttingDown)
         return;
-    // 先排下一轮，再决定要不要藏：截图失败/全黑时保持可见并等下一拍重试，
-    // 绝不把桌面留在黑屏上 —— 那会被当成「壁纸退出了」。
-    const bool rescheduled = [this]() {
-        if (m_refreshMode == Realtime || !m_running)
-            return false;
-        const int intervalMs = m_refreshMode == SnapshotMinute ? 60000 : 3600000;
-        m_snapshotTimer->start(intervalMs);
-        return true;
-    }();
-    Q_UNUSED(rescheduled)
+    // 本次出图流程结束(无论成败)：在途标记落地，后续导航分派不再受它影响。
+    m_snapshotRefreshing = false;
+    // 先排下一拍：截图失败/全黑时保持实时渲染等下一拍重试，绝不把桌面留在
+    // 黑屏上 —— 那会被当成「壁纸退出了」。
+    if (m_refreshMode != Realtime && m_running)
+        m_snapshotTimer->start(snapshotIntervalMs(m_refreshMode));
 
     // 全黑检测：抽样像素全 0 视为「页面还没画出首帧」，这一帧不能上墙。
     bool blank = !image.isNull();
@@ -915,14 +1142,19 @@ void WebWallpaper::onCapturePreview(HRESULT code, IStream *stream)
         if (m_host)
             static_cast<WebHostWidget *>(m_host)->setSnapshot(image);
         emit snapshotUpdated();
+        // 快照稳态：落盘后导航到静态快照页 —— 整页就是一张图，无脚本无动画，
+        // Chromium 空闲渲染≈0，桌面由它自己的合成面呈现截图。不能靠 TrySuspend
+        // 省电：契约要求控制器 IsVisible=false 才生效，而隐藏控制器会让宿主
+        // GDI 绘制退出 DWM 合成、桌面露出原壁纸(实测；见 WebHostWidget 注释)。
+        if (m_refreshMode != Realtime && m_running && m_webview) {
+            if (writeSnapshotPage())
+                navigateSnapshotPage();
+            else
+                videodiag::log(videodiag::Level::Warning,
+                               QStringLiteral("快照静态页写入失败，本拍保持实时渲染"),
+                               QStringLiteral("WebWallpaper"));
+        }
     }
-
-    // 回到省电态：拿到有效快照后 TrySuspend —— 合成器保留最后一帧，桌面继续显示
-    // 这一帧而渲染归零。**绝不能 put_IsVisible(FALSE)**：隐藏后宿主窗口的 Qt GDI
-    // 绘制在跨进程挂载的 WorkerW 子窗口上不被 DWM 合成，桌面露出用户原来的静态
-    // 壁纸，看起来就是「壁纸退出了」(实测截图验证过)。
-    if (m_refreshMode != Realtime && m_running && !m_suspendReasons && !image.isNull() && !blank)
-        suspendNoop();
 #endif
 }
 
@@ -942,9 +1174,12 @@ void WebWallpaper::evaluateSuspend()
     }
 
     int reasons = 0;
-    if (fbswin::isFullscreenWindowPresent())
+    // 全屏与遮盖同源：全屏窗口必然盖住桌面。两者都由「全屏自动暂停」控制 ——
+    // 默认关闭时全屏/最大化窗口下壁纸保持渲染，退出全屏立刻可见，不会出现
+    // 「退出全屏后壁纸消失很久」的重建空窗。
+    if (m_pauseOnFullscreen && fbswin::isFullscreenWindowPresent())
         reasons |= kSuspendFullscreen;
-    if (fbswin::isDesktopCoveredByWindow())
+    if (m_pauseOnFullscreen && fbswin::isDesktopCoveredByWindow())
         reasons |= kSuspendCovered;
     if (fbswin::isWorkstationLocked())
         reasons |= kSuspendLocked;
@@ -972,10 +1207,15 @@ void WebWallpaper::evaluateSuspend()
                          int(m_host->geometry().width() * dpr),
                          int(m_host->geometry().height() * dpr));
         if (!fbswin::isWindowMounted(m_host, phys)) {
-            videodiag::log(videodiag::Level::Info,
-                           QStringLiteral("网页壁纸重新挂载到桌面层"),
-                           QStringLiteral("WebWallpaper"));
-            fbswin::mountBehindIcons(m_host, m_host->geometry());
+            // 重挂节流(10s)：WorkerW 短暂不可用/挂载未生效时，每秒重试会把
+            // z 序搅得桌面闪动。m_mountFixClock 构造时已启动，首次检查即刻可用。
+            if (!m_mountFixClock->isValid() || m_mountFixClock->elapsed() >= 10000) {
+                m_mountFixClock->restart();
+                videodiag::log(videodiag::Level::Info,
+                               QStringLiteral("网页壁纸重新挂载到桌面层"),
+                               QStringLiteral("WebWallpaper"));
+                fbswin::mountBehindIcons(m_host, m_host->geometry());
+            }
         }
     }
 
@@ -990,8 +1230,7 @@ void WebWallpaper::evaluateSuspend()
         publishRuntimeState();
     } else if (!shouldSuspend && wasSuspended) {
         applySuspend(false);
-        setState(m_refreshMode == Realtime ? QStringLiteral("网页壁纸运行中")
-                                           : QStringLiteral("网页壁纸快照模式运行中"));
+        setState(runtimeStateText());
         publishRuntimeState();
     }
 
@@ -1009,18 +1248,17 @@ void WebWallpaper::evaluateSuspend()
     }
     if (!shouldSuspend) {
         // 长挂起已整树销毁过：原因解除后必须重建管线，否则壁纸就此消失 ——
-        // 表现正是「挂了一会就自己没了」。节流 5s 防止原因抖动时反复重建。
-        if (m_releasedForSuspend) {
+        // 表现正是「挂了一会就自己没了」。m_releasedForSuspend 只能在重建真正
+        // 发起时清掉：先清标志再撞上 5s 节流窗口的话，标志一丢就永远不会再重建。
+        const bool rebuildDue = m_running && !m_creating && !m_controller
+            && (!m_suspendClock->isValid() || m_suspendClock->elapsed() >= 5000);
+        if (m_releasedForSuspend && rebuildDue) {
             m_releasedForSuspend = false;
-            if (m_running && !m_creating && !m_controller
-                && (!m_suspendClock->isValid() || m_suspendClock->elapsed() >= 5000)) {
-                m_suspendClock->restart();
-                videodiag::log(videodiag::Level::Info,
-                               QStringLiteral("挂起解除，重建网页壁纸管线"),
-                               QStringLiteral("WebWallpaper"));
-                QString err;
-                start(&err);
-            }
+            videodiag::log(videodiag::Level::Info,
+                           QStringLiteral("挂起解除，重建网页壁纸管线"),
+                           QStringLiteral("WebWallpaper"));
+            QString err;
+            start(&err);
         }
         m_suspendClock->invalidate();
     }
@@ -1034,14 +1272,15 @@ void WebWallpaper::applySuspend(bool suspend)
     if (!m_controller)
         return;
     if (suspend) {
-        // 快照模式本来就不可见，只挂起；实时模式两个都做。
-        suspendNoop();
+        // 顺序是契约：TrySuspend 要求 IsVisible=false，否则直接返回
+        // ERROR_INVALID_STATE 静默失败。先藏再挂 —— 锁屏/熄屏/遮挡/全屏下
+        // 本来就不可见；电池模式下桌面短暂露出原壁纸，换来的是渲染真停
+        // (与「已暂停网页壁纸」的状态语义一致)。
         m_controller->put_IsVisible(FALSE);
+        suspendNoop();
     } else {
         if (m_webview3)
             static_cast<ICoreWebView2_3 *>(m_webview3)->Resume();
-        // 快照模式也保持可见：TrySuspend 冻结的最后一帧由合成器继续显示，
-        // 隐藏宿主内容反而会让桌面露出用户原壁纸(见 onCapturePreview 注释)。
         m_controller->put_IsVisible(TRUE);
     }
 #endif
@@ -1050,6 +1289,8 @@ void WebWallpaper::applySuspend(bool suspend)
 void WebWallpaper::destroyPipeline()
 {
 #ifdef Q_OS_WIN
+    // 管线代数推进：在途的环境/控制器创建回调即刻过期(回调侧按代比对)。
+    ++m_epoch;
     if (m_webview && m_navToken >= 0) {
         EventRegistrationToken token{m_navToken};
         m_webview->remove_NavigationCompleted(token);
@@ -1082,6 +1323,8 @@ void WebWallpaper::destroyPipeline()
     }
     m_snapshot = QImage();
     m_suspendedByUs = false;
+    m_snapshotShowing = false;
+    m_snapshotRefreshing = false;
 #endif
 }
 
@@ -1115,13 +1358,12 @@ void WebWallpaper::setRefreshMode(int mode)
 {
     m_refreshMode = qBound(0, mode, 2);
     AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Web::RefreshMode), m_refreshMode);
+    const bool wasShowing = m_snapshotShowing;
+    // 实时分支的 Resume/可见性、快照分支的节拍都由它统一处理(挂起时不动可见性)。
     startSnapshotCycle();
-    if (m_running && m_refreshMode == Realtime && m_controller && !m_suspendReasons)
-        m_controller->put_IsVisible(TRUE);
-    setState(m_running ? (m_refreshMode == Realtime
-                              ? QStringLiteral("网页壁纸运行中")
-                              : QStringLiteral("网页壁纸快照模式运行中"))
-                       : m_stateText);
+    if (m_running && m_refreshMode == Realtime && wasShowing)
+        navigateReal(); // 从快照稳态切回实时：回真实页，别把截图当「实时」挂着
+    setState(m_running ? runtimeStateText() : m_stateText);
 }
 
 void WebWallpaper::setFpsCap(int fps)
@@ -1138,22 +1380,53 @@ void WebWallpaper::setFpsCap(int fps)
 #endif
 }
 
-void WebWallpaper::navigateTo(const QString &source)
+bool WebWallpaper::navigateTo(const QString &source, QString *error)
 {
+    if (error)
+        error->clear();
 #ifdef Q_OS_WIN
-    const QString resolved = resolveSource(source);
+    if (!m_running) {
+        if (error)
+            *error = QStringLiteral("网页壁纸尚未运行");
+        return false;
+    }
+    QString requested = source.trimmed();
+    if (requested.isEmpty())
+        requested = m_source;
+    const QString resolved = resolveSource(requested, error);
     if (resolved.isEmpty())
-        return;
-    m_source = resolved;
+        return false;
+    m_source = requested;
+    m_resolvedSource = resolved;
     AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Web::Source), m_source);
     if (m_webview) {
-        m_webview->Navigate(reinterpret_cast<LPCWSTR>(m_source.utf16()));
+        beginSnapshotRefresh(); // 快照模式下换页后重新出图再回稳态
+        navigateReal();
         setState(QStringLiteral("切换页面中…"));
     }
+    return true;
+#else
+    if (error)
+        *error = QStringLiteral("网页壁纸仅支持 Windows");
+    return false;
 #endif
 }
 
+void WebWallpaper::setPauseOnFullscreen(bool on)
+{
+    m_pauseOnFullscreen = on;
+    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Web::PauseFullscreen), on);
+    evaluateSuspend(); // 立即生效，不等下一拍心跳
+}
+
 // —— 杂项 ——
+
+// 运行态状态文本：环境挂起文本由 reasonText 在挂起建立时设置，解除后回到这里。
+QString WebWallpaper::runtimeStateText() const
+{
+    return m_refreshMode == Realtime ? QStringLiteral("网页壁纸运行中")
+                                     : QStringLiteral("网页壁纸快照模式运行中");
+}
 
 void WebWallpaper::setState(const QString &text)
 {

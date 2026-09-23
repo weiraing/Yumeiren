@@ -33,6 +33,9 @@ public:
     // .cache/web-profile  WebView2 浏览器配置(网页壁纸)。归清缓存管：可再生的
     // 用户级数据(重新登录即可)，不放在 data/ 是因为浏览器缓存动辄上百 MB。
     static QString webProfile();
+    // .cache/web-snapshot  网页壁纸快照模式的静态页(截图 PNG + 展示 HTML)。
+    // 归清缓存管：内容随时可以重新截取。
+    static QString webSnapshot();
 
     // 创建根目录与实际用到的子目录。幂等。失败时给出明确原因，绝不回退 AppData。
     static bool ensureDirectories(QString *errorMessage = nullptr);

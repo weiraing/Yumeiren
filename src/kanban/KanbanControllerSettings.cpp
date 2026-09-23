@@ -15,6 +15,9 @@ constexpr int kMaxEdgePx = 2400;
 constexpr int kBaseWidthPx = 320;
 constexpr int kBaseHeightPx = 480;
 constexpr int kScaleStepPercent = 5;
+// 菜单最多透到 80%：再往上条目文字就开始糊，点了什么都看不清了。
+// 对应窗口透明度的 80 上限，两个滑杆的"最透一档"是同一种手感。
+constexpr int kMaxMenuTransparencyPercent = 80;
 
 QSize windowSizeForScale(int scalePercent)
 {
@@ -28,7 +31,37 @@ void KanbanController::loadSettings()
 {
     AppConfig &config = AppConfig::instance();
     m_scalePercent = config.value(QString::fromLatin1(ConfigKeys::Kanban::Scale), 100).toInt();
-    m_opacityPercent = config.value(QString::fromLatin1(ConfigKeys::Kanban::Opacity), 100).toInt();
+    // 透明度(0=不透明，80=最透)。旧键存的是「不透明度」，缺新键时反算迁移一次。
+    const QString trKey = QString::fromLatin1(ConfigKeys::Kanban::Transparency);
+    if (config.contains(trKey)) {
+        m_transparencyPercent = qBound(0, config.value(trKey).toInt(), 80);
+    } else if (config.contains(QString::fromLatin1(ConfigKeys::Kanban::OpacityLegacy))) {
+        m_transparencyPercent = qBound(0, 100 - config.value(
+            QString::fromLatin1(ConfigKeys::Kanban::OpacityLegacy)).toInt(), 80);
+        config.setValue(trKey, m_transparencyPercent);
+    } else {
+        m_transparencyPercent = 0;
+        config.setValue(trKey, 0);
+    }
+    m_menuBg = QColor(config.value(QString::fromLatin1(ConfigKeys::Kanban::MenuBgColor)).toString());
+
+    // 菜单透明度(0=不透明，80=最透)。旧键存的是「不透明度」，缺新键时反算迁移一次 ——
+    // 与上面窗口透明度同一个处理，用户看不出换过键。
+    const QString menuTrKey = QString::fromLatin1(ConfigKeys::Kanban::MenuTransparency);
+    if (config.contains(menuTrKey)) {
+        m_menuTransparency =
+            qBound(0, config.value(menuTrKey).toInt(), kMaxMenuTransparencyPercent);
+    } else if (config.contains(QString::fromLatin1(ConfigKeys::Kanban::MenuOpacityLegacy))) {
+        m_menuTransparency = qBound(0, 100 - config.value(
+            QString::fromLatin1(ConfigKeys::Kanban::MenuOpacityLegacy)).toInt(),
+            kMaxMenuTransparencyPercent);
+        config.setValue(menuTrKey, m_menuTransparency);
+    } else {
+        m_menuTransparency = 0;
+        config.setValue(menuTrKey, 0);
+    }
+    m_menuGlass =
+        qBound(0, config.value(QString::fromLatin1(ConfigKeys::Kanban::MenuGlass), 0).toInt(), 100);
     m_targetFps = config.value(QString::fromLatin1(ConfigKeys::Kanban::TargetFps), 30).toInt();
     m_alwaysOnTop = config.value(QString::fromLatin1(ConfigKeys::Kanban::AlwaysOnTop), true).toBool();
     m_mouseThrough = config.value(QString::fromLatin1(ConfigKeys::Kanban::MouseThrough), false).toBool();
@@ -121,12 +154,61 @@ void KanbanController::applyScaleToWindow()
     saveGeometry();
 }
 
-void KanbanController::setOpacityPercent(int percent)
+void KanbanController::setTransparencyPercent(int percent)
 {
-    m_opacityPercent = qBound(20, percent, 100);
-    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::Opacity), m_opacityPercent);
+    const int v = qBound(0, percent, 80);
+    if (m_transparencyPercent == v) {
+        return;
+    }
+    m_transparencyPercent = v;
+    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::Transparency), v);
     if (m_window) {
-        m_window->setOpacityPercent(m_opacityPercent);
+        m_window->setTransparencyPercent(v);
+    }
+    emit settingsChanged();
+}
+
+// —— 右键菜单外观：三项任一变动都整体推给窗口并回写设置页 ——
+
+void KanbanController::setMenuBgColor(const QColor &color)
+{
+    const QColor c = color.isValid() ? color : QColor();
+    if (m_menuBg == c) {
+        return;
+    }
+    m_menuBg = c;
+    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::MenuBgColor),
+                                   c.isValid() ? c.name(QColor::HexArgb) : QString());
+    if (m_window) {
+        m_window->setMenuAppearance(m_menuBg, m_menuTransparency, m_menuGlass);
+    }
+    emit settingsChanged();
+}
+
+void KanbanController::setMenuTransparency(int percent)
+{
+    const int v = qBound(0, percent, kMaxMenuTransparencyPercent);
+    if (m_menuTransparency == v) {
+        return;
+    }
+    m_menuTransparency = v;
+    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::MenuTransparency), v);
+    if (m_window) {
+        m_window->setMenuAppearance(m_menuBg, m_menuTransparency, m_menuGlass);
+    }
+    emit settingsChanged();
+}
+
+void KanbanController::setMenuGlass(int level)
+{
+    const int v = qBound(0, level, 100);
+    if (m_menuGlass == v) {
+        return;
+    }
+    m_menuGlass = v;
+    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::MenuGlass), m_menuGlass);
+    if (m_window) {
+        m_window->setMenuAppearance(m_menuBg, m_menuTransparency, m_menuGlass);
     }
     emit settingsChanged();
 }

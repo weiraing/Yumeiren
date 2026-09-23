@@ -3,6 +3,7 @@
 #ifndef KANBANCONTROLLER_H
 #define KANBANCONTROLLER_H
 
+#include <QColor>
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -74,8 +75,16 @@ public:
     // —— 设置(全部即时生效并落盘) ——
     void setScalePercent(int percent);
     int scalePercent() const { return m_scalePercent; }
-    void setOpacityPercent(int percent);
-    int opacityPercent() const { return m_opacityPercent; }
+    void setTransparencyPercent(int percent);
+    void setMenuBgColor(const QColor &color);
+    // 菜单透明度：0=不透明，80=最透。与窗口透明度的方向、上限保持一致。
+    void setMenuTransparency(int percent);
+    // 玻璃效果：0=关，越大磨砂感越强。
+    void setMenuGlass(int level);
+    int transparencyPercent() const { return m_transparencyPercent; }
+    QColor menuBgColor() const { return m_menuBg; }
+    int menuTransparency() const { return m_menuTransparency; }
+    int menuGlass() const { return m_menuGlass; }
     void setTargetFps(int fps);
     int targetFps() const { return m_targetFps; }
     void setAlwaysOnTop(bool onTop);
@@ -190,7 +199,10 @@ private:
 
     // 设置镜像(落盘的单一来源；改设置走 setter，别直接写这几个字段)
     int m_scalePercent = 100;
-    int m_opacityPercent = 100;
+    int m_transparencyPercent = 0;
+    QColor m_menuBg;       // 右键菜单底色(无效 = 主题默认)
+    int m_menuTransparency = 0;  // 菜单透明度：0=不透明，80=最透
+    int m_menuGlass = 0;   // 0=关
     int m_targetFps = 30;
     bool m_alwaysOnTop = true;
     bool m_mouseThrough = false;

@@ -5,8 +5,10 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#include <QColor>
 #include <QHash>
 #include <QLabel>
+#include <QPair>
 #include <QMainWindow>
 #include <QMutex>
 #include <QPoint>
@@ -40,6 +42,8 @@ class QTimer;
 class QButtonGroup;
 class QProcess;
 class QKeySequenceEdit;
+class QTreeWidget;
+class MediaLibraryCard;
 
 namespace fbswin {
 class GlobalHotkey;
@@ -65,10 +69,8 @@ private slots:
     void selectHeaderTab(int index);
     void selectWallTab(int index);
     void selectKanbanTab(int index); // 看板娘页内：看板娘 / 设置(实验性功能)
-    void addVideos();
-    void scanVideoDir(); // 扫描软件目录 data/video 下的视频并入列表
-    void removeSelectedVideos();
-    void clearVideos();
+    void scanVideoDir(); // 以 data/video 为准重建视频列表(目录镜像)
+    void removeCheckedVideos();
     void startVideo();
     void stopVideo();
     void refreshVideoList();
@@ -107,6 +109,9 @@ private:
     QWidget *buildVideoWallpaperPage();
     QWidget *buildWebWallpaperPage();
     void updateWebWallpaperControls(); // 网页壁纸按钮/状态与运行态同步
+    void refreshWebLibrary();          // 扫描 data/web 下的页面与 Web 项目
+    void setWebSource(const QString &source, bool activate);
+    void removeCheckedWebItems();      // 删除网页库勾选项(移入回收站)
     QSlider *makeSlider(int min, int max, int value, QLabel **valueLabel,
                         const QString &suffix = QString());
 
@@ -241,7 +246,8 @@ private:
     QPushButton *m_applyEffectBtn = nullptr;
 
     // video wallpaper page widgets
-    QListWidget *m_videoList = nullptr;
+    QTreeWidget *m_videoList = nullptr;      // 指向 MediaLibraryCard 内的列表
+    MediaLibraryCard *m_videoLib = nullptr;
     QSlider *m_videoVolume = nullptr;
     // 播放模式(互斥单选，三选一)：单循环 / 列表循环 / 随机，默认单循环
     QRadioButton *m_modeSingle = nullptr;
@@ -254,7 +260,6 @@ private:
     QCheckBox *m_autostartBox = nullptr;
     QComboBox *m_screenModeCombo = nullptr;
     // 动态网页壁纸页(WebView2)
-    QLineEdit *m_webSourceEdit = nullptr;
     QComboBox *m_webRefreshCombo = nullptr;
     QComboBox *m_webInteractCombo = nullptr;
     QComboBox *m_webFpsCombo = nullptr;
@@ -262,8 +267,12 @@ private:
     QLabel *m_webVolumeVal = nullptr;
     QSlider *m_webZoomSlider = nullptr;
     QLabel *m_webZoomVal = nullptr;
+    QTreeWidget *m_webTree = nullptr;        // 指向 MediaLibraryCard 内的列表
+    MediaLibraryCard *m_webLib = nullptr;
+    QLabel *m_webLibraryStatus = nullptr;
     QPushButton *m_webStartBtn = nullptr;
     QLabel *m_webStateLabel = nullptr;
+    bool m_webRuntimeOk = false;
     QPushButton *m_playBtn = nullptr;
     QPushButton *m_pauseBtn = nullptr;
     QComboBox *m_fpsBox = nullptr;
@@ -329,10 +338,15 @@ private:
     QHash<QString, qint64> m_kanbanThumbBaseline;
     int m_kanbanThumbTotal = 0; // 本次任务一共要出几张(收尾算成绩用)
     QSlider *m_kanbanScale = nullptr;
-    QSlider *m_kanbanOpacity = nullptr;
+    QSlider *m_kanbanTransparency = nullptr;
     QSlider *m_kanbanFps = nullptr;
+    QSlider *m_kanbanMenuOpacity = nullptr;
+    QLabel *m_kanbanMenuOpacityVal = nullptr;
+    QSlider *m_kanbanGlass = nullptr;
+    QLabel *m_kanbanGlassVal = nullptr;
+    QList<QPair<QPushButton *, QColor>> m_kanbanBgSwatches;
     QLabel *m_kanbanScaleVal = nullptr;
-    QLabel *m_kanbanOpacityVal = nullptr;
+    QLabel *m_kanbanTransparencyVal = nullptr;
     QLabel *m_kanbanFpsVal = nullptr;
     QCheckBox *m_kanbanTopBox = nullptr;
     QCheckBox *m_kanbanThroughBox = nullptr;

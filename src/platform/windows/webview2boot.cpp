@@ -1,6 +1,7 @@
 #include "platform/windows/webview2boot.h"
 
 #include <QCoreApplication>
+#include <string>
 #include <QDir>
 
 #ifdef Q_OS_WIN
@@ -84,7 +85,10 @@ HRESULT webview2CreateEnvironment(const QString &userDataFolder,
     if (!fn)
         return HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND);
     // 完成回调经调用线程的消息循环派发 —— 主程序里就是 GUI 线程的事件循环。
-    return fn(nullptr, reinterpret_cast<LPCWSTR>(userDataFolder.utf16()), options, handler);
+    // CreateCoreWebView2EnvironmentWithOptions 返回前会同步读取路径；这里保留一份
+    // 独立字符串，避免临时 Qt 字符串生命周期成为边界风险。
+    const std::wstring path = userDataFolder.toStdWString();
+    return fn(nullptr, path.c_str(), options, handler);
 }
 
 } // namespace fbswin
