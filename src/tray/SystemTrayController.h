@@ -71,6 +71,7 @@ private:
     QAction *m_actKanbanToggle = nullptr;
     QAction *m_actKanbanPause = nullptr;
     QAction *m_actKanbanNext = nullptr;
+    QAction *m_actKanbanThrough = nullptr; // 鼠标穿透(看板娘下方顶层开关，见 buildContextMenu)
     // 视线追踪四档(无/弱/中/强)，互斥。
     QAction *m_actGazeOff = nullptr;
     QAction *m_actGazeWeak = nullptr;

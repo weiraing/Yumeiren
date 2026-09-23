@@ -190,16 +190,24 @@ void MainWindow::refreshWebLibrary()
     if (!matched)
         m_webTree->setCurrentItem(nullptr);
 
+    // 页脚第一段(统计信息)。**只在这儿算、只存这段**，整行由 updateWebLibraryInfo()
+    // 把状态与当前来源名凑齐后交给 card->setInfo()。
+    //
+    // ⚠️ 段**内**用顿号，段**间**才用 " · "。原来这里 join(" · ")，页脚就成了
+    // 「1 个页面 · 14 个 Web 项目 · 未运行 · —」—— 看着是四段，跟「三条」对不上，
+    // 分不清统计到哪儿为止(2026-09-23 探针截图里一眼看出来的)。
+    // 分隔符一律 QStringLiteral，**不能用 QLatin1String**：· 和 、 都是非 ASCII，
+    // 窄字面量会被编成 UTF-8 多字节，再被当 Latin-1 逐字节解 → 界面上显示 "Â·"。
     QStringList summary;
     if (pageCount > 0)
         summary << QStringLiteral("%1 个页面").arg(pageCount);
     if (projectCount > 0)
         summary << QStringLiteral("%1 个 Web 项目").arg(projectCount);
-    const QString text = summary.isEmpty()
-        ? QStringLiteral("data/web 还没有网页。放进 HTML 或整个 Web 项目后点“刷新”即可。")
-        : summary.join(QLatin1String(" · "));
-    if (m_webLibraryStatus)
-        m_webLibraryStatus->setText(text);
+    // 空库时不再在这儿写整句指引(那句太长，会把页脚第一段撑爆)：
+    // 「放进 HTML…点刷新」已经挪进 ? 的 tooltip，这里只留短标签。
+    m_webStatsText = summary.isEmpty() ? QStringLiteral("还没有网页")
+                                       : summary.join(QStringLiteral("、"));
+    updateWebLibraryInfo();
 }
 
 
@@ -334,7 +342,7 @@ QWidget *MainWindow::buildHelpPage()
         "<p style='color:#d5d8de'>「虞美人」整合了三个开源项目的能力，为 Windows 10 / 11 的文件资源管理器设置背景：</p>"
         "<p style='color:#b9bcc4'>• <b>图片背景</b> —— 基于 Maplespe 的 explorerTool(ExplorerBgTool.dll)，"
         "默认浏览软件目录下的 data/image 文件夹，也可点击“选择文件夹”更换目录，"
-        "支持亮度 / 对比度 / 模糊 / 不透明度 / 显示位置调整，"
+        "支持亮度 / 对比度 / 模糊 / 透明度 / 显示位置调整，"
         "可选扩展到文件打开、保存对话框。</p>"
         "<p style='color:#b9bcc4'>• <b>效果样式</b> —— 基于 Maplespe 的 ExplorerBlurMica(官方 2.0.1)，"
         "为窗口添加 Blur / Acrylic / Mica / MicaAlt 系统级背景效果，亮暗色模式自适应。</p>"
@@ -444,14 +452,18 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     m_videoVolume = new QSlider(Qt::Horizontal, leftCard);
     m_videoVolume->setRange(0, 100);
     m_videoVolume->setValue(0);
-    auto *volVal = new QLabel(QStringLiteral("0"), leftCard);
+    // 计量是百分比；0% 不是"音量很小"而是取消声音播放——底层连音频轨一并停掉
+    // (见 VideoWallpaper::applyAudioPolicy)。
+    auto *volVal = new QLabel(QStringLiteral("0%"), leftCard);
     volVal->setObjectName(QStringLiteral("FieldLabel"));
-    volVal->setMinimumWidth(34);
+    volVal->setMinimumWidth(44); // "100%" 四字符，与网页壁纸音量标签同宽
     volVal->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     connect(m_videoVolume, &QSlider::valueChanged, this, [volVal](int v) {
-        volVal->setText(QString::number(v));
+        volVal->setText(QStringLiteral("%1%").arg(v));
         VideoWallpaper::instance().setVolume(v);
     });
+    m_videoVolume->setToolTip(tooltipstyle::format(QStringLiteral(
+            "视频壁纸音量(相对系统音量的百分比)：0% 取消声音播放，向右越大声")));
     volRow->addWidget(m_videoVolume, 1);
     volRow->addWidget(volVal);
     leftLay->addLayout(volRow);
@@ -484,36 +496,44 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     m_autostartBox->setChecked(VideoWallpaper::instance().autostartEnabled());
     leftLay->addWidget(m_autostartBox);
 
-    auto *modeRow = new QHBoxLayout();
-    modeRow->addWidget(new QLabel(QStringLiteral("多屏"), leftCard));
-    m_screenModeCombo = new QComboBox(leftCard);
-    m_screenModeCombo->addItems({QStringLiteral("主屏显示"), QStringLiteral("全屏拉伸"),
-                                 QStringLiteral("多屏镜像")});
-    styleCombo(m_screenModeCombo);
-    modeRow->addWidget(m_screenModeCombo, 1);
-    leftLay->addLayout(modeRow);
-
-    // 帧率上限：默认 24 FPS；仅当视频帧率高于上限时生效
+    // 帧率：互斥单选四档，按钮 id **就是 fps 值**(0=跟随视频帧率，>0=手动上限)，
+    // 于是不需要再维护一张「下标→值」的对照表 —— 旧版是下拉框，下标与值错位
+    // (下标 2 才是 24)，回填时得逐项比对，多一档 15 FPS 更容易错。
+    //
+    // ⚠️ 两个名字容易混：「默认」这一**档** = 跟随视频帧率(值 0，不设上限)；
+    // 而**出厂值**是 30 fps(2026-09-23 用户定案，原为 24)。两者不是一回事。
+    // ⚠️ 15 FPS 这一档已撤掉；老配置里若存着 15，回填时按「最接近的档位」吸附
+    // (MainWindow::loadVideoSettings)。
     auto *fpsRow = new QHBoxLayout();
-    fpsRow->addWidget(new QLabel(QStringLiteral("帧率上限"), leftCard));
-    m_fpsBox = new QComboBox(leftCard);
-    m_fpsBox->addItems({QStringLiteral("跟随视频"), QStringLiteral("15 FPS"),
-                        QStringLiteral("24 FPS"), QStringLiteral("30 FPS"),
-                        QStringLiteral("60 FPS")});
-    m_fpsBox->setCurrentIndex(2); // 默认 24 FPS
-    styleCombo(m_fpsBox);
-    m_fpsBox->setToolTip(tooltipstyle::format(QStringLiteral(
+    fpsRow->setSpacing(6);   // 与上面「模式」单选行同一观感
+    fpsRow->addWidget(new QLabel(QStringLiteral("帧率"), leftCard));
+    fpsRow->addStretch(1);   // 空白推到中间，四个按钮靠右(与「模式」行对齐)
+    m_fpsGroup = new QButtonGroup(this);
+    m_fpsGroup->setExclusive(true);
+    const QString fpsTip = tooltipstyle::format(QStringLiteral(
             "限制壁纸呈现帧率：视频帧率高于上限时，多出来的帧不再提交呈现。\n"
             "GPU 的 3D 引擎（色彩转换+缩放）占用按呈现帧数线性下降。\n"
-            "「跟随视频」保持原生帧率（最费资源）。\n"
-            "分辨率高于屏幕的素材会被自动限到 24 FPS，改回「跟随视频」即可取消。")));
-    connect(m_fpsBox, &QComboBox::currentIndexChanged, this, [this](int index) {
-        static const int fpsValues[] = {0, 15, 24, 30, 60};
-        VideoWallpaper::instance().setTargetFps(fpsValues[qBound(0, index, 4)]);
-        AppConfig &st = AppConfig::instance();
-        st.setValue(ConfigKeys::Video::TargetFps, fpsValues[qBound(0, index, 4)]);
+            "「默认」跟随视频帧率，保持原生帧率（最费资源）。\n"
+            "分辨率高于屏幕的素材会被自动限到 24 FPS，选「默认」即可取消。"));
+    auto addFpsOption = [&](int fps, const QString &label) {
+        auto *btn = new QRadioButton(label, leftCard);
+        btn->setToolTip(fpsTip);
+        m_fpsGroup->addButton(btn, fps);
+        fpsRow->addWidget(btn);
+    };
+    // 顺序即用户看到的左右顺序：默认 / 24 / 30 / 60
+    addFpsOption(0, QStringLiteral("默认"));
+    addFpsOption(24, QStringLiteral("24 fps"));
+    addFpsOption(30, QStringLiteral("30 fps"));
+    addFpsOption(60, QStringLiteral("60 fps"));
+    // 出厂默认档 30 fps。loadVideoSettings() 随后会用配置里的值覆盖它；
+    // 这里先选中是为了「配置读取失败/键缺失」时单选组不至于一个都不选中。
+    m_fpsGroup->button(30)->setChecked(true);
+    // idClicked 只在**用户点击**时发；程序 setChecked 不发 → 回填不会反过来写配置。
+    connect(m_fpsGroup, &QButtonGroup::idClicked, this, [](int fps) {
+        VideoWallpaper::instance().setTargetFps(fps);
+        AppConfig::instance().setValue(ConfigKeys::Video::TargetFps, fps);
     });
-    fpsRow->addWidget(m_fpsBox, 1);
     leftLay->addLayout(fpsRow);
 
     // 限帧方式(二选一，默认保速丢帧)。两档的省法完全不同，用词必须写清楚。
@@ -555,32 +575,48 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     rightColLay->setContentsMargins(0, 0, 0, 0);
     rightColLay->setSpacing(0);
 
-    // 右侧复用统一的媒体库卡片：标题 → 刷新/打开目录/删除 → 双列列表 → 状态 → 注释
+    // 右侧复用统一的媒体库卡片：标题 → 刷新/打开目录/删除 → 双列列表 → 一行信息。
+    // 第 4 个参数是 ? 的 tooltip，第 5 个参数会追加在它后面 —— 常驻说明全在 tooltip 里，
+    // 卡片底部只剩一行「统计信息 · 状态 · 播放数据名」(2026-09-23 用户要求)。
     auto *rightCard = new MediaLibraryCard(
         QStringLiteral("data/video 视频库"), QStringLiteral("视频"),
         QCoreApplication::applicationDirPath() + QStringLiteral("/data/video"),
         QStringLiteral("「刷新」以 data/video(含子目录)为准重建视频列表；\n"
                        "「✕ 删除」把勾选的视频文件移入回收站(可还原)。\n"
-                       "运行中双击条目：立即切换该视频为壁纸；"
+                       "双击条目：直接用它启动壁纸(已在运行时则立即切换)；"
                        "选中条目后点「启动」：从该视频开始播放。"),
-        QStringLiteral("视频文件放在程序目录 data/video 下；「✕ 删除」会把勾选的视频移入回收站。"));
+        QStringLiteral("视频文件放在程序目录 data/video 下。"));
     m_videoLib = rightCard;
     m_videoList = rightCard->tree();
-    m_videoStatus = rightCard->statusLabel();
     connect(rightCard, &MediaLibraryCard::scanRequested, this,
             [this] { scanVideoDir(); });
     connect(rightCard, &MediaLibraryCard::deleteCheckedRequested, this,
             &MainWindow::removeCheckedVideos);
 
-    // 运行中双击列表条目 → 立即切换该视频为动态壁纸
+    // 双击列表条目 → **直接用它启动壁纸**，与网页壁纸库一致(那边双击 = 应用并启动)。
+    // 旧版是「未启动时双击仅作选中」，还得再点一次「启动」按钮，两个库的操作不统一。
+    //
+    // 「双击勾选框不启动」的保护放在 MainWindow::eventFilter 里(吃掉 viewport 的
+    // MouseButtonDblClick)。**别改成「itemClicked 时看勾选态变没变」那种写法**：
+    // 实测双击勾选框时那个时序对不上，照样会启动(2026-09-23 探针验出来是「不符」)。
+    m_videoList->viewport()->installEventFilter(this);
     connect(m_videoList, &QTreeWidget::itemDoubleClicked, this,
             [this](QTreeWidgetItem *item, int) {
+        if (!item)
+            return;
         auto &vp = VideoWallpaper::instance();
-        if (!vp.isStarted() || vp.playlist().isEmpty())
-            return; // 未启动时双击仅作选中
-        const int row = item ? m_videoList->indexOfTopLevelItem(item) : -1;
-        if (row >= 0 && row < vp.playlist().size())
-            vp.switchToTrack(row);
+        const int row = m_videoList->indexOfTopLevelItem(item);
+        if (row < 0 || row >= vp.playlist().size())
+            return;
+        if (!vp.isStarted() || vp.playlist().isEmpty()) {
+            // 未启动：把这一行设成当前项再走「启动」按钮那条路 —— startVideo() 内部
+            // 就是按 currentItem 的索引起播，这样两边行为完全一致(含写 WasPlaying、
+            // 更新按钮态与状态栏文案)。
+            m_videoList->setCurrentItem(item);
+            startVideo();
+            return;
+        }
+        vp.switchToTrack(row);   // 运行中：立即切换
     });
 
     rightColLay->addWidget(rightCard, 1);
@@ -596,11 +632,6 @@ QWidget *MainWindow::buildVideoWallpaperPage()
         VideoWallpaper::instance().setPauseOnBattery(on);
         AppConfig &st = AppConfig::instance();
         st.setValue(ConfigKeys::Video::PauseBattery, on);
-    });
-    connect(m_screenModeCombo, &QComboBox::currentIndexChanged, this, [this](int idx) {
-        VideoWallpaper::instance().setScreenMode(idx);
-        AppConfig &st = AppConfig::instance();
-        st.setValue(ConfigKeys::Video::ScreenMode, idx);
     });
     connect(m_reclaimBox, &QCheckBox::toggled, this, [this](bool on) {
         VideoWallpaper::instance().setReclaimMemory(on);
@@ -691,50 +722,120 @@ QWidget *MainWindow::buildWebWallpaperPage()
     grid->setHorizontalSpacing(10);
     grid->setVerticalSpacing(8);
     grid->addWidget(new QLabel(QStringLiteral("刷新策略"), leftCard), 0, 0);
-    m_webRefreshCombo = new QComboBox(leftCard);
-    m_webRefreshCombo->addItems({QStringLiteral("实时渲染"), QStringLiteral("快照·每分钟"),
-                                 QStringLiteral("快照·每小时")});
-    m_webRefreshCombo->setCurrentIndex(WebWallpaper::instance().refreshMode());
-    styleCombo(m_webRefreshCombo);
-    m_webRefreshCombo->setToolTip(tooltipstyle::format(
+    // 三档互斥单选，按钮 id 直接取 WebWallpaper::RefreshMode 的枚举值
+    // (Realtime=0 / SnapshotMinute=1 / SnapshotHour=2)，于是不需要「下标→模式」的对照表。
+    m_webRefreshGroup = new QButtonGroup(this);
+    m_webRefreshGroup->setExclusive(true);
+    auto *refreshRow = new QHBoxLayout();
+    refreshRow->setSpacing(6);
+    refreshRow->addStretch(1);   // 按钮靠右，与下面「交互模式」「帧率」两行对齐
+    const QString refreshTip = tooltipstyle::format(
         QStringLiteral("快照模式：准静态页面(时钟/天气)定时截一张图贴桌面，"
-                       "两次刷新之间几乎零 CPU/GPU；实时渲染则让页面持续动画")));
-    connect(m_webRefreshCombo, &QComboBox::currentIndexChanged, this, [](int idx) {
-        WebWallpaper::instance().setRefreshMode(idx);
+                       "两次刷新之间几乎零 CPU/GPU；实时渲染则让页面持续动画"));
+    auto addRefreshOption = [&](int mode, const QString &label) {
+        auto *btn = new QRadioButton(label, leftCard);
+        btn->setToolTip(refreshTip);
+        m_webRefreshGroup->addButton(btn, mode);
+        refreshRow->addWidget(btn);
+    };
+    // 顺序即左右顺序：实时渲染 / 快照·每分钟 / 快照·每小时
+    addRefreshOption(WebWallpaper::Realtime, QStringLiteral("实时渲染"));
+    addRefreshOption(WebWallpaper::SnapshotMinute, QStringLiteral("快照·每分钟"));
+    addRefreshOption(WebWallpaper::SnapshotHour, QStringLiteral("快照·每小时"));
+    // idClicked 只在**用户点击**时发；程序 setChecked 不发 → 回填不会反过来写配置。
+    connect(m_webRefreshGroup, &QButtonGroup::idClicked, this, [](int mode) {
+        WebWallpaper::instance().setRefreshMode(mode);
     });
-    grid->addWidget(m_webRefreshCombo, 0, 1);
+    {
+        // 配置写盘时 AppConfig 会把 web/refreshMode 钳到 0..2，正常不会越界；
+        // 但 loadSettings() 是直接 toInt() 读的，手改配置文件仍可能塞进 5 —— 那种情况下
+        // button(5) 返回 nullptr，直接解引用就是崩溃。所以这里兜一下底。
+        const int saved = WebWallpaper::instance().refreshMode();
+        const int mode = m_webRefreshGroup->button(saved) ? saved : int(WebWallpaper::Realtime);
+        if (mode != saved) {
+            videodiag::log(videodiag::Level::Info,
+                           QStringLiteral("网页壁纸刷新策略：配置里的 %1 不在可选档位内，回落到实时渲染")
+                               .arg(saved),
+                           QLatin1String("UI"));
+            WebWallpaper::instance().setRefreshMode(mode);
+        }
+        m_webRefreshGroup->button(mode)->setChecked(true);
+    }
+    grid->addLayout(refreshRow, 0, 1);
 
     grid->addWidget(new QLabel(QStringLiteral("交互模式"), leftCard), 1, 0);
-    m_webInteractCombo = new QComboBox(leftCard);
-    m_webInteractCombo->addItems({QStringLiteral("允许鼠标交互"), QStringLiteral("仅展示(穿透点击)")});
-    m_webInteractCombo->setCurrentIndex(WebWallpaper::instance().interactive() ? 0 : 1);
-    styleCombo(m_webInteractCombo);
-    connect(m_webInteractCombo, &QComboBox::currentIndexChanged, this, [](int idx) {
-        WebWallpaper::instance().setInteractive(idx == 0);
+    // 两档互斥单选，按钮 id 直接承载语义值：0 = 网页展示(鼠标穿透)、1 = 网页交互。
+    // ⚠️ 这两个名字最容易记反：「网页展示」才是**穿透**（只看不摸，鼠标落到桌面），
+    // 「网页交互」才吃鼠标。档位名是用户定的(2026-09-23)，别再改回上一版的
+    // 「允许鼠标交互 / 仅展示(穿透点击)」—— 那一版还是下拉框，且默认选的是「允许交互」。
+    // 出厂默认「网页展示」= false：见 AppConfig 的 kBoolDefaultTrue(该项已移出那张表)。
+    m_webInteractGroup = new QButtonGroup(this);
+    m_webInteractGroup->setExclusive(true);
+    auto *interactRow = new QHBoxLayout();
+    interactRow->setSpacing(6);
+    interactRow->addStretch(1);   // 按钮靠右，与上面「刷新策略」同一观感
+    const QString interactTip = tooltipstyle::format(
+        QStringLiteral("网页壁纸挂在桌面图标后面，两种模式都不影响点图标，差别只在桌面空白处：\n"
+                       "「网页展示」鼠标穿透，空白处的点击/框选/右键菜单照常落到桌面；\n"
+                       "「网页交互」网页接收鼠标，页面里的按钮、链接、滚动才能用。"));
+    auto addInteractOption = [&](int id, const QString &label) {
+        auto *btn = new QRadioButton(label, leftCard);
+        btn->setToolTip(interactTip);
+        m_webInteractGroup->addButton(btn, id);
+        interactRow->addWidget(btn);
+    };
+    // 顺序即左右顺序：网页展示 / 网页交互
+    addInteractOption(0, QStringLiteral("网页展示"));
+    addInteractOption(1, QStringLiteral("网页交互"));
+    // idClicked 只在**用户点击**时发；程序 setChecked 不发 → 回填不会反过来写配置。
+    connect(m_webInteractGroup, &QButtonGroup::idClicked, this, [](int id) {
+        WebWallpaper::instance().setInteractive(id == 1);   // 内部会顺手写配置
     });
-    grid->addWidget(m_webInteractCombo, 1, 1);
+    m_webInteractGroup->button(WebWallpaper::instance().interactive() ? 1 : 0)->setChecked(true);
+    grid->addLayout(interactRow, 1, 1);
 
-    grid->addWidget(new QLabel(QStringLiteral("帧率上限"), leftCard), 2, 0);
-    m_webFpsCombo = new QComboBox(leftCard);
-    m_webFpsCombo->addItems({QStringLiteral("跟随页面"), QStringLiteral("24 fps"),
-                             QStringLiteral("30 fps"), QStringLiteral("60 fps")});
-    const int capVals[4] = {0, 24, 30, 60};
-    const int curCap = WebWallpaper::instance().fpsCap();
-    int capIdx = 0;
-    for (int i = 0; i < 4; ++i)
-        if (capVals[i] == curCap)
-            capIdx = i;
-    m_webFpsCombo->setCurrentIndex(capIdx);
-    styleCombo(m_webFpsCombo);
-    m_webFpsCombo->setToolTip(tooltipstyle::format(
-        QStringLiteral("默认 24：网页壁纸不需要满屏幕刷新率，页面按 requestAnimationFrame"
-                       "驱动的动效(canvas/WebGL)会随之降帧，大幅省 GPU/CPU；"
-                       "对 CSS 过渡类动画不起作用")));
-    connect(m_webFpsCombo, &QComboBox::currentIndexChanged, this, [](int idx) {
-        const int vals[4] = {0, 24, 30, 60};
-        WebWallpaper::instance().setFpsCap(idx >= 0 && idx < 4 ? vals[idx] : 0);
+    grid->addWidget(new QLabel(QStringLiteral("帧率"), leftCard), 2, 0);
+    // 与视频壁纸页同一套档位与写法(见 buildVideoWallpaperPage 里那段注释)：
+    // 按钮 id 就是 fps 值，「默认」= 跟随页面(值 0，不设上限)，出厂默认 30。
+    // 页面这边的值取自 WebWallpaper 已加载的设置(不是直接读配置)，与旧版一致。
+    m_webFpsGroup = new QButtonGroup(this);
+    m_webFpsGroup->setExclusive(true);
+    auto *webFpsRow = new QHBoxLayout();
+    webFpsRow->setSpacing(6);
+    webFpsRow->addStretch(1);   // 按钮靠右，与视频页那一行同一观感
+    const QString webFpsTip = tooltipstyle::format(
+        QStringLiteral("网页壁纸不需要满屏幕刷新率：页面按 requestAnimationFrame 驱动的动效"
+                       "(canvas/WebGL)会随上限降帧，大幅省 GPU/CPU；"
+                       "对 CSS 过渡类动画不起作用。\n"
+                       "「默认」跟随页面自身帧率(不设上限，最费资源)。"));
+    auto addWebFpsOption = [&](int fps, const QString &label) {
+        auto *btn = new QRadioButton(label, leftCard);
+        btn->setToolTip(webFpsTip);
+        m_webFpsGroup->addButton(btn, fps);
+        webFpsRow->addWidget(btn);
+    };
+    // 顺序即左右顺序：默认 / 24 / 30 / 60
+    addWebFpsOption(0, QStringLiteral("默认"));
+    addWebFpsOption(24, QStringLiteral("24 fps"));
+    addWebFpsOption(30, QStringLiteral("30 fps"));
+    addWebFpsOption(60, QStringLiteral("60 fps"));
+    connect(m_webFpsGroup, &QButtonGroup::idClicked, this, [](int fps) {
+        WebWallpaper::instance().setFpsCap(fps);   // 内部会顺手写配置
     });
-    grid->addWidget(m_webFpsCombo, 2, 1);
+    {
+        const int saved = WebWallpaper::instance().fpsCap();
+        int cap = saved;
+        if (!m_webFpsGroup->button(cap)) {
+            cap = snapToFpsOption(saved);
+            videodiag::log(videodiag::Level::Info,
+                           QStringLiteral("网页壁纸帧率：配置里的 %1 已不在可选档位内，吸附到 %2")
+                               .arg(saved).arg(cap),
+                           QLatin1String("UI"));
+            WebWallpaper::instance().setFpsCap(cap);
+        }
+        m_webFpsGroup->button(cap)->setChecked(true);
+    }
+    grid->addLayout(webFpsRow, 2, 1);
 
     grid->addWidget(new QLabel(QStringLiteral("音量"), leftCard), 3, 0);
     auto *volRow = new QHBoxLayout();
@@ -750,8 +851,8 @@ QWidget *MainWindow::buildWebWallpaperPage()
         WebWallpaper::instance().setVolume(v);
     });
     m_webVolumeSlider->setToolTip(tooltipstyle::format(
-        QStringLiteral("WebView2 只能整体静音/取消静音，没有音量级：拉到 0 即静音，"
-                       "大于 0 为出声(音量跟随系统)")));
+        QStringLiteral("网页壁纸音量(%)：0% 取消声音播放；WebView2 没有音量级，"
+                       "大于 0 即出声(音量跟随系统)")));
     volRow->addWidget(m_webVolumeSlider, 1);
     volRow->addWidget(m_webVolumeVal);
     grid->addLayout(volRow, 3, 1);
@@ -773,16 +874,6 @@ QWidget *MainWindow::buildWebWallpaperPage()
     zoomRow->addWidget(m_webZoomVal);
     grid->addLayout(zoomRow, 4, 1);
 
-    // 全屏自动暂停：默认不勾选(勾选后检测到全屏应用即挂起，退出全屏自动恢复)
-    grid->addWidget(new QLabel(QStringLiteral("全屏自动暂停"), leftCard), 5, 0);
-    auto *fsBox = new QCheckBox(leftCard);
-    fsBox->setChecked(WebWallpaper::instance().pauseOnFullscreen());
-    fsBox->setToolTip(tooltipstyle::format(QStringLiteral(
-        "检测到全屏应用时自动暂停网页壁纸以省电，\n退出全屏后自动恢复。")));
-    connect(fsBox, &QCheckBox::toggled, this,
-            [](bool on) { WebWallpaper::instance().setPauseOnFullscreen(on); });
-    grid->addWidget(fsBox, 5, 1);
-
     grid->setColumnStretch(1, 1);
     leftLay->addLayout(grid);
 
@@ -793,6 +884,8 @@ QWidget *MainWindow::buildWebWallpaperPage()
     connect(&WebWallpaper::instance(), &WebWallpaper::stateChanged, this, [this](const QString &text) {
         if (m_webStateLabel)
             m_webStateLabel->setText(text);
+        // 同一个状态也要反映到右栏页脚(第二段) —— 那是两处独立的显示，都要更新。
+        updateWebLibraryInfo();
     });
     connect(&WebWallpaper::instance(), &WebWallpaper::runningChanged, this,
             [this](bool) { updateWebWallpaperControls(); });
@@ -813,7 +906,8 @@ QWidget *MainWindow::buildWebWallpaperPage()
     rightColLay->setContentsMargins(0, 0, 0, 0);
     rightColLay->setSpacing(0);
 
-    // 右侧复用统一的媒体库卡片：标题 → 刷新/打开目录/删除 → 双列列表 → 状态 → 注释
+    // 右侧复用统一的媒体库卡片：标题 → 刷新/打开目录/删除 → 双列列表 → 一行信息。
+    // 与视频页同一个卡片类，页脚也是同一套三段式(统计信息 · 状态 · 当前来源名)。
     auto *rightCard = new MediaLibraryCard(
         QStringLiteral("data/web 网页库"), QStringLiteral("页面 / 项目"),
         webLibraryRoot(),
@@ -821,12 +915,12 @@ QWidget *MainWindow::buildWebWallpaperPage()
                        "分类里的 .html/.htm 会作为页面列出；\n"
                        "包含 index.html 或 index.htm 的文件夹会作为完整 Web 项目列出，"
                        "其余 js/css/图片资源不用手动挑选。"),
-        QStringLiteral("目录里还可放嵌套分类；含 index.html/index.htm 的目录自动识别为 Web 项目。"));
+        QStringLiteral("目录里还可放嵌套分类；放进 HTML 或整个 Web 项目后点「刷新」即可。"));
     m_webLib = rightCard;
     m_webTree = rightCard->tree();
-    m_webLibraryStatus = rightCard->statusLabel();
-    m_webLibraryStatus->setText(QStringLiteral("正在刷新 data/web…"));
-    m_webLibraryStatus->setWordWrap(true);
+    // 初始值：refreshWebLibrary() 在本页构造末尾会立刻跑一遍并覆盖它。
+    // 它只是让页脚在刷新完成前不是空的 —— 过渡态只填第一段。
+    m_webLib->setInfo(QStringLiteral("正在刷新 data/web…"), QString(), QString());
     connect(rightCard, &MediaLibraryCard::scanRequested, this,
             [this] { refreshWebLibrary(); });
     connect(rightCard, &MediaLibraryCard::deleteCheckedRequested, this,
@@ -886,7 +980,8 @@ QWidget *MainWindow::buildWebWallpaperPage()
     return scroll;
 }
 
-// 网页壁纸页按钮/状态与运行态保持一致：启动键切换「▶ 启动/■ 停止」+ data-active 换色。
+// 网页壁纸页按钮/状态与运行态保持一致：启动键切换「▶ 启动/■ 取消」+ data-active 换色。
+// (启动后叫「取消」与视频壁纸键同款措辞，取消的是壁纸不是任务。)
 void MainWindow::updateWebWallpaperControls()
 {
     if (!m_webStartBtn)
@@ -903,12 +998,50 @@ void MainWindow::updateWebWallpaperControls()
 
                                                        "先到「视频壁纸」页取消它，再回来应用网页壁纸"))
                                   : QString());
-    m_webStartBtn->setText(running ? QStringLiteral("■ 停止") : QStringLiteral("▶ 启动"));
+    m_webStartBtn->setText(running ? QStringLiteral("■ 取消") : QStringLiteral("▶ 启动"));
     m_webStartBtn->setProperty("data-active", running ? 1 : 0);
     m_webStartBtn->style()->unpolish(m_webStartBtn);
     m_webStartBtn->style()->polish(m_webStartBtn);
     if (m_webStateLabel)
         m_webStateLabel->setText(web.stateText());
+    // 起停也会改变页脚第二段(状态)与第三段(来源名)，顺手一起刷新。
+    updateWebLibraryInfo();
+}
+
+// 网页库页脚那一行：统计信息 · 状态 · 当前来源名。与视频库同一套三段式。
+// **唯一写方** —— refreshWebLibrary(第一段变了)与状态/起停变化都走这里。
+void MainWindow::updateWebLibraryInfo()
+{
+    if (!m_webLib)
+        return;
+    auto &web = WebWallpaper::instance();
+    // 来源名只在真的在跑时报：停着时 source() 还留着上次那个键，
+    // 直接显示会让人以为它正挂着。
+    const QString name = (web.isRunning() && !web.source().isEmpty())
+                             ? web.source()
+                             : QStringLiteral("—");
+    // 未运行时 stateText() 是空串(WebWallpaper 只在 setState 时才写它)，
+    // 这时兜一个词，别让状态那格空着。
+    const QString state = web.stateText().isEmpty() ? QStringLiteral("未运行") : web.stateText();
+    m_webLib->setInfo(m_webStatsText.isEmpty() ? QStringLiteral("正在刷新 data/web…")
+                                               : m_webStatsText,
+                      state, name);
+}
+
+int MainWindow::snapToFpsOption(int saved)
+{
+    // 把配置里存着的、已不在可选档位里的值(例如老版本的 15 FPS)吸到最近的档位。
+    // 视频壁纸页与网页壁纸页的档位集合相同(都是 {0,24,30,60})，所以共用一个。
+    //
+    // **只在 24/30/60 里挑最近的，不吸到 0**：存着一个数值说明用户要的是「限帧」，
+    // 吸到「默认」(不设上限)等于把他最费资源的那档悄悄打开。
+    // 而完全不吸附的后果是单选组一个都不选中 —— 界面看着像坏了。
+    static const int kCaps[] = {24, 30, 60};
+    int best = kCaps[0];
+    for (const int cap : kCaps)
+        if (qAbs(cap - saved) < qAbs(best - saved))
+            best = cap;
+    return best;
 }
 
 QWidget *MainWindow::buildWallpaperPage()
@@ -1021,13 +1154,33 @@ void MainWindow::refreshVideoList()
         QFileInfo fi(f);
         m_videoLib->addRow(nullptr, fi.fileName(), fi.suffix().toUpper(), f, true, true);
     }
-    if (m_videoStatus)
-        m_videoStatus->setText(QStringLiteral("共 %1 个视频 · %2")
-                                   .arg(VideoWallpaper::instance().playlist().size())
-                                   .arg(VideoWallpaper::instance().isPlaying()
-                                            ? QStringLiteral("播放中") : QStringLiteral("停止")));
+    // 页脚那一行交给唯一入口组装(以前这里自己拼「共 N 个视频 · 播放中/停止」，
+    // 而 onVideoStateChanged 又会整行覆盖掉它 —— 同一行两个写方，内容随缘)。
+    updateVideoLibraryInfo();
     updateVideoButtons();
     updatePlayingHighlight();
+}
+
+// 视频库页脚那一行：统计信息 · 状态 · 播放数据名。
+// **唯一写方** —— refreshVideoList / onVideoStateChanged 都走这里，别在别处再 setText。
+// 状态用壁纸层给的原文(「检测到全屏应用，已自动暂停」这类"为什么"不能丢)；
+// 曲目名只在真的在跑时报，停着的时候 m_index 还留着上次的值，直接显示会让人以为还在播。
+void MainWindow::updateVideoLibraryInfo()
+{
+    if (!m_videoLib)
+        return;
+    auto &vp = VideoWallpaper::instance();
+    const QStringList &pl = vp.playlist();
+    const int idx = vp.currentIndex();
+    const bool live = vp.isStarted() && idx >= 0 && idx < pl.size();
+    // 构造期 m_videoStateText 还是空的(恢复播放的那次 emit 可能早于本页构建)，
+    // 这时按运行态兜一个词，别让状态那格空着。
+    const QString state = !m_videoStateText.isEmpty()
+                              ? m_videoStateText
+                              : (vp.isStarted() ? QStringLiteral("播放中")
+                                                : QStringLiteral("未启动"));
+    m_videoLib->setInfo(QStringLiteral("共 %1 个视频").arg(pl.size()), state,
+                        live ? QFileInfo(pl.at(idx)).fileName() : QStringLiteral("—"));
 }
 
 // 正在播放(含暂停/自动挂起)的条目以底色高亮，便于辨别当前曲目。
@@ -1057,8 +1210,10 @@ void MainWindow::onVideoStateChanged(const QString &text)
 {
     videodiag::log(videodiag::Level::Debug,
                    QStringLiteral("UI状态 %1").arg(text));
-    if (m_videoStatus)
-        m_videoStatus->setText(text);
+    // 只存原文，组装交给 updateVideoLibraryInfo() —— 页脚那行有三段，
+    // 光有状态拼不出完整一行。
+    m_videoStateText = text;
+    updateVideoLibraryInfo();
     updateVideoButtons();
     updatePlayingHighlight();
 
@@ -1083,7 +1238,7 @@ void MainWindow::updateVideoButtons()
                               ? tooltipstyle::format(
                                     QStringLiteral("动态网页壁纸运行中，两者只能应用一个。\n"
 
-                                                   "先到「动态网页壁纸」页停止它，再回来启动视频壁纸"))
+                                                   "先到「动态网页壁纸」页取消它，再回来启动视频壁纸"))
                               : QString());
     m_playBtn->setText(started ? QStringLiteral("■ 取消") : QStringLiteral("▶ 启动"));
     m_playBtn->setProperty("data-active", started ? 1 : 0);

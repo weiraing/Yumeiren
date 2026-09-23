@@ -177,6 +177,17 @@ void SystemTrayController::buildContextMenu()
     m_actGazeMedium = addGazeEntry(kanban::KanbanRenderer::GazeMedium);
     m_actGazeStrong = addGazeEntry(kanban::KanbanRenderer::GazeStrong);
 
+    // 看板娘下方顶层的「鼠标穿透」开关，与看板娘右键菜单同名同功能。穿透期间小人
+    // 收不到鼠标、右键菜单叫不出来，托盘这里是除设置页复选框外的另一条关闭通道。
+    // 必须走控制器 setMouseThrough：成员/配置落盘/窗口应用/设置页复选框回写都由它收口，
+    // 两边菜单只是各自在弹出时读回状态(见 updateMenuState)。
+    m_actKanbanThrough = m_contextMenu->addAction(QStringLiteral("鼠标穿透"));
+    m_actKanbanThrough->setCheckable(true);
+    connect(m_actKanbanThrough, &QAction::triggered, this, [this](bool through) {
+        if (m_kanban)
+            m_kanban->setMouseThrough(through);
+    });
+
     m_contextMenu->addSeparator();
     m_actQuit = addEntry(m_contextMenu, QStringLiteral("关闭软件"), [this] {
         emit quitRequested();
@@ -231,6 +242,13 @@ void SystemTrayController::updateMenuState()
     if (m_kanban)
         m_actKanbanPause->setText(m_kanban->isPaused() ? QStringLiteral("继续")
                                                        : QStringLiteral("暂停"));
+
+    if (m_actKanbanThrough) {
+        // 同视线档位：没跑也能先定偏好(落盘，下次启动生效)；没注入控制器则无从读回状态。
+        // 置灰判据与「启动 / 取消」一致：只在 Stopping 那一瞬灰掉(窗口正在拆，别再碰)。
+        m_actKanbanThrough->setEnabled(m_kanban && !kanbanStopping);
+        m_actKanbanThrough->setChecked(m_kanban && m_kanban->mouseThrough());
+    }
 
     const QString tip = QStringLiteral("%1 - 动态壁纸%2 / 看板娘%3")
                             .arg(appinfo::displayName(),

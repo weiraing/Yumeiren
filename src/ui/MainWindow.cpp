@@ -18,6 +18,7 @@
 
 #include <QAbstractScrollArea>
 #include <QApplication>
+#include <QButtonGroup>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
@@ -29,6 +30,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMouseEvent>
 #include <QPainterPath>
 #include <QPointer>
 #include <QPushButton>
@@ -42,6 +44,7 @@
 #include <QStyledItemDelegate>
 #include <QTextStream>
 #include <QThreadPool>
+#include <QTreeWidget>
 #include <QTimer>
 #include <QWindow>
 
@@ -82,12 +85,37 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     setWindowTitle(appinfo::windowTitle()); // 原生标题=Yumeiren(窗口行); 品牌名在自绘标题栏
     setMinimumSize(880, 660);
     // 初始窗口几何：优先恢复上次保存的尺寸位置(钳制在可用工作区 94% 内；越界自动拉回
-    // 主屏)，无保存记录时用自适应首选 960×836。
+    // 主屏)，无保存记录时用自适应首选 950×820。
     //
-    // 高度 836 是实测的最小值：再低一点(830)整页就会冒出竖向滚动条、左移 8 像素。
+    // 950×820 是产品定的首次打开尺寸(2026-09-23)。宽度 950 自始未变，高度走过
+    // 836 → 880 → 820 三个值(见 git log)，**以代码里的 kDefaultH 为准**(注释里出现别的数
+    // 就是没跟上)。**这里填的是"请求值"，
+    // 不是用户看到的窗口外框**：外框恒比它大 15×37(实测两组：900×700→915×737、
+    // 950×880→965×917)。多出来的是 Qt 按"有边框窗口"算的 frame —— WS_THICKFRAME 还在，
+    // 而 WM_NCCALCSIZE 又把客户区放成了整个窗口矩形，两边口径不一致。要外框正好
+    // 950×820 得填 935×783(按上表那个恒定差值算)。**别顺手去"修"这个差**：
+    // 它同时参与位置钳制与下次保存的尺寸回写，动它等于把所有历史配置的语义一起改掉。
+    //
+    // 高度方向的实测(请求值 → 外框，用 tools/winprobe/height_sweep.py 量的)：
+    //     950×880 → 965×917：文件夹美化页右卡内空白 69、看板娘页无竖向滚动条
+    //     950×836 → 965×873：文件夹美化页右卡内空白 25、**看板娘页冒出竖向滚动条**
+    // 也就是说高度再往下走，先顶不住的是看板娘页(它的卡片有固有高度)，不是原先以为的
+    // 文件夹美化页 —— 830 那档"整页左移 8 像素"的老结论只在更窄的窗口上成立。
+    //
+    // ⚠️ 上表是 2026-09-23「左列最小宽」修复**之前**、且在**更窄的窗口(外框 965)** 上量的。
+    // 2026-09-23 重跑了一次(外框 989 / 请求宽 974，即当前保存的配置)：
+    //     请求 820 → 外框 989×857：**文件夹美化页冒出竖向滚动条**、看板娘页也冒
+    //     请求 836 → 外框 989×873：文件夹美化页干净、**看板娘页仍冒**
+    //     请求 880 → 外框 989×917：三页全干净
+    // 判据：`tmp/_edges3.py` 按 height_sweep 的 HANDLE 色(#d3d6dd) 扫窗口最右 4..18 像素条带，
+    // 找连续的 handle 竖条。**别只看 height_sweep 自带的 analyse()** —— 它对看板娘页会失灵
+    // (报「右卡底=100、卡内空白=-281」)，以像素扫描/截图为准。
+    //
+    // 就上表看，**820 比 836 严格更差**：白多出文件夹美化页那条滚动条，什么也没换来。
+    // 但 820 是 2026-09-23 用户拍板的默认值，**没经他同意不要改回去**。
     {
-        constexpr int kDefaultW = 960;
-        constexpr int kDefaultH = 836;
+        constexpr int kDefaultW = 950;
+        constexpr int kDefaultH = 820;
         const QRect avail = QGuiApplication::primaryScreen()->availableGeometry();
         auto &cfg = AppConfig::instance();
         const int cw = cfg.value(ConfigKeys::Window::Width, 0).toInt();
@@ -475,6 +503,34 @@ QWidget *MainWindow::buildHeader()
     box->addWidget(lb2);
     box->addWidget(m_effectChip);
     lay->addWidget(m_statusBox);
+
+    // 动态壁纸页右上角的运行状态徽标：与文件夹美化页的 DLL 注册徽标同一套
+    // StatusChip 样式，但反映的是**运行态**(未启动/运行中/暂停)而非注册态。
+    // 只在导航选中动态壁纸页时显示(见 switchPage)，与 m_statusBox 互斥出现。
+    m_wallStatusBox = new QWidget(header);
+    m_wallStatusBox->setVisible(false);
+    auto *wbox = new QHBoxLayout(m_wallStatusBox);
+    wbox->setContentsMargins(0, 0, 0, 0);
+    wbox->setSpacing(4);
+    auto *lb3 = new QLabel(QStringLiteral("视频壁纸"), m_wallStatusBox);
+    lb3->setObjectName(QStringLiteral("HeaderSub"));
+    m_videoChip = new QLabel(m_wallStatusBox);
+    m_videoChip->setObjectName(QStringLiteral("StatusChip"));
+    auto *lb4 = new QLabel(QStringLiteral("网页壁纸"), m_wallStatusBox);
+    lb4->setObjectName(QStringLiteral("HeaderSub"));
+    m_webChip = new QLabel(m_wallStatusBox);
+    m_webChip->setObjectName(QStringLiteral("StatusChip"));
+    wbox->addWidget(lb3);
+    wbox->addWidget(m_videoChip);
+    wbox->addSpacing(10);
+    wbox->addWidget(lb4);
+    wbox->addWidget(m_webChip);
+    lay->addWidget(m_wallStatusBox);
+
+    // 视频/网页壁纸的启停与挂起都会汇聚到运行态单例(见各自 publishRuntimeState)，
+    // 订阅它即可让徽标跟后台状态实时同步，不必逐个接两边的状态信号。
+    connect(&ApplicationRuntimeState::instance(), &ApplicationRuntimeState::stateChanged,
+            this, &MainWindow::setWallStatusChips);
     return header;
 }
 
@@ -497,6 +553,27 @@ QSlider *MainWindow::makeSlider(int min, int max, int value, QLabel **valueLabel
 
 bool MainWindow::eventFilter(QObject *obj, QEvent *event)
 {
+    // 双击视频库的**勾选框**时不要启动壁纸 —— 那条路径的语义是「勾选/取消」，不是「起播」。
+    // ⚠️ 必须从事件本身取坐标：信号(itemDoubleClicked)不带位置，而 QCursor::pos() 在探针
+    // 用 PostMessage 驱动时也不可靠(合成消息不会真的移动光标)。
+    // ⚠️ 也别改成「itemClicked 里看勾选态变没变」——实测双击勾选框时那个时序对不上，
+    // 照样会启动(2026-09-23 探针验出来是「不符」)。
+    if (event->type() == QEvent::MouseButtonDblClick && m_videoList
+        && obj == m_videoList->viewport()) {
+        auto *me = static_cast<QMouseEvent *>(event);
+        const QPoint p = me->position().toPoint();
+        const QModelIndex idx = m_videoList->indexAt(p);
+        if (idx.isValid()) {
+            QStyleOptionViewItem opt;
+            opt.initFrom(m_videoList);
+            opt.rect = m_videoList->visualRect(idx);
+            opt.features |= QStyleOptionViewItem::HasCheckIndicator;
+            const QRect box = m_videoList->style()->subElementRect(
+                QStyle::SE_ItemViewItemCheckIndicator, &opt, m_videoList);
+            if (box.contains(p))
+                return true;   // 吃掉这次双击：勾选框归勾选框
+        }
+    }
     if (event->type() == QEvent::Resize) {
         if (m_galleryList && obj == m_galleryList->viewport()) {
             updateGalleryGrid(); // 视口宽度变化时重算三列正方形网格
@@ -506,7 +583,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
         } else if (m_imageSourceLabel && obj == m_imageSourceLabel) {
             setImageSourceText(m_sourceText); // 宽度变化后重新按两行省略
         } else if (m_previewFrame && obj == m_previewFrame) {
-            updatePreviewAspect(); // 宽度变了就按桌面比例重算预览框高度
+            updatePreviewAspect(); // 宽度变了就按桌面比例重算预览框高度(内部推迟到事件循环)
         }
     }
     return QMainWindow::eventFilter(obj, event);
@@ -706,6 +783,37 @@ void MainWindow::setStatusChips()
     m_adminLabel->style()->polish(m_adminLabel);
     m_osLabel->setText(Engine::windowsProductName());
     m_versionLabel->setText(QStringLiteral("version ") + appinfo::version());
+}
+
+// 动态壁纸页右上角徽标：直接读两个壁纸组件本体，而不是运行态单例的聚合位 ——
+// 那个聚合位由视频/网页共用(谁后发布算谁的)，分不出两枚徽标各自该显示什么。
+// 状态文案与托盘 tooltip 同一套：未启动 / 运行中 / 暂停；
+// 「暂停」涵盖手动暂停与自动挂起(全屏/遮挡/锁屏/熄屏/电池)，与运行态聚合语义一致。
+void MainWindow::setWallStatusChips()
+{
+    if (!m_videoChip || !m_webChip)
+        return;
+    auto setChip = [](QLabel *chip, const QString &text, bool ok, bool warn) {
+        chip->setText(text);
+        chip->setProperty("data-ok", ok ? 1 : 0);
+        chip->setProperty("data-warn", warn ? 1 : 0);
+        chip->style()->unpolish(chip);
+        chip->style()->polish(chip);
+    };
+    VideoWallpaper &video = VideoWallpaper::instance();
+    const bool vStarted = video.isStarted();
+    const bool vPlaying = vStarted && video.isPlaying();
+    setChip(m_videoChip, !vStarted ? QStringLiteral("未启动")
+                         : vPlaying ? QStringLiteral("运行中")
+                                    : QStringLiteral("暂停"),
+            vPlaying, vStarted && !vPlaying);
+    WebWallpaper &web = WebWallpaper::instance();
+    const bool wRunning = web.isRunning();
+    const bool wActive = wRunning && !web.isSuspended();
+    setChip(m_webChip, !wRunning ? QStringLiteral("未启动")
+                       : wActive ? QStringLiteral("运行中")
+                                 : QStringLiteral("暂停"),
+            wActive, wRunning && !wActive);
 }
 
 void MainWindow::reportDllMigration()
@@ -1092,7 +1200,8 @@ void MainWindow::loadSettings()
     m_brightness->setValue(s.value(ConfigKeys::Image::Brightness, 100).toInt());
     m_contrast->setValue(s.value(ConfigKeys::Image::Contrast, 100).toInt());
     m_blur->setValue(s.value(ConfigKeys::Image::Blur, 0).toInt());
-    m_opacity->setValue(s.value(ConfigKeys::Image::Opacity, 255).toInt());
+    // 透明度：旧「不透明度」键已在 AppConfig 默认值补齐前反算迁移到新键，这里直接读。
+    m_transparency->setValue(s.value(ConfigKeys::Image::Transparency, 0).toInt());
     m_posMode = qBound(0, s.value(ConfigKeys::Image::PosType, 6).toInt(), 6);
     setPosMode(m_posMode);
     m_folderExt->setChecked(s.value(ConfigKeys::Image::FolderExt, false).toBool());
@@ -1164,23 +1273,27 @@ void MainWindow::loadSettings()
     m_fullscreenPauseBox->setChecked(s.value(ConfigKeys::Video::PauseFullscreen, true).toBool());
     m_batteryBox->setChecked(s.value(ConfigKeys::Video::PauseBattery, false).toBool());
     {
-        const int targetFps = s.value(ConfigKeys::Video::TargetFps, 24).toInt();
-        static const int fpsValues[] = {0, 15, 24, 30, 60};
-        for (int i = 0; i < 5; ++i)
-            if (fpsValues[i] == targetFps) {
-                m_fpsBox->setCurrentIndex(i);
-                break;
-            }
+        // 出厂默认 30 fps(2026-09-23 用户定案，原为 24)。四档 = 四个单选按钮的 id。
+        const int saved = s.value(ConfigKeys::Video::TargetFps, 30).toInt();
+        int targetFps = saved;
+        if (!m_fpsGroup->button(targetFps)) {
+            targetFps = snapToFpsOption(saved);   // 为何不吸到 0：见该函数定义处
+            videodiag::log(videodiag::Level::Info,
+                           QStringLiteral("视频帧率：配置里的 %1 已不在可选档位内，吸附到 %2")
+                               .arg(saved).arg(targetFps),
+                           QLatin1String("UI"));
+            s.setValue(ConfigKeys::Video::TargetFps, targetFps);
+        }
+        if (QAbstractButton *btn = m_fpsGroup->button(targetFps))
+            btn->setChecked(true);
         VideoWallpaper::instance().setTargetFps(targetFps);
     }
     m_fpsKeepSpeedBox->setChecked(s.value(ConfigKeys::Video::FpsKeepSpeed, true).toBool());
     VideoWallpaper::instance().setKeepSpeed(m_fpsKeepSpeedBox->isChecked());
     m_reclaimBox->setChecked(s.value(ConfigKeys::Video::Reclaim, true).toBool());
     m_affinityBox->setChecked(s.value(ConfigKeys::Video::AffinityLimit, true).toBool());
-    m_screenModeCombo->setCurrentIndex(s.value(ConfigKeys::Video::ScreenMode, 0).toInt());
     VideoWallpaper::instance().setPauseOnFullscreen(m_fullscreenPauseBox->isChecked());
     VideoWallpaper::instance().setReclaimMemory(m_reclaimBox->isChecked());
-    VideoWallpaper::instance().setScreenMode(m_screenModeCombo->currentIndex());
     VideoWallpaper::instance().setVolume(m_videoVolume->value());
 }
 
@@ -1192,7 +1305,7 @@ void MainWindow::saveImageSettings()
     s.setValue(ConfigKeys::Image::Brightness, m_brightness->value());
     s.setValue(ConfigKeys::Image::Contrast, m_contrast->value());
     s.setValue(ConfigKeys::Image::Blur, m_blur->value());
-    s.setValue(ConfigKeys::Image::Opacity, m_opacity->value());
+    s.setValue(ConfigKeys::Image::Transparency, m_transparency->value());
     s.setValue(ConfigKeys::Image::PosType, m_posMode);
     s.setValue(ConfigKeys::Image::FolderExt, m_folderExt->isChecked());
     s.setValue(ConfigKeys::Image::Mode,

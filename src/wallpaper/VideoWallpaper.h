@@ -1,6 +1,6 @@
 /**
  * @file VideoWallpaper.h
- * @brief 动态壁纸核心类：视频播放、多屏输出、挂起策略与生命周期管理。
+ * @brief 动态壁纸核心类：视频播放、主屏输出、挂起策略与生命周期管理。
  */
 #ifndef VIDEOWALLPAPER_H
 #define VIDEOWALLPAPER_H
@@ -30,7 +30,6 @@ class VideoWallpaper : public QObject
 {
     Q_OBJECT
 public:
-    enum ScreenMode { PrimaryScreen = 0, StretchAll = 1, MirrorAll = 2 };
     // 播放模式(互斥单选框)：只播当前这条 / 按序循环 / 每次随机挑一条
     enum PlayMode { SingleLoop = 0, ListLoop = 1, Random = 2 };
 
@@ -57,8 +56,7 @@ public:
     void setReclaimMemory(bool on);
     void setAutostart(bool on);
     bool autostartEnabled() const;
-    void setScreenMode(int mode);
-    void setVolume(int percent);
+    void setVolume(int percent);      // 计量为百分比；0=取消声音播放(音频轨一并停掉)
     void setMonitorOn(bool on);
     void setTargetFps(int fps);
     // true 保速丢帧(速率恒 1.0，多余帧在 QVideoSink 中转处丢弃)；false 慢动作(最省资源但画面变慢)
@@ -156,7 +154,6 @@ private:
     bool m_pauseOnFullscreen = false;
     bool m_pauseOnBattery = false;
     bool m_reclaimMemory = true;
-    int m_screenMode = PrimaryScreen;
     int m_volume = 0;
 
     // FrameScheduler 状态机

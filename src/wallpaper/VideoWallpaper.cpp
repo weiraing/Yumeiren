@@ -508,9 +508,9 @@ void VideoWallpaper::evaluateSuspend()
     // 判据与"谁在前台"无关：全屏应用前面压着小窗口时桌面依然不可见，只看前台会误判成已回桌面
     if (m_pauseOnFullscreen && fbswin::isFullscreenWindowPresent())
         reasons |= SuspendFullscreen;
-    // 仅主屏模式做遮挡判定：扩展模式下实测会退化成每秒反复暂停/恢复
-    if (m_pauseOnFullscreen && m_screenMode == PrimaryScreen
-        && fbswin::isDesktopCoveredByWindow())
+    // 遮挡判定只在主屏铺放时安全(多输出时曾实测每秒反复暂停/恢复)，多屏档位已删、
+    // 现在恒为单输出主屏铺放，故无条件启用。
+    if (m_pauseOnFullscreen && fbswin::isDesktopCoveredByWindow())
         reasons |= SuspendCovered;
     if (fbswin::isWorkstationLocked())
         reasons |= SuspendLocked;

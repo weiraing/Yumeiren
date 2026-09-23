@@ -30,15 +30,16 @@ const NumericRule kNumericRules[] = {
     {ConfigKeys::Image::Brightness, 100, 20, 200},
     {ConfigKeys::Image::Contrast, 100, 50, 150},
     {ConfigKeys::Image::Blur, 0, 0, 20},
-    {ConfigKeys::Image::Opacity, 255, 30, 255},
+    {ConfigKeys::Image::Transparency, 0, 0, ConfigKeys::Image::MaxTransparency},
     {ConfigKeys::Image::PosType, 6, 0, 6},
     {ConfigKeys::Image::Mode, 0, 0, 1},
     {ConfigKeys::Effect::Type, 1, 0, 4},
     {ConfigKeys::Effect::LightAlpha, 200, 0, 255},
     {ConfigKeys::Effect::DarkAlpha, 120, 0, 255},
     {ConfigKeys::Video::Volume, 0, 0, 100},
-    {ConfigKeys::Video::TargetFps, 24, 0, 240},
-    {ConfigKeys::Video::ScreenMode, 0, 0, 2},
+    // 出厂 30 fps(2026-09-23 由 24 改)；0 = 跟随视频帧率。只在键**缺失**时才用这个值，
+    // 已存在的配置不会被改。
+    {ConfigKeys::Video::TargetFps, 30, 0, 240},
     {ConfigKeys::Video::PlayMode, 0, 0, 2},
     // 看板娘位置 -1 表示「尚未放置」(首次显示时按主屏右下角自动摆放)，下界必须留 -1，
     // 否则钳位会把「未放置」改写成 0，等于把窗口钉死在屏幕左上角。
@@ -52,7 +53,8 @@ const NumericRule kNumericRules[] = {
     {ConfigKeys::Web::RefreshMode, 0, 0, 2},
     {ConfigKeys::Web::Volume, 0, 0, 100},
     {ConfigKeys::Web::Zoom, 100, 50, 200},
-    {ConfigKeys::Web::FpsCap, 24, 0, 60},
+    // 出厂 30 fps(2026-09-23 由 24 改)；0 = 跟随页面自身帧率。与视频壁纸页同一档位集合。
+    {ConfigKeys::Web::FpsCap, 30, 0, 60},
 };
 
 const char *kBoolRules[] = {
@@ -108,9 +110,8 @@ const char *kBoolDefaultTrue[] = {
     // 有后台任务时点关闭应「隐藏而不是退出」，故默认开；读取端(closeEvent /
     // 界面勾选框)默认值同为 true。
     ConfigKeys::Tray::MinimizeToTrayOnClose,
-    // 网页壁纸默认允许交互：选网页壁纸多半就是冲着可交互内容来的，默认关会让
-    // 用户以为功能坏了。
-    ConfigKeys::Web::Interactive,
+    // 网页壁纸的 Web::Interactive 原本在这里(默认开)。2026-09-23 用户定案改为**默认关**：
+    // 界面上是两档互斥单选，默认档「网页展示」(鼠标穿透)。现在它不在本表里，即默认 false。
 };
 
 bool boolDefaultFor(const char *key)
@@ -231,6 +232,19 @@ void AppConfig::ensureDefaultsAndFix()
         ++missing;
     }
 
+    // 图片背景「不透明度→透明度」迁移(必须先于默认值补齐，理由同上面的 PlayMode)：
+    // 旧键 image/opacity 存的是 alpha(30..255，255=不透明)，新键 image/transparency 存
+    // 透明度百分比(0=不透明，越大越透)。若不抢先迁移，下面的数值规则表会把缺失的新键
+    // 补成默认 0，旧设置就永远丢了。旧键留在文件里不删，回滚旧版仍可读。
+    if (!m_settings->contains(ConfigKeys::Image::Transparency)) {
+        int t = 0;
+        if (m_settings->contains(ConfigKeys::Image::OpacityLegacy))
+            t = qBound(0, 100 - qRound(m_settings->value(ConfigKeys::Image::OpacityLegacy)
+                                           .toInt() * 100.0 / 255.0),
+                       ConfigKeys::Image::MaxTransparency);
+        m_settings->setValue(ConfigKeys::Image::Transparency, t);
+    }
+
     for (const NumericRule &rule : kNumericRules) {
         if (!m_settings->contains(rule.key)) {
             m_settings->setValue(rule.key, rule.defaultValue);
@@ -289,6 +303,16 @@ void AppConfig::ensureDefaultsAndFix()
             m_settings->setValue(s.key, QString::fromLatin1(s.def));
             ++missing;
         }
+    }
+
+    // 「网页壁纸-全屏自动暂停」「视频壁纸-多屏档位」连同设置项一起移除后(2026-09-23 /
+    // 2026-09-24)，配置里那些残留要清掉，否则留一个谁都读不到的键。**先 contains 再
+    // remove**：对不存在的键调 remove 会把 QSettings 标脏，变成每次启动都写一次盘
+    // (同上面 kBoolRules 那段的顾虑)。写字面量是因为对应的 ConfigKeys 常量已删。
+    for (const QString &removedKey : {QStringLiteral("web/pauseFullscreen"),
+                                      QStringLiteral("video/screenMode")}) {
+        if (m_settings->contains(removedKey))
+            m_settings->remove(removedKey);
     }
 
     if (missing + fixed > 0)

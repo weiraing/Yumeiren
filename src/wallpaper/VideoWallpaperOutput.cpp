@@ -1,4 +1,4 @@
-// VideoWallpaper 的输出窗口管理与播放器操作（多屏输出、挂载、错误恢复）。
+// VideoWallpaper 的输出窗口管理与播放器操作（主屏输出、挂载、错误恢复）。
 #include "VideoWallpaper.h"
 
 #include "config/AppConfig.h"
@@ -139,7 +139,7 @@ void VideoWallpaper::layoutOutputs()
                     .arg(QFileInfo(out.player->source().toLocalFile()).fileName())
                     .arg(quintptr(out.player), 0, 16)
                     .arg(quintptr(out.widget), 0, 16));
-            // 只有首个输出推进列表：MirrorAll 下每屏各一个播放器会对同一曲目各自上报 EndOfMedia
+            // 只有首个输出推进列表(现固定单输出，isPrimaryOutput 恒真，保留以防未来再有多输出)
             if (st == QMediaPlayer::EndOfMedia) {
                 if (isPrimaryOutput(out))
                     nextTrack();
@@ -237,7 +237,7 @@ void VideoWallpaper::layoutOutputs()
                 "可在左侧「帧率上限」改回跟随视频")
                 .arg(res.width()).arg(res.height()).arg(est).arg(kAutoFpsOversized));
         });
-        // 解码/打开失败 → 有限重试 → 提示并跳过；失败铺满列表即整体停播。只有首个输出参与推进(MirrorAll 副本会对同一文件重复报错)
+        // 解码/打开失败 → 有限重试 → 提示并跳过；失败铺满列表即整体停播。只有首个输出参与推进
         connect(out.player, &QMediaPlayer::errorOccurred, this,
                 [this, out](QMediaPlayer::Error err, const QString &msg) {
             if (!isLiveOutput(out) || !m_started || m_outputs.isEmpty()
@@ -278,17 +278,8 @@ void VideoWallpaper::layoutOutputs()
         m_outputs.append(out);
     };
 
-    if (m_screenMode == PrimaryScreen) {
-        makeOutput(QGuiApplication::primaryScreen()->geometry(), true);
-    } else if (m_screenMode == StretchAll) {
-        QRect total;
-        for (QScreen *s : screens)
-            total = total.united(s->geometry());
-        makeOutput(total, true);
-    } else { // MirrorAll: one player per screen, first carries the audio
-        for (int i = 0; i < screens.size(); ++i)
-            makeOutput(screens[i]->geometry(), i == 0);
-    }
+    // 多屏档位(全屏拉伸/多屏镜像)已删(2026-09-24)：固定只铺主屏，行为与删除前的默认档一致。
+    makeOutput(QGuiApplication::primaryScreen()->geometry(), true);
 }
 VideoWallpaper::VideoOutput *VideoWallpaper::liveOutputFor(const QMediaPlayer *player)
 {

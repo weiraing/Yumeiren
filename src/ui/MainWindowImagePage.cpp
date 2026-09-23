@@ -24,6 +24,7 @@
 #include <QSlider>
 #include <QStyledItemDelegate>
 #include <QThreadPool>
+#include <QTimer>
 #include <QVBoxLayout>
 
 namespace {
@@ -77,6 +78,14 @@ protected:
 };
 
 } // namespace
+
+// 透明度(0=不透明，越大越透) → 绘制与 DLL 配置(imgAlpha)用的 alpha(0..255)。
+// 与 AppConfig 里旧键迁移的反算式互为逆运算；上限 88%(见 ConfigKeys::Image)对应
+// 旧版 alpha 下限 30，这里对越界值兜底钳到 0..100。
+int transparencyToAlpha(int transparencyPercent)
+{
+    return qRound((100 - qBound(0, transparencyPercent, 100)) * 255 / 100.0);
+}
 
 
 QString MainWindow::elidedTwoLineText(const QString &text, int width) const
@@ -216,7 +225,7 @@ QWidget *MainWindow::buildImagePage()
     resetParamsBtn->setObjectName(QStringLiteral("ParamResetButton"));
     resetParamsBtn->setCursor(Qt::PointingHandCursor);
     resetParamsBtn->setToolTip(tooltipstyle::format(QStringLiteral(
-            "恢复默认参数：尺寸100%、显示位置右下、亮度/对比度100%、模糊0、不透明度255，\n"
+            "恢复默认参数：尺寸100%、显示位置右下、亮度/对比度100%、模糊0、透明度0%，\n"
             "两个选项不勾选")));
     connect(resetParamsBtn, &QPushButton::clicked, this, &MainWindow::resetImageParams);
     adjTitleRow->addWidget(resetParamsBtn);
@@ -239,13 +248,17 @@ QWidget *MainWindow::buildImagePage()
     m_brightness = makeSlider(20, 200, 100, &m_brightnessVal, QStringLiteral("%"));
     m_contrast = makeSlider(50, 150, 100, &m_contrastVal, QStringLiteral("%"));
     m_blur = makeSlider(0, 20, 0, &m_blurVal, QStringLiteral("px"));
-    m_opacity = makeSlider(30, 255, 255, &m_opacityVal);
+    m_transparency = makeSlider(0, ConfigKeys::Image::MaxTransparency, 0, &m_transparencyVal,
+                                QStringLiteral("%"));
+    m_transparency->setToolTip(tooltipstyle::format(QStringLiteral(
+            "背景图透明度：0% 完全不透明，越往右越透明(最透 88%)，预览实时生效；\n"
+            "旧版本此处为方向相反的「不透明度」滑杆，原设置已按相同效果自动换算")));
 
     addRow(0, QStringLiteral("尺寸"), m_scale, m_scaleVal);
     addRow(1, QStringLiteral("亮度"), m_brightness, m_brightnessVal);
     addRow(2, QStringLiteral("对比度"), m_contrast, m_contrastVal);
     addRow(3, QStringLiteral("模糊"), m_blur, m_blurVal);
-    addRow(4, QStringLiteral("不透明度"), m_opacity, m_opacityVal);
+    addRow(4, QStringLiteral("透明度"), m_transparency, m_transparencyVal);
     m_rotate = makeSlider(-180, 180, 0, &m_rotateVal, QStringLiteral("°"));
     m_rotate->setToolTip(tooltipstyle::format(QStringLiteral(
             "绕图片竖直中心轴旋转的投影：向左逆时针、向右顺时针，±180° 即左右镜像")));
@@ -342,7 +355,7 @@ QWidget *MainWindow::buildImagePage()
 
     lay->addWidget(rightCard, 5);
 
-    for (QSlider *s : {m_rotate, m_scale, m_brightness, m_contrast, m_blur, m_opacity})
+    for (QSlider *s : {m_rotate, m_scale, m_brightness, m_contrast, m_blur, m_transparency})
         connect(s, &QSlider::valueChanged, this, &MainWindow::updateImagePreview);
 
     scroll->setWidget(page);
@@ -462,6 +475,13 @@ void MainWindow::selectPreset(int index)
 }
 
 // 预览框宽高比锁死为主屏(桌面)比例，高度按宽度反算，使预览与真实桌面同形。
+//
+// ⚠️ 这里只登记「想要多高」，真正的 setFixedHeight 交给 applyPreviewAspect() 在事件循环里做。
+// 原因(2026-09-23 实测)：本函数是被 m_previewFrame 自己的 Resize 事件调起来的，在里面同步
+// 改高度会**立刻再发一次 Resize**；而新高度又改变父滚动区的滚动条状态、把宽度改回去 ——
+// 拖窗口(尤其拖角、宽高同时变)时形成同步自激环，几轮下来进程直接 0xC0000005 退出，
+// 现象就是用户报的「预览那栏上下抖一下，然后软件没了」。
+// 推回事件循环后，这一轮布局彻底走完再改，拖动中的多次请求也自动合并成一次。
 void MainWindow::updatePreviewAspect()
 {
     if (!m_previewFrame)
@@ -475,8 +495,23 @@ void MainWindow::updatePreviewAspect()
         if (sg.height() > 0)
             aspect = qreal(sg.width()) / sg.height();
     }
-    const int want = qMax(90, qRound(frameW / aspect));
-    // 迟滞 3px：否则「高度→滚动条→宽度→高度」会锁死在两个状态之间来回翻转。
+    m_previewAspectPending = qMax(90, qRound(frameW / aspect));
+    if (!m_previewAspectTimer) {
+        m_previewAspectTimer = new QTimer(this);
+        m_previewAspectTimer->setSingleShot(true);
+        connect(m_previewAspectTimer, &QTimer::timeout, this, &MainWindow::applyPreviewAspect);
+    }
+    m_previewAspectTimer->start(0);
+}
+
+void MainWindow::applyPreviewAspect()
+{
+    if (!m_previewFrame || m_previewAspectPending <= 0)
+        return;
+    const int want = m_previewAspectPending;
+    m_previewAspectPending = 0;
+    // 迟滞 3px：滚动条一进一出只让预览框宽度变约 3.6px(左右列按 6:5 分宽度)、折算高度
+    // 约 2.3px，落在死区里就不会来回翻转。死区一旦小于这个量，环就重新活过来。
     if (qAbs(want - m_previewFrame->height()) >= 3)
         m_previewFrame->setFixedHeight(want);
 }
@@ -528,7 +563,8 @@ void MainWindow::updateImagePreview()
 
     const int pos = qBound(0, m_posMode, 6);
     QImage preview = ImageProcess::mockExplorerPreview(
-        processed, effNative, pos, m_opacity->value(), mock, dpr, realWin, m_darkTheme);
+        processed, effNative, pos, transparencyToAlpha(m_transparency->value()),
+        mock, dpr, realWin, m_darkTheme);
     m_previewLabel->setPixmap(QPixmap::fromImage(preview));
 }
 
@@ -568,7 +604,7 @@ void MainWindow::resetImageParams()
     m_brightness->setValue(100);
     m_contrast->setValue(100);
     m_blur->setValue(0);
-    m_opacity->setValue(255);
+    m_transparency->setValue(0);
     setPosMode(6); // 默认右下
     m_folderExt->setChecked(false);
     saveImageSettings();
@@ -631,7 +667,8 @@ void MainWindow::applyImage()
     int posType = posMap[qBound(0, m_posMode, 6)];
 
     if (!Engine::instance().writeImageConfig(imageDir, posType,
-                                             m_opacity->value(), m_folderExt->isChecked(),
+                                             transparencyToAlpha(m_transparency->value()),
+                                             m_folderExt->isChecked(),
                                              randomMode, &err)) {
         setLog(err, true);
         m_applyImageBtn->setEnabled(true);

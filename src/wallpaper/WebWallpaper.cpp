@@ -42,16 +42,15 @@
 
 namespace {
 
-// 挂起原因位与分级释放阈值 —— 判据与视频壁纸一致，阈值也沿用同一套。
+// 挂起原因位与分级释放阈值 —— 各位的阈值沿用视频壁纸那套。
+// ⚠️ 网页壁纸**不做**「全屏/遮挡自动暂停」(2026-09-23 用户要求连同设置项一起移除)，
+// 所以这里没有 4 / 8 两个挂起位；视频壁纸那边还有一套同名的，别混。
 constexpr int kSuspendLocked = 1;
 constexpr int kSuspendMonitorOff = 2;
-constexpr int kSuspendFullscreen = 4;
-constexpr int kSuspendCovered = 8;
 constexpr int kSuspendBattery = 16;
 
 constexpr qint64 kReleaseHiddenMs = 5000;    // 锁屏/熄屏：恢复必然伴随人工动作
 constexpr qint64 kReleaseBatteryMs = 30000;
-constexpr qint64 kReleaseCoveredMs = 60000;  // 全屏/遮挡：alt-tab 回来不该撞上重载
 constexpr qint64 kReleaseDefaultMs = 180000;
 
 constexpr int kSnapshotWarmupMs = 1500;      // 快照刷新：唤醒渲染后等这一拍再截图
@@ -370,8 +369,6 @@ qint64 suspendReleaseThresholdMs(int reasons)
         return kReleaseHiddenMs;
     if (reasons & kSuspendBattery)
         return kReleaseBatteryMs;
-    if (reasons & (kSuspendFullscreen | kSuspendCovered))
-        return kReleaseCoveredMs;
     return kReleaseDefaultMs;
 }
 
@@ -383,10 +380,6 @@ int snapshotIntervalMs(int refreshMode)
 
 QString reasonText(int reasons)
 {
-    if (reasons & kSuspendCovered)
-        return QStringLiteral("桌面被完全遮挡，已暂停网页壁纸");
-    if (reasons & kSuspendFullscreen)
-        return QStringLiteral("检测到全屏应用，已暂停网页壁纸");
     if (reasons & kSuspendLocked)
         return QStringLiteral("系统已锁定，已暂停网页壁纸");
     if (reasons & kSuspendMonitorOff)
@@ -486,12 +479,12 @@ void WebWallpaper::loadSettings()
 {
     AppConfig &config = AppConfig::instance();
     m_refreshMode = config.value(QString::fromLatin1(ConfigKeys::Web::RefreshMode), 0).toInt();
-    m_interactive = config.value(QString::fromLatin1(ConfigKeys::Web::Interactive), true).toBool();
+    // 兜底 false = 「网页展示」(鼠标穿透)，与 AppConfig 的布尔默认表一致
+    // (2026-09-23 用户定案，原为 true)。
+    m_interactive = config.value(QString::fromLatin1(ConfigKeys::Web::Interactive), false).toBool();
     m_volume = config.value(QString::fromLatin1(ConfigKeys::Web::Volume), 0).toInt();
     m_zoomPercent = config.value(QString::fromLatin1(ConfigKeys::Web::Zoom), 100).toInt();
-    m_fpsCap = config.value(QString::fromLatin1(ConfigKeys::Web::FpsCap), 24).toInt();
-    m_pauseOnFullscreen =
-        config.value(QString::fromLatin1(ConfigKeys::Web::PauseFullscreen), false).toBool();
+    m_fpsCap = config.value(QString::fromLatin1(ConfigKeys::Web::FpsCap), 30).toInt();
     m_source = config.value(QString::fromLatin1(ConfigKeys::Web::Source)).toString();
 }
 
@@ -946,13 +939,24 @@ void WebWallpaper::applyInteractive()
 #ifdef Q_OS_WIN
     if (!m_host || !m_host->testAttribute(Qt::WA_WState_Created))
         return;
-    // 仅展示 = 鼠标穿透(WS_EX_TRANSPARENT)，与看板娘的鼠标穿透同一套底层开关。
+    // 仅展示 = 鼠标穿透，**只靠 WS_EX_TRANSPARENT**。
+    //
+    // ⚠️ 千万别顺手把 WS_EX_LAYERED 加回来。mountBehindIcons() 特意剥掉了它(见
+    // desktopmount.cpp 那段注释)：Win11 的 DWM **不合成跨进程挂载的分层子窗口**，
+    // 加上去的表现是「挂载日志一切正常、窗口就是永远不出现在桌面上」—— 极难查。
+    // 2026-09-23 踩过：把「网页展示」改成默认档后立刻复现(23:10 那四次挂载全是
+    // interactive=0)；翻历史日志才看清所有能用的挂载都是 interactive=1，且唯一一次
+    // interactive=0 在 4 秒后就被改回 1。
+    //
+    // ⚠️ 所以这里**无论哪一档都先把 LAYERED 剥掉**：它一旦被加上，DWM 就不再合成这个
+    // 窗口，而且**切回「网页交互」也不会自己恢复** —— 那一档只清 TRANSPARENT，不动 LAYERED。
     const HWND hwnd = reinterpret_cast<HWND>(m_host->winId());
     LONG ex = GetWindowLongW(hwnd, GWL_EXSTYLE);
+    ex &= ~LONG(WS_EX_LAYERED);
     if (m_interactive)
         ex &= ~WS_EX_TRANSPARENT;
     else
-        ex |= WS_EX_TRANSPARENT | WS_EX_LAYERED;
+        ex |= WS_EX_TRANSPARENT;
     SetWindowLongW(hwnd, GWL_EXSTYLE, ex);
 #endif
 }
@@ -1174,13 +1178,9 @@ void WebWallpaper::evaluateSuspend()
     }
 
     int reasons = 0;
-    // 全屏与遮盖同源：全屏窗口必然盖住桌面。两者都由「全屏自动暂停」控制 ——
-    // 默认关闭时全屏/最大化窗口下壁纸保持渲染，退出全屏立刻可见，不会出现
-    // 「退出全屏后壁纸消失很久」的重建空窗。
-    if (m_pauseOnFullscreen && fbswin::isFullscreenWindowPresent())
-        reasons |= kSuspendFullscreen;
-    if (m_pauseOnFullscreen && fbswin::isDesktopCoveredByWindow())
-        reasons |= kSuspendCovered;
+    // 全屏/遮挡**不挂起**：网页壁纸原先有个「全屏自动暂停」开关，2026-09-23 连同设置项一起
+    // 移除。保持渲染的好处是退出全屏立刻可见，不会出现「退出全屏后壁纸消失很久」的重建空窗。
+    // ⚠️ 视频壁纸那边仍有这个开关，别把两边的判据当成一套。
     if (fbswin::isWorkstationLocked())
         reasons |= kSuspendLocked;
     if (!m_monitorOn)
@@ -1410,13 +1410,6 @@ bool WebWallpaper::navigateTo(const QString &source, QString *error)
         *error = QStringLiteral("网页壁纸仅支持 Windows");
     return false;
 #endif
-}
-
-void WebWallpaper::setPauseOnFullscreen(bool on)
-{
-    m_pauseOnFullscreen = on;
-    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Web::PauseFullscreen), on);
-    evaluateSuspend(); // 立即生效，不等下一拍心跳
 }
 
 // —— 杂项 ——

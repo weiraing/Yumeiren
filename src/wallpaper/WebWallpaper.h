@@ -52,11 +52,10 @@ public:
 
     // —— 设置(全部即时生效并落盘) ——
     void setInteractive(bool on);
-    void setVolume(int percent);      // 0=静音;>0 取消静音(WebView2 无音量级)
+    void setVolume(int percent);      // 计量为百分比；0=取消声音播放(WebView2 无音量级)，>0 出声
     void setZoomPercent(int percent); // 50~200
     void setRefreshMode(int mode);
     void setFpsCap(int fps);          // 0=跟随页面,24/30/60
-    void setPauseOnFullscreen(bool on); // 全屏时自动暂停(默认关)
     bool navigateTo(const QString &source, QString *error = nullptr); // 运行中换页
     // 显示器电源状态(WM_POWERBROADCAST 投递，与视频/看板娘同一事件源)。
     void setMonitorOn(bool on);
@@ -74,7 +73,6 @@ public:
     int volume() const { return m_volume; }
     int zoomPercent() const { return m_zoomPercent; }
     int fpsCap() const { return m_fpsCap; }
-    bool pauseOnFullscreen() const { return m_pauseOnFullscreen; }
     QString stateText() const { return m_stateText; }
 
 signals:
@@ -135,7 +133,6 @@ private:
     int m_volume = 0;  // 0=静音(默认：壁纸别出声，用户要声音自己开)
     int m_zoomPercent = 100;
     int m_fpsCap = 0;
-    bool m_pauseOnFullscreen = false; // 全屏时自动暂停(默认关闭)
 
     // —— COM 管线 ——
     ICoreWebView2Environment *m_environment = nullptr;

@@ -14,12 +14,18 @@ inline constexpr auto Theme = "ui/theme";
 }
 
 namespace Image {
+// 透明度上限(%)。88 对应旧版「不透明度」滑杆的 alpha 下限 30(1 - 30/255 ≈ 88%)：
+// 再往上背景几乎不可见，用户容易以为图弄丢了。UI 滑杆、配置钳位、旧值迁移共用。
+inline constexpr int MaxTransparency = 88;
 inline constexpr auto Rotate = "image/rotate";
 inline constexpr auto Scale = "image/scale";
 inline constexpr auto Brightness = "image/brightness";
 inline constexpr auto Contrast = "image/contrast";
 inline constexpr auto Blur = "image/blur";
-inline constexpr auto Opacity = "image/opacity";
+// 透明度(%)：0=不透明，MaxTransparency=最透。绘制/写入 DLL 配置时换算成
+// alpha=round((100-透明度)×255/100)；旧键迁移在 AppConfig 默认值补齐之前做。
+inline constexpr auto Transparency = "image/transparency";
+inline constexpr auto OpacityLegacy = "image/opacity"; // 旧版「不透明度」(alpha 30..255)，仅迁移用
 inline constexpr auto PosType = "image/posType";
 inline constexpr auto FolderExt = "image/folderExt";
 inline constexpr auto Mode = "image/mode";
@@ -59,7 +65,6 @@ inline constexpr auto TargetFps = "video/targetFps";
 // 更省资源但画面变慢)。见 VideoWallpaper::setKeepSpeed。
 inline constexpr auto FpsKeepSpeed = "video/fpsKeepSpeed";
 inline constexpr auto Reclaim = "video/reclaim";
-inline constexpr auto ScreenMode = "video/screenMode";
 inline constexpr auto AffinityLimit = "video/affinityLimit";
 inline constexpr auto Diag = "video/diag";
 }
@@ -69,11 +74,12 @@ namespace Web {
 inline constexpr auto Enabled = "web/enabled";           // 上次退出时在跑(启动恢复判据)
 inline constexpr auto Source = "web/source";
 inline constexpr auto RefreshMode = "web/refreshMode";   // 0=实时 1=快照·每分钟 2=快照·每小时
-inline constexpr auto Interactive = "web/interactive";   // 允许鼠标交互(否则点击穿透)
+// 允许鼠标交互(否则点击穿透)。**默认关**(2026-09-23 用户定案，原默认开)：
+// 界面上「网页展示」= false、「网页交互」= true，默认档是「网页展示」。
+inline constexpr auto Interactive = "web/interactive";
 inline constexpr auto Volume = "web/volume";             // 0=静音；WebView2 只有静音两档
 inline constexpr auto Zoom = "web/zoom";                 // 50~200
-inline constexpr auto FpsCap = "web/fpsCap";             // 默认24:壁纸不需要满刷新率,0=跟随页面
-inline constexpr auto PauseFullscreen = "web/pauseFullscreen"; // 全屏时自动暂停(默认关)
+inline constexpr auto FpsCap = "web/fpsCap";             // 0=跟随页面自身帧率(默认档);出厂 30
 }
 
 namespace Window {

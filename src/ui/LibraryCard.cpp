@@ -62,7 +62,10 @@ MediaLibraryCard::MediaLibraryCard(const QString &title, const QString &nameHead
     help->setObjectName(QStringLiteral("HelpBadge"));
     help->setAlignment(Qt::AlignCenter);
     help->setFixedSize(22, 22);
-    help->setToolTip(tooltipstyle::format(helpText));
+    // noteText 并进 ? 的 tooltip(2026-09-23)：卡片底部原来有第二行常驻说明，现在
+    // 只留一行三段式信息，说明内容全挪到这里 —— 所以传参时别跟 helpText 写重。
+    help->setToolTip(tooltipstyle::format(
+        noteText.isEmpty() ? helpText : helpText + QLatin1Char('\n') + noteText));
     toolbar->addWidget(help);
     lay->addLayout(toolbar);
 
@@ -78,12 +81,14 @@ MediaLibraryCard::MediaLibraryCard(const QString &title, const QString &nameHead
     m_tree->setUniformRowHeights(true);
     lay->addWidget(m_tree, 1);
 
-    m_status = new QLabel(this);
-    m_status->setObjectName(QStringLiteral("HintLabel"));
-    lay->addWidget(m_status);
-
-    auto *note = new QLabel(noteText, this);
-    lay->addWidget(note);
+    // 底部只留这一行：统计信息 · 状态 · 播放数据名(见 setInfo)。
+    // ⚠️ 刻意 setWordWrap(false)：两个库的页脚高度因此完全一致，不会因为某页
+    // 状态文案长一点就把卡片底边顶上去。文案放不下时会裁尾巴 —— 所以三段都要短。
+    // (原来这里还有第二个 QLabel 常驻显示 noteText，已并进 ? 的 tooltip。)
+    m_info = new QLabel(this);
+    m_info->setObjectName(QStringLiteral("HintLabel"));
+    m_info->setWordWrap(false);
+    lay->addWidget(m_info);
 
     // 删除键跟随勾选集：勾上任意一行才可用
     connect(m_tree, &QTreeWidget::itemChanged, this, [this] {
@@ -100,8 +105,9 @@ QTreeWidgetItem *MediaLibraryCard::addRow(QTreeWidgetItem *parent, const QString
     item->setText(0, name);
     item->setText(1, type);
     item->setData(0, PathRole, path);
-    item->setToolTip(0, QDir::toNativeSeparators(path));
-    item->setToolTip(1, item->toolTip(0));
+    // 刻意不挂 Qt::ToolTipRole：列表项鼠标一停就弹整条路径，扫列表时很吵(2026-09-23 用户要求)。
+    // 名称列被省略号截断时也不再补 tooltip —— 想看全路径把列拉宽即可。
+    // 注意 path 本身还要用(PathRole)，别把上面的 setData 一起删了。
     if (bold) {
         QFont f = item->font(0);
         f.setBold(true);
@@ -125,10 +131,19 @@ QStringList MediaLibraryCard::checkedPaths() const
     return paths;
 }
 
-void MediaLibraryCard::setStatus(const QString &text)
+// 三段固定顺序：统计信息 · 状态 · 播放数据名。空段跳过。
+// ⚠️ 分隔符必须是 QStringLiteral，**不能用 QLatin1String**：里面的 · 是非 ASCII，
+// 窄字面量会被编成 UTF-8 两字节(C2 B7)，再被当 Latin-1 逐字节解 → 界面上显示 "Â·"。
+void MediaLibraryCard::setInfo(const QString &stats, const QString &state, const QString &name)
 {
-    if (m_status)
-        m_status->setText(text);
+    if (!m_info)
+        return;
+    QStringList parts;
+    for (const QString &s : {stats, state, name}) {
+        if (!s.isEmpty())
+            parts << s;
+    }
+    m_info->setText(parts.join(QStringLiteral(" · ")));
 }
 
 void MediaLibraryCard::setLibraryEnabled(bool on)

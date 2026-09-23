@@ -692,7 +692,7 @@ QWidget *MainWindow::buildKanbanParamCard(QWidget *parent)
     m_kanbanThroughBox->setToolTip(tooltipstyle::format(
         QStringLiteral("开启后鼠标对窗口隐形，点击全部落到桌面。\n"
                        "注意：穿透期间小人收不到鼠标，右键菜单也叫不出来 —— "
-                       "要关掉只能回这一页取消勾选。")));
+                       "要关掉可回这一页取消勾选，或在系统托盘右键菜单里取消“鼠标穿透”。")));
     connect(m_kanbanThroughBox, &QCheckBox::toggled, this, [this](bool on) {
         if (!m_kanbanSyncing)
             m_kanban->setMouseThrough(on);
@@ -1600,11 +1600,16 @@ void MainWindow::switchPage(int row)
     for (auto *t : m_kanbanTabs)
         t->setVisible(row == 2);
     m_statusBox->setVisible(row == 0);
+    m_wallStatusBox->setVisible(row == 1);
 
     if (row == 0)
         selectHeaderTab(m_stack->currentIndex());
-    else if (row == 1)
+    else if (row == 1) {
+        // 徽标只在订阅信号之外的这一刻兜底刷一次：万一状态位没变(信号不发)但
+        // 组件刚建好还没读过初值，进页就能看到对的。
+        setWallStatusChips();
         selectWallTab(m_wallStack->currentIndex());
+    }
     else if (row == 2) {
         selectKanbanTab(m_kanbanStack ? m_kanbanStack->currentIndex() : 0);
         updateKanbanControls();

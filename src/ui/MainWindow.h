@@ -75,6 +75,7 @@ private slots:
     void stopVideo();
     void refreshVideoList();
     void onVideoStateChanged(const QString &text);
+    void updateVideoLibraryInfo(); // 视频库页脚：统计信息 · 状态 · 当前视频名
     void updateVideoButtons();
     void updatePlayingHighlight(); // 播放列表中当前曲目条目高亮
     void pickPresetFolder();
@@ -109,6 +110,10 @@ private:
     QWidget *buildVideoWallpaperPage();
     QWidget *buildWebWallpaperPage();
     void updateWebWallpaperControls(); // 网页壁纸按钮/状态与运行态同步
+    void updateWebLibraryInfo();       // 网页库页脚：统计信息 · 状态 · 当前来源名
+    // 帧率档位吸附：把配置里存着的、已不在可选档位里的值
+    // (如老版本的 15 FPS)吸到最近的档位。视频页与网页页共用。
+    static int snapToFpsOption(int saved);
     void refreshWebLibrary();          // 扫描 data/web 下的页面与 Web 项目
     void setWebSource(const QString &source, bool activate);
     void removeCheckedWebItems();      // 删除网页库勾选项(移入回收站)
@@ -120,6 +125,7 @@ private:
     void scheduleImagePreview();
 
     void updatePreviewAspect();
+    void applyPreviewAspect();
     void updateEffectPresetSelection(int index);
     void setLog(const QString &text, bool isError);
     // 写一条「就绪」提示，并记住「这行现在是提示」—— 切页签时只有这种状态下才会被换成
@@ -129,6 +135,7 @@ private:
     static QString imagePageHintText();
     static QString effectPageHintText();
     void setStatusChips();
+    void setWallStatusChips();   // 动态壁纸页右上角的运行状态徽标(视频/网页各一枚)
 
     void reportDllMigration();
     void loadSettings();
@@ -206,6 +213,10 @@ private:
     QFrame *m_previewFrame = nullptr;      // 承载预览图的边框，宽高比跟随桌面
     QSize m_previewRenderSize;             // 预览画布对应的预览区尺寸(防重入)
     QTimer *m_previewDebounce = nullptr;   // resize 风暴里延迟重绘的定时器
+    // 预览框高度调整必须推迟到事件循环(见 updatePreviewAspect)：在 Resize 事件里同步
+    // setFixedHeight 会形成同步自激环，拖窗口时直接 0xC0000005 崩掉。
+    QTimer *m_previewAspectTimer = nullptr;
+    int m_previewAspectPending = 0;        // 待应用的高度(px)，<=0 表示无待办
     QString m_previewSrcKey;               // 预览源图缓存键：路径+修改时间
     QImage m_previewSrcCache;              // 已解码(必要时缩放)的预览源图
     QSize m_previewSrcNative;              // 缓存对应的原始像素尺寸
@@ -214,7 +225,7 @@ private:
     QSlider *m_brightness = nullptr;
     QSlider *m_contrast = nullptr;
     QSlider *m_blur = nullptr;
-    QSlider *m_opacity = nullptr;
+    QSlider *m_transparency = nullptr;     // 图片背景透明度(%)，0=不透明；要 alpha 时经换算
     QPushButton *m_posButtons[7] = {};     // 显示位置按钮(下标=模式 0填充 1居中 2拉伸 3..6四角)
     int m_posMode = 0;                     // 当前显示位置模式
     QCheckBox *m_folderExt = nullptr;
@@ -227,7 +238,7 @@ private:
     QLabel *m_brightnessVal = nullptr;
     QLabel *m_contrastVal = nullptr;
     QLabel *m_blurVal = nullptr;
-    QLabel *m_opacityVal = nullptr;
+    QLabel *m_transparencyVal = nullptr;
     QPushButton *m_applyImageBtn = nullptr;
 
     // effect page widgets
@@ -258,26 +269,29 @@ private:
     QCheckBox *m_reclaimBox = nullptr;
     QCheckBox *m_affinityBox = nullptr;   // 资源友好模式(限制逻辑核, 重启生效)
     QCheckBox *m_autostartBox = nullptr;
-    QComboBox *m_screenModeCombo = nullptr;
     // 动态网页壁纸页(WebView2)
-    QComboBox *m_webRefreshCombo = nullptr;
-    QComboBox *m_webInteractCombo = nullptr;
-    QComboBox *m_webFpsCombo = nullptr;
+    QButtonGroup *m_webRefreshGroup = nullptr;  // 刷新策略：互斥单选，id 就是 WebWallpaper::RefreshMode 枚举值
+    QButtonGroup *m_webInteractGroup = nullptr;  // 交互模式：互斥单选，id 0=网页展示(穿透) / 1=网页交互
+    QButtonGroup *m_webFpsGroup = nullptr;  // 帧率：互斥单选，按钮 id 就是 fps 值(0=跟随页面)
     QSlider *m_webVolumeSlider = nullptr;
     QLabel *m_webVolumeVal = nullptr;
     QSlider *m_webZoomSlider = nullptr;
     QLabel *m_webZoomVal = nullptr;
     QTreeWidget *m_webTree = nullptr;        // 指向 MediaLibraryCard 内的列表
     MediaLibraryCard *m_webLib = nullptr;
-    QLabel *m_webLibraryStatus = nullptr;
+    // 网页库页脚第一段(统计信息)。页面/项目数在 refreshWebLibrary 里数出来存这儿，
+    // 状态与来源名由 updateWebLibraryInfo() 现取 —— 三段凑齐后交给 card->setInfo()。
+    QString m_webStatsText;
     QPushButton *m_webStartBtn = nullptr;
     QLabel *m_webStateLabel = nullptr;
     bool m_webRuntimeOk = false;
     QPushButton *m_playBtn = nullptr;
     QPushButton *m_pauseBtn = nullptr;
-    QComboBox *m_fpsBox = nullptr;
-    QCheckBox *m_fpsKeepSpeedBox = nullptr; // 限帧方式：保速丢帧 / 慢动作
-    QLabel *m_videoStatus = nullptr;
+    QButtonGroup *m_fpsGroup = nullptr;     // 帧率：互斥单选，按钮 id 就是 fps 值(0=跟随视频帧率)
+    QCheckBox *m_fpsKeepSpeedBox = nullptr; // 限速方式：保速丢帧 / 慢动作
+    // 视频库页脚第二段(状态)：壁纸层最后一次 playbackStateChanged 的原文。
+    // 存原文而不是自己拼短词 —— 「检测到全屏应用，已自动暂停」这类"为什么"不能丢。
+    QString m_videoStateText;
 
     // 显示器电源通知的订阅句柄(Windows 的 HPOWERNOTIFY)。用 void* 是为了不在头文件
     // 里引 windows.h；空 = 没订上，熄灭/唤醒判据随之不可用(构造时会记一行)。
@@ -306,6 +320,9 @@ private:
     QWidget *m_statusBox = nullptr;         // 状态徽标(仅文件夹美化页显示)
     QLabel *m_imageChip = nullptr;
     QLabel *m_effectChip = nullptr;
+    QWidget *m_wallStatusBox = nullptr;     // 运行状态徽标(仅动态壁纸页显示)
+    QLabel *m_videoChip = nullptr;
+    QLabel *m_webChip = nullptr;
     QLabel *m_logLabel = nullptr;
     // 底部那行现在是不是一条「就绪」提示(而不是某次操作的结果消息)。
     bool m_logShowsHint = false;

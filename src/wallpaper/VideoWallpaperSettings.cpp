@@ -21,38 +21,7 @@
 #pragma comment(lib, "Powrprof.lib")
 #endif
 
-namespace {
-QString screenModeName(int mode)
-{
-    switch (mode) {
-    case 0: return QStringLiteral("单屏");
-    case 1: return QStringLiteral("扩展");
-    case 2: return QStringLiteral("克隆");
-    default: return QStringLiteral("未知(%1)").arg(mode);
-    }
-}
-} // namespace
 
-
-void VideoWallpaper::setScreenMode(int mode)
-{
-    const int prev = m_screenMode;
-    m_screenMode = qBound(0, mode, 2);
-    if (m_screenMode == prev)
-        return; // 值未变不重建：启动时 loadSettings 会对已运行的管线重复调用
-    videodiag::log(videodiag::Level::Info,
-        QStringLiteral("显示模式切换: %1→%2 outputs=%3")
-            .arg(screenModeName(prev)).arg(screenModeName(m_screenMode))
-            .arg(m_outputs.size()));
-    if (!m_outputs.isEmpty()) {
-        layoutOutputs();
-        // 重建后恢复播放(挂起原因存在时由状态机保持暂停)
-        if (m_started && !m_manualPaused && !m_playlist.isEmpty()) {
-            playIndex(qMax(0, m_index));
-            evaluateSuspend();
-        }
-    }
-}
 void VideoWallpaper::setPauseOnFullscreen(bool on)
 {
     m_pauseOnFullscreen = on;
