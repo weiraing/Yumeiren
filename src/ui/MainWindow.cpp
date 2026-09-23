@@ -8,7 +8,7 @@
 #include "config/ConfigKeys.h"
 #include "core/CachePaths.h"
 #include "core/Diagnostics.h"
-#include "engine/Engine.h"
+#include "explorerbg/Engine.h"
 #include "kanban/KanbanController.h"
 #include "kanban/KanbanModelManager.h"
 #include "platform/windows/desktopmount.h"
@@ -517,7 +517,7 @@ QVector<QPushButton *> MainWindow::makeTabGroup(QHBoxLayout *lay, const QStringL
 }
 
 // 三组页内页签共用的选中骨架：越界判空、逐个 setChecked、切堆叠页。
-// selectHeaderTab 在此之上还有「就绪提示跟随页签」等本页逻辑(见 MainWindowKanbanPage.cpp)。
+// selectHeaderTab 在此之上还有「就绪提示跟随页签」等本页逻辑(见 KanbanSettingsPage.cpp)。
 bool MainWindow::selectTabGroup(QVector<QPushButton *> &tabs, QStackedWidget *stack, int index)
 {
     if (index < 0 || index >= tabs.size())

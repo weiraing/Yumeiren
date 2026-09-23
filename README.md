@@ -463,13 +463,13 @@ Yumeiren/
 │   ├── main.cpp                  # 入口：着色器缓存开关、单实例、配置加载、亲和性
 │   ├── app/                      # 产品信息、运行状态、退出收口
 │   ├── config/                   # AppConfig（INI 读写/校验/延迟保存）+ ConfigKeys
-│   ├── core/                     # CachePaths / Diagnostics / ImageProcess
-│   ├── engine/                   # 系统后端（DLL 释放、注册、Explorer 重启）
-│   ├── kanban/                   # 看板娘：控制器 / 状态机 / 窗口 / 渲染器 / 模型管理
+│   ├── core/                     # 跨模块共享：CachePaths / Diagnostics / SuspendPolicy
+│   ├── explorerbg/               # 文件夹美化：Engine(DLL 注册) / ImageProcess / 图片页 / 效果页
+│   ├── kanban/                   # 看板娘：控制器 / 状态机 / 窗口 / 渲染器 / 模型管理 / 设置页
 │   ├── platform/windows/         # fbswin:: WorkerW 挂载、全屏/锁屏/电池检测、单实例
 │   ├── tray/                     # 系统托盘控制器
-│   ├── ui/                       # 主窗口 + 图片页 / 效果页 / 视频页 / 看板娘页
-│   └── wallpaper/                # VideoWallpaper 播放器、主屏输出、挂起策略
+│   ├── ui/                       # 主窗口壳 + 共享小部件(LibraryCard / TooltipStyle / UiStyle)
+│   └── wallpaper/                # 动态壁纸：视频 / 网页壁纸播放器 + 壁纸页 UI
 ├── cmake/                        # Version.cmake / Live2DCubism.cmake / *.h.in 模板
 ├── resources/                    # app.rc.in · app.manifest.in · style.qss · light.qss
 │                                 #   dlls/（两个 Hook DLL，随仓库提供）· icons/

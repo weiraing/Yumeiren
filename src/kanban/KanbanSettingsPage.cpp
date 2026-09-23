@@ -1,5 +1,5 @@
 // MainWindow 看板娘页的构建与交互逻辑（含模型选择、参数调节、托盘联动）。
-#include "MainWindow.h"
+#include "ui/MainWindow.h"
 
 #include "config/AppConfig.h"
 #include "config/ConfigKeys.h"

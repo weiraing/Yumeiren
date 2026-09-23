@@ -140,21 +140,20 @@ set(YUMEIREN_SOURCES
     src/app/ApplicationShutdown.cpp
     # config/ module
     src/config/AppConfig.cpp
-    # core/ module
+    # core/ module(跨模块共享的缓存路径与诊断日志)
     src/core/CachePaths.cpp
     src/core/Diagnostics.cpp
-    src/core/ImageProcess.cpp
-    # engine/ module
-    src/engine/Engine.cpp
-    # ui/ module
+    # explorerbg/ module(文件夹美化：图片背景+效果样式+使用说明)
+    src/explorerbg/Engine.cpp
+    src/explorerbg/ImageProcess.cpp
+    src/explorerbg/ImagePage.cpp
+    src/explorerbg/EffectStylePage.cpp
+    # ui/ module(主窗口壳 + 共享小部件；三个模块各自的页面在对应模块目录下)
     src/ui/MainWindow.cpp
-    src/ui/MainWindowImagePage.cpp
-    src/ui/MainWindowEffectPage.cpp
-    src/ui/MainWindowVideoPage.cpp
-    src/ui/MainWindowKanbanPage.cpp
     src/ui/LibraryCard.cpp
     src/ui/TooltipStyle.cpp
-    # wallpaper/ module
+    # wallpaper/ module(动态壁纸：视频+网页，含壁纸页 UI)
+    src/wallpaper/WallpaperPage.cpp
     src/wallpaper/VideoWallpaper.cpp
     src/wallpaper/VideoWallpaperOutput.cpp
     src/wallpaper/VideoWallpaperSettings.cpp
@@ -168,6 +167,7 @@ set(YUMEIREN_SOURCES
     src/tray/SystemTrayController.cpp
     # kanban/ module
     src/kanban/KanbanAnimationClock.cpp
+    src/kanban/KanbanSettingsPage.cpp
     src/kanban/KanbanController.cpp
     src/kanban/KanbanControllerInteraction.cpp
     src/kanban/KanbanControllerSettings.cpp

@@ -20,8 +20,8 @@
 
 #include <memory>
 
-#include "engine/Engine.h"
-#include "core/ImageProcess.h"
+#include "explorerbg/Engine.h"
+#include "explorerbg/ImageProcess.h"
 
 namespace kanban {
 class KanbanController;

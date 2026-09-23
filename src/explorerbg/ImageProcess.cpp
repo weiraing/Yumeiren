@@ -1,4 +1,4 @@
-#include "core/ImageProcess.h"
+#include "explorerbg/ImageProcess.h"
 
 #include <QPainter>
 #include <QFontMetrics>

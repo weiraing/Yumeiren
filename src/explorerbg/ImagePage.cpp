@@ -1,10 +1,11 @@
-// MainWindow 图片背景页的构建与交互逻辑（含图库浏览、参数调整、随机模式）。
-#include "MainWindow.h"
+// 文件夹美化模块(图片背景+效果样式+使用说明，即首屏三个页签)——图片背景页的
+// 构建与交互逻辑（含图库浏览、参数调整、随机模式）。
+#include "ui/MainWindow.h"
 
 #include "config/AppConfig.h"
 #include "config/ConfigKeys.h"
 #include "core/CachePaths.h"
-#include "engine/Engine.h"
+#include "explorerbg/Engine.h"
 #include "ui/TooltipStyle.h"
 
 #include <QApplication>
@@ -116,6 +117,59 @@ QString MainWindow::elidedTwoLineText(const QString &text, int width) const
         return fm.elidedText(text, Qt::ElideRight, width);
     return first + QLatin1Char('\n') + fm.elidedText(rest, Qt::ElideRight, width);
 }
+// 文件夹美化的第三个页签「使用说明」：纯静态说明卡，内容只描述图片背景/效果样式
+// 两项能力，故归入本模块(此前误放在动态壁纸页的源文件里)。
+QWidget *MainWindow::buildHelpPage()
+{
+    auto *scroll = new QScrollArea(this);
+    scroll->setWidgetResizable(true);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    auto *page = new QWidget(scroll);
+    auto *lay = new QVBoxLayout(page);
+    lay->setContentsMargins(18, 16, 18, 16);
+
+    auto *card = new QFrame(page);
+    card->setObjectName(QStringLiteral("PageCard"));
+    auto *cardLay = new QVBoxLayout(card);
+    cardLay->setContentsMargins(18, 14, 18, 18);
+    cardLay->setSpacing(10);
+
+    auto *t = new QLabel(QStringLiteral("使用说明"), card);
+    t->setObjectName(QStringLiteral("GroupTitle"));
+    cardLay->addWidget(t);
+
+    const QString text = QStringLiteral(
+        "<p style='color:#d5d8de'>「虞美人」整合了三个开源项目的能力，为 Windows 10 / 11 的文件资源管理器设置背景：</p>"
+        "<p style='color:#b9bcc4'>• <b>图片背景</b> —— 基于 Maplespe 的 explorerTool(ExplorerBgTool.dll)，"
+        "默认浏览软件目录下的 data/image 文件夹，也可点击“选择文件夹”更换目录，"
+        "支持亮度 / 对比度 / 模糊 / 透明度 / 显示位置调整，"
+        "可选扩展到文件打开、保存对话框。</p>"
+        "<p style='color:#b9bcc4'>• <b>效果样式</b> —— 基于 Maplespe 的 ExplorerBlurMica(官方 2.0.1)，"
+        "为窗口添加 Blur / Acrylic / Mica / MicaAlt 系统级背景效果，亮暗色模式自适应。</p>"
+        "<p style='color:#b9bcc4'>• 两项能力各自独立：只开图片、只开特效、或两个都开都可以。"
+        "两边的“应用”只写自己那份配置、只注册自己那个 DLL，不会关掉另一项；"
+        "两个都开时图片覆盖文件列表区，模糊/亚克力作为整窗底色。</p>"
+        "<p style='color:#d5d8de'><b>生效方式</b>：程序需以管理员身份运行（自动弹出 UAC 确认）。"
+        "点击“应用”后会写入配置、注册 DLL 并重启资源管理器；打开任意文件夹即可看到效果。</p>"
+        "<p style='color:#d5d8de'><b>常见问题</b>：</p>"
+        "<p style='color:#b9bcc4'>• 若 Windows 大版本更新后背景消失，重新点击“应用”即可。</p>"
+        "<p style='color:#b9bcc4'>• 若资源管理器窗口无法打开，按住 <b>ESC</b> 键点击资源管理器可跳过背景加载，"
+        "然后在本工具点击“恢复”。</p>"
+        "<p style='color:#b9bcc4'>• “Home / 图库”页不显示背景，请进入任意文件夹查看。</p>"
+        "<p style='color:#82858d'>致谢：SuryaMajumdar/ExplorerBgTool (MIT) · Maplespe/explorerTool · "
+        "Maplespe/ExplorerBlurMica (LGPL-3.0)。本工具仅调用其官方 DLL 并生成配置。</p>");
+
+    auto *body = new QLabel(text, card);
+    body->setWordWrap(true);
+    body->setTextFormat(Qt::RichText);
+    body->setAlignment(Qt::AlignTop);
+    cardLay->addWidget(body);
+    lay->addWidget(card);
+    lay->addStretch(1);
+    scroll->setWidget(page);
+    return scroll;
+}
+
 QWidget *MainWindow::buildImagePage()
 {
     auto *scroll = new QScrollArea(this);

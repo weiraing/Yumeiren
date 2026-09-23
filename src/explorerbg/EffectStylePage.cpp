@@ -1,10 +1,10 @@
-// MainWindow 效果样式页的构建与交互逻辑。
-#include "MainWindow.h"
+// 文件夹美化模块——效果样式页(Blur/Acrylic/Mica)的构建与交互逻辑。
+#include "ui/MainWindow.h"
 
 #include "config/AppConfig.h"
 #include "config/ConfigKeys.h"
 #include "core/Diagnostics.h"
-#include "engine/Engine.h"
+#include "explorerbg/Engine.h"
 #include "ui/TooltipStyle.h"
 
 #include <QCheckBox>

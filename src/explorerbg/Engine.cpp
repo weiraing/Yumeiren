@@ -1,4 +1,4 @@
-#include "engine/Engine.h"
+#include "explorerbg/Engine.h"
 
 #include "app/AppInfo.h"
 #include "core/CachePaths.h"
