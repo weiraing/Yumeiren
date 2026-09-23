@@ -20,7 +20,6 @@ public:
 
     bool load();                       // 幂等：创建目录/文件、校验修复
     bool save();                       // sync + 状态检查; 失败记日志不清空配置
-    void reload();
 
     QString configFilePath() const;
     QString configDirectory() const;
@@ -32,7 +31,6 @@ public:
     void remove(const QString &key);
 
 signals:
-    void settingChanged(const QString &key, const QVariant &value);
 
 private:
     explicit AppConfig(QObject *parent = nullptr);

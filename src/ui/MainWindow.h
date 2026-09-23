@@ -15,6 +15,7 @@
 #include <QSize>
 #include <QSlider>
 #include <QStringList>
+#include <functional>
 #include <QVector>
 
 #include <memory>
@@ -30,6 +31,7 @@ class SystemTrayController;
 class QLineEdit;
 class QListWidget;
 class QListWidgetItem;
+class QHBoxLayout;
 class QStackedWidget;
 class QCheckBox;
 class QComboBox;
@@ -136,6 +138,11 @@ private:
     static QString effectPageHintText();
     void setStatusChips();
     void setWallStatusChips();   // 动态壁纸页右上角的运行状态徽标(视频/网页各一枚)
+    // 三组页内页签(图片背景/动态壁纸/看板娘)共用的构建与选中骨架，见 MainWindow.cpp
+    QVector<QPushButton *> makeTabGroup(QHBoxLayout *lay, const QStringList &labels,
+                                        bool hiddenByDefault,
+                                        const std::function<void(int)> &onSelect);
+    bool selectTabGroup(QVector<QPushButton *> &tabs, QStackedWidget *stack, int index);
 
     void reportDllMigration();
     void loadSettings();
@@ -302,13 +309,6 @@ private:
     QPushButton *m_titleMin = nullptr;
     QPushButton *m_titleMax = nullptr;
     QPushButton *m_titleClose = nullptr;
-    bool m_edgeCursorActive = false;        // 边缘悬停时光标形状已切换
-    bool m_resizing = false;                // 手动边缘缩放进行中
-    bool m_moving = false;                  // 手动标题栏拖动进行中
-    Qt::Edges m_resizeEdges;                // 缩放方向
-    QRect m_resizeStartGeom;                // 缩放起始几何
-    QPoint m_resizeStartPos;                // 缩放起始鼠标位置
-    QPoint m_moveOffset;                    // 拖动时鼠标相对窗口左上角的偏移
     QListWidget *m_nav = nullptr;
     QStackedWidget *m_topStack = nullptr;   // 文件夹美化 / 动态壁纸
     QStackedWidget *m_stack = nullptr;      // 图片背景 / 效果样式 / 使用说明

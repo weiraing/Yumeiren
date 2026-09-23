@@ -71,13 +71,6 @@ void VideoWallpaper::setPlaylist(const QStringList &files)
         if (isLiveOutput(out))
             applyLoopPolicy(out.player);
 }
-void VideoWallpaper::clearPlaylist()
-{
-    stopAll();
-    m_playlist.clear();
-    m_index = -1;
-    emit playbackStateChanged(QStringLiteral("已清空播放列表"));
-}
 void VideoWallpaper::layoutOutputs()
 {
     VW_ASSERT_GUI();

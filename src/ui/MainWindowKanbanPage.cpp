@@ -7,6 +7,7 @@
 #include "kanban/ModelThumbCache.h"
 #include "platform/windows/shellfileops.h"
 #include "ui/TooltipStyle.h"
+#include "ui/UiStyle.h"
 #include "ui/UiMetrics.h" // 左列宽度：与动态壁纸页共用同一个常量
 
 #include "app/ApplicationRuntimeState.h"
@@ -1321,8 +1322,7 @@ void MainWindow::updateKanbanControls()
     m_kanbanStartBtn->setText((running || failed) ? QStringLiteral("■ 取消")
                                                    : QStringLiteral("▶ 启动"));
     m_kanbanStartBtn->setProperty("data-active", (running || failed) ? 1 : 0);
-    m_kanbanStartBtn->style()->unpolish(m_kanbanStartBtn);
-    m_kanbanStartBtn->style()->polish(m_kanbanStartBtn);
+    uistyle::restyleWidget(m_kanbanStartBtn);
     m_kanbanPauseBtn->setEnabled(running);
     m_kanbanPauseBtn->setText(paused ? QStringLiteral("⏸ 继续") : QStringLiteral("⏸ 暂停"));
     // 可播动作不足两个就置灰并说明原因 —— 不解释原因的灰按钮用户只会当成 bug。实测
@@ -1568,8 +1568,7 @@ void MainWindow::setKanbanLog(const QString &text, bool isError)
         return;
     m_kanbanLog->setText(text);
     m_kanbanLog->setProperty("data-err", isError ? 1 : 0);
-    m_kanbanLog->style()->unpolish(m_kanbanLog);
-    m_kanbanLog->style()->polish(m_kanbanLog);
+    uistyle::restyleWidget(m_kanbanLog);
 }
 
 // 托盘图标左键单击/双击：窗口可能是 hide() 掉的，先 show 再解最小化。
@@ -1620,11 +1619,8 @@ void MainWindow::switchPage(int row)
 
 void MainWindow::selectHeaderTab(int index)
 {
-    if (index < 0 || index >= m_headerTabs.size())
+    if (!selectTabGroup(m_headerTabs, m_stack, index))
         return;
-    for (int i = 0; i < m_headerTabs.size(); ++i)
-        m_headerTabs[i]->setChecked(i == index);
-    m_stack->setCurrentIndex(index);
     // 底部那行若还是「就绪」提示，就跟着页签换成该页的 —— 「切到效果样式却仍写着
     // 图片页那句」就是这么来的。结果是「某次操作的反馈」时不换：用户刚点了应用，
     // 那句「效果样式已应用！」比一句泛泛的就绪提示有用。
@@ -1639,19 +1635,10 @@ void MainWindow::selectHeaderTab(int index)
 
 void MainWindow::selectWallTab(int index)
 {
-    if (index < 0 || index >= m_wallTabs.size())
-        return;
-    for (int i = 0; i < m_wallTabs.size(); ++i)
-        m_wallTabs[i]->setChecked(i == index);
-    m_wallStack->setCurrentIndex(index);
+    selectTabGroup(m_wallTabs, m_wallStack, index);
 }
 
 void MainWindow::selectKanbanTab(int index)
 {
-    if (index < 0 || index >= m_kanbanTabs.size())
-        return;
-    for (int i = 0; i < m_kanbanTabs.size(); ++i)
-        m_kanbanTabs[i]->setChecked(i == index);
-    if (m_kanbanStack)
-        m_kanbanStack->setCurrentIndex(index);
+    selectTabGroup(m_kanbanTabs, m_kanbanStack, index);
 }

@@ -13,6 +13,7 @@
 #include "kanban/KanbanModelManager.h"
 #include "platform/windows/desktopmount.h"
 #include "tray/SystemTrayController.h"
+#include "ui/UiStyle.h"
 #include "wallpaper/VideoWallpaper.h"
 #include "wallpaper/WebWallpaper.h"
 
@@ -72,13 +73,6 @@ const GUID kMonitorPowerOnGuid = {0x02731015, 0x4510, 0x4526,
                                   {0x99, 0xE6, 0xE5, 0xA1, 0x7E, 0xBD, 0x1A, 0xEA}};
 }
 #endif
-
-namespace {
-
-// 图库缩略图标题：一行小字，超宽以省略号截断
-void runComboSelfTest(QWidget *window);
-
-} // namespace
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 {
@@ -294,11 +288,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 
     // 看板娘与托盘放在最后装配：控件树、设置回填、视频壁纸恢复都已就位。
     setupKanbanAndTray();
-
-    // TEMPORARY diagnostic build hook: FBS_COMBO_DEBUG=<dir> walks every combo box,
-    // opens its popup and writes metrics plus a rendered PNG into that directory.
-    if (qEnvironmentVariableIsSet("FBS_COMBO_DEBUG"))
-        runComboSelfTest(this);
     videodiag::logObjectEvent("create", this,
                               QStringLiteral("size=%1x%2").arg(width()).arg(height()));
 }
@@ -445,44 +434,17 @@ QWidget *MainWindow::buildHeader()
     lay->setContentsMargins(14, 6, 18, 6);
     lay->setSpacing(4);
 
-    const QStringList tabs = {QStringLiteral("图片背景"), QStringLiteral("效果样式"),
-                              QStringLiteral("使用说明")};
-    for (int i = 0; i < tabs.size(); ++i) {
-        auto *b = new QPushButton(tabs[i], header);
-        b->setObjectName(QStringLiteral("HeaderTab"));
-        b->setCheckable(true);
-        b->setCursor(Qt::PointingHandCursor);
-        connect(b, &QPushButton::clicked, this, [this, i] { selectHeaderTab(i); });
-        m_headerTabs.append(b);
-        lay->addWidget(b);
-    }
+    // 三组页内页签同一套 HeaderTab 写法，仅标签与选中回调不同 —— 见 makeTabGroup。
+    // 第一组默认可见(文件夹美化页)，后两组只在导航选中对应页时显示。
+    m_headerTabs = makeTabGroup(lay, {QStringLiteral("图片背景"), QStringLiteral("效果样式"),
+                                      QStringLiteral("使用说明")},
+                                false, [this](int i) { selectHeaderTab(i); });
     lay->addSpacing(6);
-
-    const QStringList wallTabs = {QStringLiteral("视频壁纸"), QStringLiteral("动态网页壁纸")};
-    for (int i = 0; i < wallTabs.size(); ++i) {
-        auto *b = new QPushButton(wallTabs[i], header);
-        b->setObjectName(QStringLiteral("HeaderTab"));
-        b->setCheckable(true);
-        b->setVisible(false);
-        b->setCursor(Qt::PointingHandCursor);
-        connect(b, &QPushButton::clicked, this, [this, i] { selectWallTab(i); });
-        m_wallTabs.append(b);
-        lay->addWidget(b);
-    }
+    m_wallTabs = makeTabGroup(lay, {QStringLiteral("视频壁纸"), QStringLiteral("动态网页壁纸")},
+                              true, [this](int i) { selectWallTab(i); });
     lay->addSpacing(6);
-
-    // 看板娘页的页内页签：与壁纸页同一套 HeaderTab 写法，只在导航选中看板娘时出现。
-    const QStringList kanbanTabs = {QStringLiteral("看板娘"), QStringLiteral("设置")};
-    for (int i = 0; i < kanbanTabs.size(); ++i) {
-        auto *b = new QPushButton(kanbanTabs[i], header);
-        b->setObjectName(QStringLiteral("HeaderTab"));
-        b->setCheckable(true);
-        b->setVisible(false);
-        b->setCursor(Qt::PointingHandCursor);
-        connect(b, &QPushButton::clicked, this, [this, i] { selectKanbanTab(i); });
-        m_kanbanTabs.append(b);
-        lay->addWidget(b);
-    }
+    m_kanbanTabs = makeTabGroup(lay, {QStringLiteral("看板娘"), QStringLiteral("设置")},
+                                true, [this](int i) { selectKanbanTab(i); });
     lay->addStretch(1);
 
     m_statusBox = new QWidget(header);
@@ -532,6 +494,39 @@ QWidget *MainWindow::buildHeader()
     connect(&ApplicationRuntimeState::instance(), &ApplicationRuntimeState::stateChanged,
             this, &MainWindow::setWallStatusChips);
     return header;
+}
+
+// 三组页内页签的构建器：生成可勾选的 HeaderTab 按钮并挂进标题栏布局，按下时把
+// 自己的下标转发给 onSelect。hiddenByDefault 的组由 switchPage 在切到对应页时亮出。
+QVector<QPushButton *> MainWindow::makeTabGroup(QHBoxLayout *lay, const QStringList &labels,
+                                                bool hiddenByDefault,
+                                                const std::function<void(int)> &onSelect)
+{
+    QVector<QPushButton *> tabs;
+    for (int i = 0; i < labels.size(); ++i) {
+        auto *b = new QPushButton(labels[i], lay->parentWidget());
+        b->setObjectName(QStringLiteral("HeaderTab"));
+        b->setCheckable(true);
+        b->setVisible(!hiddenByDefault);
+        b->setCursor(Qt::PointingHandCursor);
+        connect(b, &QPushButton::clicked, this, [this, i, onSelect] { onSelect(i); });
+        tabs.append(b);
+        lay->addWidget(b);
+    }
+    return tabs;
+}
+
+// 三组页内页签共用的选中骨架：越界判空、逐个 setChecked、切堆叠页。
+// selectHeaderTab 在此之上还有「就绪提示跟随页签」等本页逻辑(见 MainWindowKanbanPage.cpp)。
+bool MainWindow::selectTabGroup(QVector<QPushButton *> &tabs, QStackedWidget *stack, int index)
+{
+    if (index < 0 || index >= tabs.size())
+        return false;
+    for (int i = 0; i < tabs.size(); ++i)
+        tabs[i]->setChecked(i == index);
+    if (stack)
+        stack->setCurrentIndex(index);
+    return true;
 }
 
 QSlider *MainWindow::makeSlider(int min, int max, int value, QLabel **valueLabel,
@@ -756,8 +751,7 @@ void MainWindow::setLog(const QString &text, bool isError)
     m_logShowsHint = false;
     m_logLabel->setText(text);
     m_logLabel->setProperty("data-err", isError ? 1 : 0);
-    m_logLabel->style()->unpolish(m_logLabel);
-    m_logLabel->style()->polish(m_logLabel);
+    uistyle::restyleWidget(m_logLabel);
 }
 
 void MainWindow::setStatusChips()
@@ -770,17 +764,14 @@ void MainWindow::setStatusChips()
     m_imageChip->setProperty("data-warn", (img.dangling || img.stale) ? 1 : 0);
     m_effectChip->setProperty("data-ok", eff.ours ? 1 : 0);
     m_effectChip->setProperty("data-warn", (eff.dangling || eff.stale) ? 1 : 0);
-    m_imageChip->style()->unpolish(m_imageChip);
-    m_imageChip->style()->polish(m_imageChip);
-    m_effectChip->style()->unpolish(m_effectChip);
-    m_effectChip->style()->polish(m_effectChip);
+    uistyle::restyleWidget(m_imageChip);
+    uistyle::restyleWidget(m_effectChip);
 
     const bool admin = Engine::isElevated();
     m_adminLabel->setText(admin ? QStringLiteral("● 管理员权限")
                                 : QStringLiteral("● 非管理员"));
     m_adminLabel->setProperty("data-admin", admin ? 1 : 0);
-    m_adminLabel->style()->unpolish(m_adminLabel);
-    m_adminLabel->style()->polish(m_adminLabel);
+    uistyle::restyleWidget(m_adminLabel);
     m_osLabel->setText(Engine::windowsProductName());
     m_versionLabel->setText(QStringLiteral("version ") + appinfo::version());
 }
@@ -797,8 +788,7 @@ void MainWindow::setWallStatusChips()
         chip->setText(text);
         chip->setProperty("data-ok", ok ? 1 : 0);
         chip->setProperty("data-warn", warn ? 1 : 0);
-        chip->style()->unpolish(chip);
-        chip->style()->polish(chip);
+        uistyle::restyleWidget(chip);
     };
     VideoWallpaper &video = VideoWallpaper::instance();
     const bool vStarted = video.isStarted();
@@ -953,8 +943,7 @@ private:
             box->setFrameShadow(QFrame::Plain);
         }
 
-        frame->style()->unpolish(frame);
-        frame->style()->polish(frame);
+        uistyle::restyleWidget(frame);
         frame->update();
         frame->installEventFilter(this);
         clipCorners();
@@ -976,183 +965,6 @@ private:
 
 } // namespace
 
-namespace {
-
-void runComboSelfTest(QWidget *window)
-{
-    const QString dirPath =
-        QString::fromLocal8Bit(qEnvironmentVariable("FBS_COMBO_DEBUG").toUtf8());
-    QDir().mkpath(dirPath);
-    const QList<QComboBox *> boxes = window->findChildren<QComboBox *>();
-
-    auto record = [dirPath](const QString &line) {
-        QFile file(dirPath + QStringLiteral("/combo-debug.txt"));
-        if (file.open(QIODevice::Append | QIODevice::Text))
-            QTextStream(&file) << line << '\n';
-    };
-
-    auto applyQss = [record](bool dark) {
-        QFile f(dark ? QStringLiteral(":/style.qss") : QStringLiteral(":/light.qss"));
-        const QByteArray data =
-            f.open(QIODevice::ReadOnly | QIODevice::Text) ? f.readAll() : QByteArray();
-        if (auto *app = qobject_cast<QApplication *>(QApplication::instance())) {
-            app->setStyleSheet(QString::fromUtf8(data));
-            record(QStringLiteral("\n=== theme %1 === open=%2 read=%3 appCss=%4")
-                       .arg(dark ? QStringLiteral("dark") : QStringLiteral("light"))
-                       .arg(f.error() == QFileDevice::NoError)
-                       .arg(data.size())
-                       .arg(app->styleSheet().size()));
-        }
-    };
-
-    auto step = std::make_shared<std::function<void(int, int)>>();
-    *step = [boxes, record, applyQss, dirPath, step, window](int theme, int i) {
-        if (i >= boxes.size()) {
-            if (theme == 0)
-                (*step)(1, 0);
-            else
-                QApplication::quit();
-            return;
-        }
-        if (i == 0)
-            applyQss(theme == 1);
-
-        QComboBox *combo = boxes.at(i);
-        for (QWidget *w = combo; w && w != combo->window(); w = w->parentWidget())
-            if (auto *stack = qobject_cast<QStackedWidget *>(w->parentWidget()))
-                stack->setCurrentWidget(w);
-
-        combo->showPopup();
-        combo->hidePopup();
-        QAbstractItemView *probeView = combo->view();
-        QWidget *probeFrame = probeView ? probeView->window() : nullptr;
-        if (probeView)
-            probeView->setStyleSheet(QString());
-        if (probeFrame)
-            probeFrame->setStyleSheet(QString());
-        switch (i) {
-        case 0:
-            break; // baseline: the app-level #ComboPopup rules as they stand
-        case 1: // local rule on the view, bare class selector
-            probeView->setStyleSheet(QStringLiteral(
-                "QAbstractItemView::item { background:#ffffff; color:#000000;"
-                " padding:8px 12px; margin:2px 3px; }"
-                "QAbstractItemView::item:selected { background:#00ff00; color:#000000; }"));
-            break;
-        case 2: // local rule on the view, id selector
-            probeView->setStyleSheet(QStringLiteral(
-                "#ComboPopup::item { background:#ffffff; color:#000000;"
-                " padding:8px 12px; margin:2px 3px; }"
-                "#ComboPopup::item:selected { background:#00ff00; color:#000000; }"));
-            break;
-        case 3: // local rule on the view, wildcard
-            probeView->setStyleSheet(QStringLiteral("QWidget { background:#ffd0d0; }"));
-            break;
-        case 4: // local rule on the popup frame
-            if (probeFrame)
-                probeFrame->setStyleSheet(QStringLiteral(
-                    "QFrame { background:#ffe0a0; border:2px solid #ff0000;"
-                    " border-radius:12px; }"));
-            break;
-        default:
-            break;
-        }
-        combo->showPopup();
-        QTimer::singleShot(300, combo, [combo, record, dirPath, theme, i, step, window] {
-            QAbstractItemView *view = combo->view();
-            QWidget *frame = view ? view->window() : nullptr;
-            auto *scroll = qobject_cast<QAbstractScrollArea *>(view);
-            if (!view || !frame || !scroll || !scroll->viewport()) {
-                record(QStringLiteral("[%1] %2: no popup").arg(i).arg(combo->objectName()));
-                (*step)(theme, i + 1);
-                return;
-            }
-            // Which popup does Qt really open: the QListView, or a QMenu behind our back?
-            QString tops;
-            const QList<QWidget *> wids = QApplication::allWidgets();
-            for (QWidget *w : wids) {
-                if (!w->isVisible() || !w->isWindow() || w == window)
-                    continue;
-                tops += QStringLiteral(" [%1 obj=%2 %3x%4]")
-                            .arg(QString::fromLatin1(w->metaObject()->className()))
-                            .arg(w->objectName())
-                            .arg(w->width())
-                            .arg(w->height());
-            }
-            record(QStringLiteral("[%1] hint SH_ComboBox_Popup=%2 viewClass=%3 viewObj=%4 "
-                                  "viewVisible=%5 frameClass=%6 frameObj=%7 styleClass=%8 "
-                                  "appCssBytes=%9 popupTops=%10")
-                       .arg(i)
-                       .arg(combo->style()->styleHint(QStyle::SH_ComboBox_Popup, nullptr, combo))
-                       .arg(QString::fromLatin1(view->metaObject()->className()))
-                       .arg(view->objectName())
-                       .arg(view->isVisible())
-                       .arg(QString::fromLatin1(frame->metaObject()->className()))
-                       .arg(frame->objectName())
-                       .arg(QString::fromLatin1(view->style()->metaObject()->className()))
-                       .arg(qobject_cast<QApplication *>(QApplication::instance())
-                                ? qobject_cast<QApplication *>(QApplication::instance())
-                                      ->styleSheet().size()
-                                : -1)
-                       .arg(tops));
-            QScrollBar *bar = scroll->verticalScrollBar();
-            int content = 0;
-            QString rows;
-            for (int r = 0; r < combo->count(); ++r) {
-                content += view->sizeHintForRow(r);
-                const QRect vr = view->visualRect(combo->model()->index(r, 0));
-                rows += QStringLiteral("    row%1 hint=%2 at %3,%4 %5x%6\n")
-                            .arg(r)
-                            .arg(view->sizeHintForRow(r))
-                            .arg(vr.x())
-                            .arg(vr.y())
-                            .arg(vr.width())
-                            .arg(vr.height());
-            }
-            const bool fits = bar->maximum() == 0 && content <= scroll->viewport()->height();
-            record(QStringLiteral("[%1] %2 items=%3 %4 | frame=%5x%6 view=%7x%8 vp=%9x%10 "
-                                 "chrome=%11 margins=%12,%13,%14,%15 delegate=%16 barMax=%17")
-                       .arg(i)
-                       .arg(combo->objectName().isEmpty() ? combo->metaObject()->className()
-                                                          : combo->objectName())
-                       .arg(combo->count())
-                       .arg(fits ? QStringLiteral("FITS") : QStringLiteral("SCROLLS"))
-                       .arg(frame->width())
-                       .arg(frame->height())
-                       .arg(view->width())
-                       .arg(view->height())
-                       .arg(scroll->viewport()->width())
-                       .arg(scroll->viewport()->height())
-                       .arg(frame->height() - scroll->viewport()->height())
-                       .arg(view->contentsMargins().left())
-                       .arg(view->contentsMargins().top())
-                       .arg(view->contentsMargins().right())
-                       .arg(view->contentsMargins().bottom())
-                       .arg(view->itemDelegate() ? view->itemDelegate()->metaObject()->className()
-                                                 : QStringLiteral("none"))
-                       .arg(bar->maximum())
-                   + rows);
-
-            const qreal dpr = frame->devicePixelRatioF();
-            QImage image(QSize(qRound(frame->width() * dpr), qRound(frame->height() * dpr)),
-                         QImage::Format_ARGB32_Premultiplied);
-            image.setDevicePixelRatio(dpr);
-            image.fill(Qt::transparent);
-            frame->render(&image);
-            image.save(dirPath + QStringLiteral("/%1-%2.png")
-                                   .arg(theme)
-                                   .arg(i, 2, 10, QLatin1Char('0')));
-            combo->hidePopup();
-            QTimer::singleShot(120, combo, [combo, step, theme, i] {
-                combo->setCurrentIndex(0);
-                (*step)(theme, i + 1);
-            });
-        });
-    };
-    QTimer::singleShot(1200, window, [step] { (*step)(0, 0); });
-}
-
-} // namespace
 
 void MainWindow::styleCombo(QComboBox *combo) const
 {

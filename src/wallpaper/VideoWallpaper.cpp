@@ -5,6 +5,7 @@
 #include "wallpaper/WebWallpaper.h"
 #include "config/AppConfig.h"
 #include "core/Diagnostics.h"
+#include "core/SuspendPolicy.h"
 #include "platform/windows/desktopmount.h"
 
 #include <QAudioOutput>
@@ -36,11 +37,6 @@ namespace {
 
 VideoWallpaper *g_wallpaper = nullptr;
 
-// 长挂起卸载管线的分级阈值(重建约 2s)：看不见且恢复必伴随人工动作的尽快放，可能随时切回桌面留 60s，电池 30s
-constexpr qint64 kLongSuspendReleaseMs = 180000;
-constexpr qint64 kSuspendReleaseHiddenMs = 5000;
-constexpr qint64 kSuspendReleaseCoveredMs = 60000;
-constexpr qint64 kSuspendReleaseBatteryMs = 30000;
 } // namespace
 
 VideoWallpaper &VideoWallpaper::instance()
@@ -642,17 +638,18 @@ void VideoWallpaper::emitTrackState()
 }
 qint64 VideoWallpaper::suspendReleaseThresholdMs(int reasons) const
 {
-    if (const int overrideMs = qEnvironmentVariableIntValue("YUMEIREN_LONG_SUSPEND_MS");
-        overrideMs > 0)
-        return overrideMs; // 自动化测试覆盖全部档位
+    // 分级阈值见 core/SuspendPolicy.h；环境变量供自动化测试压低全部档位。
+    const auto graded = [&](qint64 ms) {
+        return suspendpolicy::thresholdWithEnvOverride("YUMEIREN_LONG_SUSPEND_MS", ms);
+    };
     // 锁屏/熄屏优先：画面根本不存在，且恢复必然伴随人工动作
     if (reasons & (SuspendLocked | SuspendMonitorOff))
-        return kSuspendReleaseHiddenMs;
+        return graded(suspendpolicy::kHiddenMs);
     if (reasons & SuspendBattery)
-        return kSuspendReleaseBatteryMs;
+        return graded(suspendpolicy::kBatteryMs);
     if (reasons & (SuspendFullscreen | SuspendCovered))
-        return kSuspendReleaseCoveredMs;
-    return kLongSuspendReleaseMs;
+        return graded(suspendpolicy::kCoveredMs);
+    return graded(suspendpolicy::kDefaultMs);
 }
 void VideoWallpaper::longSuspendRelease()
 {

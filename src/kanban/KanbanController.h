@@ -40,7 +40,6 @@ public:
     QString stateText() const { return kanban::stateText(m_machine.state()); }
     QString backendText() const { return m_backendName; }
     bool live2dAvailable() const;
-    QString currentModelName() const { return m_currentModelName; }
     QStringList modelNames() const;
     int expressionCount() const;
     // 有效模型的完整信息，顺序与 modelNames() 一致。
@@ -129,7 +128,6 @@ signals:
     void currentModelChanged(const QString &modelName);
     void settingsChanged();      // 需要回写界面上的滑块/复选框
     void openSettingsRequested(); // 右键菜单「打开设置」
-    void quitKanbanRequested();
 
 private slots:
     void onFrameTick(float deltaSeconds);

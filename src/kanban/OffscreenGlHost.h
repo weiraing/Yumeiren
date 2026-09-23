@@ -5,7 +5,7 @@
 // (ModelThumbJob) 都需要它，两边必须给出**逐位一致**的渲染结果，各写一份迟早漂移。
 //
 // 刻意没有重写 glContextGeneration()：默认返回 0，渲染器据此认定「没有上下文」，
-// syncCubismShaderCache() 直接返回，不会去动那份**进程级**的 Cubism 着色器缓存。
+// cubismruntime::syncShaderCache() 直接返回，不会去动那份**进程级**的 Cubism 着色器缓存。
 // 本类只用于「本进程唯一的那个上下文」，不承担换上下文的责任。
 #ifndef KANBANOFFSCREENGLHOST_H
 #define KANBANOFFSCREENGLHOST_H

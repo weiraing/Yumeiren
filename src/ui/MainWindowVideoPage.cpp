@@ -8,6 +8,7 @@
 #include "platform/windows/shellfileops.h"
 #include "ui/LibraryCard.h"
 #include "ui/TooltipStyle.h"
+#include "ui/UiStyle.h"
 #include "ui/UiMetrics.h" // 左右列宽度：与看板娘页共用同一个常量
 #include "wallpaper/VideoWallpaper.h"
 #include "wallpaper/WebWallpaper.h"
@@ -1000,8 +1001,7 @@ void MainWindow::updateWebWallpaperControls()
                                   : QString());
     m_webStartBtn->setText(running ? QStringLiteral("■ 取消") : QStringLiteral("▶ 启动"));
     m_webStartBtn->setProperty("data-active", running ? 1 : 0);
-    m_webStartBtn->style()->unpolish(m_webStartBtn);
-    m_webStartBtn->style()->polish(m_webStartBtn);
+    uistyle::restyleWidget(m_webStartBtn);
     if (m_webStateLabel)
         m_webStateLabel->setText(web.stateText());
     // 起停也会改变页脚第二段(状态)与第三段(来源名)，顺手一起刷新。
@@ -1242,8 +1242,7 @@ void MainWindow::updateVideoButtons()
                               : QString());
     m_playBtn->setText(started ? QStringLiteral("■ 取消") : QStringLiteral("▶ 启动"));
     m_playBtn->setProperty("data-active", started ? 1 : 0);
-    m_playBtn->style()->unpolish(m_playBtn);
-    m_playBtn->style()->polish(m_playBtn);
+    uistyle::restyleWidget(m_playBtn);
     if (m_pauseBtn) {
         m_pauseBtn->setEnabled(started);
         m_pauseBtn->setText(VideoWallpaper::instance().isManualPaused()

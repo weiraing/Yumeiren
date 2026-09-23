@@ -334,15 +334,6 @@ bool AppConfig::save()
     return true;
 }
 
-void AppConfig::reload()
-{
-    m_settings->sync();
-    m_settings->sync();
-    m_settings->sync();
-    // QSettings 无显式 reread：sync 把外部改动拉回来，之后读取即为最新内容
-    ensureDefaultsAndFix();
-}
-
 QVariant AppConfig::value(const QString &key, const QVariant &defaultValue) const
 {
     return m_settings->value(key, defaultValue);
@@ -353,7 +344,6 @@ void AppConfig::setValue(const QString &key, const QVariant &value)
     if (m_settings->value(key) == value)
         return;
     m_settings->setValue(key, value);
-    emit settingChanged(key, value);
     scheduleSave();
 }
 

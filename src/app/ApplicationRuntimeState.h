@@ -31,9 +31,7 @@ public:
     void setWallpaperState(bool running, bool paused);
     void setKanbanState(bool running, bool paused);
 
-    bool mainWindowVisible() const { return m_mainWindowVisible; }
     void setMainWindowVisible(bool visible);
-    bool trayAvailable() const { return m_trayAvailable; }
     void setTrayAvailable(bool available);
 
     // 任一后台功能在跑，进程就必须活着(关闭主窗口只隐藏)。

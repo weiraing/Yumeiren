@@ -6,6 +6,7 @@
 #include "config/ConfigKeys.h"
 #include "core/CachePaths.h"
 #include "core/Diagnostics.h"
+#include "core/SuspendPolicy.h"
 #include "platform/windows/desktopmount.h"
 #include "platform/windows/webview2boot.h"
 #include "wallpaper/VideoWallpaper.h"
@@ -49,9 +50,6 @@ constexpr int kSuspendLocked = 1;
 constexpr int kSuspendMonitorOff = 2;
 constexpr int kSuspendBattery = 16;
 
-constexpr qint64 kReleaseHiddenMs = 5000;    // 锁屏/熄屏：恢复必然伴随人工动作
-constexpr qint64 kReleaseBatteryMs = 30000;
-constexpr qint64 kReleaseDefaultMs = 180000;
 
 constexpr int kSnapshotWarmupMs = 1500;      // 快照刷新：唤醒渲染后等这一拍再截图
 
@@ -365,11 +363,16 @@ const wchar_t kFpsCapBootstrap[] = LR"(
 
 qint64 suspendReleaseThresholdMs(int reasons)
 {
+    // 分级阈值见 core/SuspendPolicy.h(此前网页壁纸是三份拷贝里唯一没有测试压档的，
+    // 现补上 YUMEIREN_WEB_SUSPEND_MS，与视频/看板娘同名机制对齐)。
+    const auto graded = [&](qint64 ms) {
+        return suspendpolicy::thresholdWithEnvOverride("YUMEIREN_WEB_SUSPEND_MS", ms);
+    };
     if (reasons & (kSuspendLocked | kSuspendMonitorOff))
-        return kReleaseHiddenMs;
+        return graded(suspendpolicy::kHiddenMs);
     if (reasons & kSuspendBattery)
-        return kReleaseBatteryMs;
-    return kReleaseDefaultMs;
+        return graded(suspendpolicy::kBatteryMs);
+    return graded(suspendpolicy::kDefaultMs);
 }
 
 // 快照节拍间隔；排程点有三处(周期入口/失败重排/挂起跳过)，统一从这里取。
@@ -1039,11 +1042,6 @@ void WebWallpaper::startSnapshotCycle()
 #endif
 }
 
-void WebWallpaper::stopSnapshotCycle()
-{
-    m_snapshotTimer->stop();
-}
-
 // 节拍入口：从稳态唤醒出真实页重新渲染，或对已在屏的真实页直接出图。
 void WebWallpaper::captureSnapshot()
 {
@@ -1145,7 +1143,6 @@ void WebWallpaper::onCapturePreview(HRESULT code, IStream *stream)
         m_snapshot = image;
         if (m_host)
             static_cast<WebHostWidget *>(m_host)->setSnapshot(image);
-        emit snapshotUpdated();
         // 快照稳态：落盘后导航到静态快照页 —— 整页就是一张图，无脚本无动画，
         // Chromium 空闲渲染≈0，桌面由它自己的合成面呈现截图。不能靠 TrySuspend
         // 省电：契约要求控制器 IsVisible=false 才生效，而隐藏控制器会让宿主

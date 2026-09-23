@@ -40,7 +40,6 @@ public:
 
     const QStringList &playlist() const { return m_playlist; }
     void setPlaylist(const QStringList &files);
-    void clearPlaylist();
 
     bool startPlaying(QString *error, int preferIndex = -1);
     void pauseResume();
@@ -65,7 +64,6 @@ public:
     // 有效帧率上限：手动设置优先，其次是自动限帧
     int effectiveTargetFps() const;
     // 当前是否处于自动限帧状态
-    bool autoFpsActive() const { return m_targetFps <= 0 && m_autoFps > 0; }
     bool isStarted() const { return m_started; }
     void evaluateSuspend();
     // 退出收口：必须在 QApplication 仍存活时调用——静态单例析构在其后，QWidget 调用会踩空 qApp 崩溃(c0000005)。幂等。详见 docs/crash_analysis.md

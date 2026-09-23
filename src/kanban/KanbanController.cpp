@@ -5,6 +5,7 @@
 #include "config/AppConfig.h"
 #include "config/ConfigKeys.h"
 #include "core/Diagnostics.h"
+#include "core/SuspendPolicy.h"
 #include "platform/windows/desktopmount.h"
 #include "kanban/KanbanAnimationClock.h"
 #include "kanban/KanbanRenderer.h"
@@ -23,8 +24,6 @@ constexpr const char *kModule = "Kanban";
 constexpr int kGlReadyTimeoutMs = 5000;
 // 挂起判定心跳。锁屏/熄屏都是「持续几分钟起步」的事件，1s 足够。
 constexpr int kSuspendHeartbeatMs = 1000;
-// 持续挂起到释放模型与纹理的门槛（与视频壁纸 kSuspendReleaseHiddenMs 同值同理）。
-constexpr qint64 kSuspendReleaseHiddenMs = 5000;
 } // namespace
 
 KanbanController::KanbanController(QObject *parent)
@@ -188,8 +187,10 @@ bool KanbanController::ensureWindow()
         emit openSettingsRequested();
     });
     connect(m_window, &KanbanWindow::quitRequested, this, [this] {
+        // 退出收口：窗口「取消看板娘」只管 stop，后续(配置写回/窗口拆毁)都在
+        // stop() 里。过去这里还发过一个 quitKanbanRequested 信号，全工程无人
+        // 接收，已删。
         stop();
-        emit quitKanbanRequested();
     });
     connect(m_window, &KanbanWindow::glContextReady, this, &KanbanController::onGlContextReady);
     return true;
@@ -597,11 +598,10 @@ void KanbanController::setMonitorOn(bool on)
 
 qint64 KanbanController::suspendReleaseThresholdMs()
 {
-    if (const int overrideMs = qEnvironmentVariableIntValue("YUMEIREN_KANBAN_SUSPEND_MS");
-        overrideMs > 0) {
-        return overrideMs; // 自动化实测用它把阈值压到几秒内(壁纸那边同名机制)
-    }
-    return kSuspendReleaseHiddenMs;
+    // 看板娘挂起只判「锁屏/熄屏类看不见」一种，取 kHiddenMs 档(与视频壁纸同值同理，
+    // 见 core/SuspendPolicy.h)；环境变量供自动化实测把阈值压到几秒内。
+    return suspendpolicy::thresholdWithEnvOverride("YUMEIREN_KANBAN_SUSPEND_MS",
+                                                   suspendpolicy::kHiddenMs);
 }
 
 // 只喂一个假的「看不见」信号，被测的仍是下游整条链：停帧 → 数到阈值 → 释放模型与

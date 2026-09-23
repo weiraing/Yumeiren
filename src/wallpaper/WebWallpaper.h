@@ -78,7 +78,6 @@ public:
 signals:
     void stateChanged(const QString &text); // 人类可读状态(底部状态栏)
     void runningChanged(bool running);
-    void snapshotUpdated();                 // 快照模式下出了一张新截图(重绘用)
 
 public:
     // —— 内部(回调经 static 跳板进来，外部别调) ——
@@ -106,7 +105,6 @@ private:
     void loadSettings();
     void evaluateSuspend();
     void startSnapshotCycle();
-    void stopSnapshotCycle();
     void captureSnapshot();       // 快照周期入口：导航回真实页重新渲染
     void doCapturePreview();      // 出图步：页面已渲染，发起 CapturePreview
     bool writeSnapshotPage();     // 快照落盘为缓存里的静态页，失败返回 false
