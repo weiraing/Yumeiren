@@ -42,8 +42,16 @@ if(NOT DEFINED DST_DIR)
 endif()
 
 # 无用文件清单（与 CI 打包共用同一份，见 cmake/TrimRuntimeFiles.cmake 文件头）。
-# 它同时提供 yumeiren_trim_runtime_files() —— 本脚本末尾用它清掉目标目录里的
-# 历史残留（早先的构建已经把那些文件拷进去过，光靠「拷贝时跳过」清不掉）。
+# 这里只用它的 YUMEIREN_TRIM_FILES —— 拷贝时直接跳过清单里的项，省掉「拷进来再删」
+# 那趟白费的 IO。
+#
+# ⚠️ 剔除动作与完整性断言**不在本脚本里**，尽管本脚本最清楚往目录里放了什么。
+#   本脚本是三个部署步骤（Qt 运行库 / WebView2 Loader / 插件）共用的拷贝器，
+#   每次调用都会完整跑一遍；把断言挂在这里，就变成在**只拷了一部分**的中间状态上
+#   做完整性检查 —— 2026-09-25 CI 实测红了：Qt 运行库那步跑完时 WebView2Loader.dll
+#   还没被拷进来（它排在下一步），断言当场 FATAL_ERROR。
+#   完整性检查只能有一个位置：**所有部署步骤之后**。见 CMakeLists.txt 的
+#   yumeiren_trim_runtime()（它建的 target 排在部署链末尾）。
 include("${CMAKE_CURRENT_LIST_DIR}/TrimRuntimeFiles.cmake")
 
 if(NOT IS_DIRECTORY "${DST_DIR}")
@@ -133,5 +141,6 @@ if(YUMEIREN_MISSING)
     message(STATUS "Qt 运行时: 源文件不存在(跳过) ${YUMEIREN_MISSING}")
 endif()
 
-# 清掉目标目录里的历史残留（早先的构建拷进来过），并断言必需文件齐全。
-yumeiren_trim_runtime_files("${DST_DIR}")
+# 本脚本到此为止 —— 只负责「把该有的拷到位」。
+# 剔除历史残留 + 断言目录完整，都由 CMakeLists.txt 的 yumeiren_trim_runtime() 在所有
+# 部署步骤之后统一做，理由见文件头那段注释（本脚本被三个步骤共用，跑早了会误红）。

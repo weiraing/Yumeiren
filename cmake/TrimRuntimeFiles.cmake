@@ -7,10 +7,19 @@
 # @copyright 本项目遵循仓库 LICENSE。
 # ---------------------------------------------------------------------------
 #
-# 两种用法：
-#   1) 本地构建 —— DeployQtRuntime.cmake 在部署完成后 include 本文件并调用
-#      yumeiren_trim_runtime_files(<输出目录>)；
-#   2) CI 打包 —— cmake -DTARGET_DIR=<目录> -P cmake/TrimRuntimeFiles.cmake。
+# 三种用法：
+#   1) 本地构建 —— CMakeLists.txt 里 yumeiren_trim_runtime() 建的独立 target，
+#      挂在部署链**末尾**（所有部署步骤都跑完之后）；
+#   2) CI 打包 —— cmake -DTARGET_DIR=<目录> -DRELEASE_PACKAGE=ON -P cmake/TrimRuntimeFiles.cmake；
+#   3) CI 读清单 —— cmake -DPRINT_LIST=<文件> -P cmake/TrimRuntimeFiles.cmake（只读，不改文件）。
+#
+# ⚠️ 为什么剔除与断言**不能**塞进 DeployQtRuntime.cmake（曾经就是那么写的）：
+#   那个脚本是三个部署步骤共用的拷贝器，每次调用都会跑一遍。断言挂在它末尾，
+#   就变成在**只拷了一部分**的中间状态上做完整性检查 —— 2026-09-25 CI 实测：
+#   Qt 运行库那步跑完时 WebView2Loader.dll 还没被拷进来（它排在下一步），
+#   断言当场 FATAL_ERROR，整次构建红。本机没暴露是因为 build/ 里躺着上一次
+#   构建留下的旧文件，把断言蒙过去了；从零构建一样会红。
+#   结论：完整性检查只能有一个位置 —— **所有部署步骤之后**。
 #
 # 为什么清单只维护这一份：本地走 CMake 拷贝、CI 走 windeployqt，两条路径各自会把
 #   **不同的**多余文件带进来（本地是 $<TARGET_RUNTIME_DLLS> 里的 Qt6Concurrent，
@@ -86,10 +95,12 @@ set(YUMEIREN_TRIM_FILES
 
 # 剔完之后必须还在的 —— 少一个就是「双击起不来」或「核心功能没了」。
 # 这里是**反向断言**：删过头要当场红，而不是等用户反馈。
-# 这一组是「本地构建与发布包都该有」的。
+#
+# ⚠️ 这一组只放**总是会被部署**的东西（Qt 侧 + 我们自己从 Qt bin 拷的那五个 FFmpeg
+#   运行库）。来自 third_party/ 的（Live2D / WebView2）**不放这里** ——
+#   third_party/ 不入库（Cubism 是专有许可），干净检出里它们**合法缺席**，
+#   无条件要求会让「没有 SDK 的正常构建」在断言上红。
 set(YUMEIREN_KEEP_FILES
-    "Live2DCubismCore.dll"
-    "WebView2Loader.dll"
     "Qt6Core.dll"
     "Qt6Gui.dll"
     "Qt6Widgets.dll"
@@ -108,6 +119,18 @@ set(YUMEIREN_KEEP_FILES
     "swscale-8.dll"
 )
 
+# 来自 third_party/ 的运行期文件：在不在，取决于那份 SDK 在不在。
+#
+# ⚠️ 判据必须与部署条件**逐条对齐**（同 MEMORY 里那条铁律）：多一条 → 干净检出上
+#   误红；少一条 → 漏掉「部署静默跳过」。后者正是 Live2D 曾经的表现：构建全绿、
+#   看板娘空白、日志里一行都没有。
+#   所以这里不自己下结论 —— 由调用方按当前配置显式声明（-DYUMEIREN_EXPECT_LIVE2D=ON /
+#   -DYUMEIREN_EXPECT_WEBVIEW2=ON），声明了才进必需清单。
+set(YUMEIREN_KEEP_FILES_OPTIONAL
+    "Live2DCubismCore.dll"
+    "WebView2Loader.dll"
+)
+
 # 只有**发布包**才该有的，不能并进上面那组 —— 本地是 MinGW 构建：它不用 MSVC 的
 # CRT（那是 MSVC 编出来的 exe 才导入的），Qt 也不带 icuuc.dll。把它们放进通用组，
 # 本地每次构建都会在断言上红，而那并不是「删过头了」，是「本来就没有」。
@@ -124,6 +147,32 @@ set(YUMEIREN_KEEP_FILES_RELEASE
 set(YUMEIREN_TRIM_EMPTY_DIRS
     "tls" "styles" "generic" "networkinformation" "iconengines"
 )
+
+# ---------------------------------------------------------------------------
+# 清单自相矛盾的静态检查 —— 放在**文件作用域**，于是每种用法都会跑到
+#   （含 PRINT_LIST 那条只读清单、根本不碰文件的路径）。
+#
+# 这一条才是「删过头」的真正防线：剔清单里混进一个必需文件，是**纯集合性质**的错误，
+#   与现场有多少文件、部署步骤跑到第几步、调用顺序如何**全都无关**，必然错。
+# 而下面那个「目录里在不在」的存在性断言依赖现场状态 —— 它能抓住「部署没跑到」，
+#   但也会被现场状态骗（旧文件、中间状态）。两者互补，别拿一个替另一个。
+# ---------------------------------------------------------------------------
+set(_yumeiren_conflict "")
+foreach(_rel IN LISTS YUMEIREN_TRIM_FILES)
+    foreach(_group YUMEIREN_KEEP_FILES YUMEIREN_KEEP_FILES_OPTIONAL YUMEIREN_KEEP_FILES_RELEASE)
+        list(FIND ${_group} "${_rel}" _idx)
+        if(NOT _idx EQUAL -1)
+            list(APPEND _yumeiren_conflict "${_rel}  (同时在 ${_group} 里)")
+        endif()
+    endforeach()
+endforeach()
+if(_yumeiren_conflict)
+    message(FATAL_ERROR "剔除清单与保留清单自相矛盾，同一项不可能既删又留：${_yumeiren_conflict}")
+endif()
+unset(_yumeiren_conflict)
+unset(_idx)
+unset(_rel)
+unset(_group)
 
 # 剔除 dst_dir 下清单里的文件，并断言保留清单齐全。
 #
@@ -172,16 +221,33 @@ function(yumeiren_trim_runtime_files dst_dir)
         endif()
     endforeach()
 
-    # 反向断言
+    # 存在性断言：只查「本次构建/本次打包本该有」的那些。
+    # 必需清单 = 无条件组 + 调用方显式声明了的那几个可选件（见文件头那段）。
+    set(_required ${YUMEIREN_KEEP_FILES})
+    if(YUMEIREN_EXPECT_LIVE2D)
+        list(APPEND _required "Live2DCubismCore.dll")
+    endif()
+    if(YUMEIREN_EXPECT_WEBVIEW2)
+        list(APPEND _required "WebView2Loader.dll")
+    endif()
+
     set(_missing "")
-    foreach(_keep IN LISTS YUMEIREN_KEEP_FILES)
+    foreach(_keep IN LISTS _required)
         if(NOT EXISTS "${dst_dir}/${_keep}")
             list(APPEND _missing "${_keep}")
         endif()
     endforeach()
     if(_missing)
+        # 这条消息刻意不说「剔除把文件删了」—— 那只是两种可能之一，而且往往不是。
+        # 真实经历：CI 上这么红过一次，缺的是 WebView2Loader.dll，真因是**断言跑早了**
+        # （那时它还没被拷进来），跟剔除毫无关系。把「跑早了 / 没跑到 / 被删了」并列写出来，
+        # 免得下一个人又顺着「谁删的」去查。
         message(FATAL_ERROR
-            "运行时剔除把必需文件删掉了！缺：${_missing} —— 清单与部署逻辑已不一致。")
+            "运行时输出目录不完整，缺：${_missing}\n"
+            "  三种可能，按顺序排查：\n"
+            "    1) 断言跑早了 —— 该文件的部署步骤还没执行（见 CMakeLists.txt 的部署链顺序）；\n"
+            "    2) 部署条件没成立 —— 检查该文件的部署开关与本次配置是否一致；\n"
+            "    3) 剔除清单误删 —— 静态检查本该拦住，检查 cmake/TrimRuntimeFiles.cmake 的三份清单。")
     endif()
 endfunction()
 
@@ -207,15 +273,30 @@ if(CMAKE_SCRIPT_MODE_FILE STREQUAL CMAKE_CURRENT_LIST_FILE)
     if(NOT DEFINED TARGET_DIR)
         message(FATAL_ERROR "需要 -DTARGET_DIR=<要清理的目录>")
     endif()
-    yumeiren_trim_runtime_files("${TARGET_DIR}")
-    set(_release_missing "")
-    foreach(_keep IN LISTS YUMEIREN_KEEP_FILES_RELEASE)
-        if(NOT EXISTS "${TARGET_DIR}/${_keep}")
-            list(APPEND _release_missing "${_keep}")
-        endif()
-    endforeach()
-    if(_release_missing)
-        message(FATAL_ERROR "发布包缺少必需的运行期文件：${_release_missing}")
+
+    # 发布包模式：这个目录是**要发给用户的**，third_party 派生的运行期文件与 MSVC
+    # 运行时都必须齐全（CI 打包那步加 -DRELEASE_PACKAGE=ON）。
+    # 本地构建输出走同一条 -P 入口但**不加这个开关** —— 那边 third_party 可能合法
+    # 缺席，要求 MSVC 运行时更是无从谈起（本地是 MinGW，压根没有那些 DLL）。
+    if(RELEASE_PACKAGE)
+        set(YUMEIREN_EXPECT_LIVE2D ON)
+        set(YUMEIREN_EXPECT_WEBVIEW2 ON)
     endif()
-    message(STATUS "运行时剔除完成（发布包模式，MSVC 运行时 + ICU + FFmpeg 运行库齐全）")
+
+    yumeiren_trim_runtime_files("${TARGET_DIR}")
+
+    if(RELEASE_PACKAGE)
+        set(_release_missing "")
+        foreach(_keep IN LISTS YUMEIREN_KEEP_FILES_RELEASE)
+            if(NOT EXISTS "${TARGET_DIR}/${_keep}")
+                list(APPEND _release_missing "${_keep}")
+            endif()
+        endforeach()
+        if(_release_missing)
+            message(FATAL_ERROR "发布包缺少必需的运行期文件：${_release_missing}")
+        endif()
+        message(STATUS "运行时剔除完成（发布包模式：Live2D + WebView2 + MSVC 运行时 + ICU + FFmpeg 运行库齐全）")
+    else()
+        message(STATUS "运行时剔除完成（构建输出模式：不要求 third_party 派生件与 MSVC 运行时）")
+    endif()
 endif()

@@ -369,17 +369,22 @@ jobs:
           Write-Host 'MSVC 运行时就位。'
 
           # —— 剔除运行时里用不到的文件 ——
-          # 清单只有一份：cmake/TrimRuntimeFiles.cmake（本地构建也调它，见
-          # cmake/DeployQtRuntime.cmake）。**不要**在这里再抄一遍清单 ——
+          # 清单只有一份：cmake/TrimRuntimeFiles.cmake（本地构建也调它，见 CMakeLists.txt
+          # 的 yumeiren_trim_runtime()）。**不要**在这里再抄一遍清单 ——
           # 本地走 CMake 拷贝、CI 走 windeployqt，两条路径带进来的多余文件不同，
           # 但「哪些是无用的」是同一个事实，写两份必然漂移。
+          #
+          # -DRELEASE_PACKAGE=ON 声明「这个目录是要发给用户的」：于是除了无条件必需项，
+          # 还会要求 third_party 派生的运行期文件（Live2D / WebView2）与 MSVC 运行时。
+          # 本地构建输出走同一条 -P 入口但**不加**这个开关 —— 那边 third_party 可能
+          # 合法缺席、MSVC 运行时更是压根没有（本地是 MinGW），加了必误红。
           #
           # 这条路径由 windeployqt 带进来的多余东西比本地多得多：图片格式插件
           # (qgif/qico/qsvg)、style 插件、触摸插件、TLS 后端、D3Dcompiler、
           # Qt6Svg / Qt6Concurrent。逐个核对过都没被加载 —— 端到端验证（视频壁纸
           # 起播 + 看板娘 Live2D 渲染首帧）与未删减的包逐行一致，0 条错误。
           $outAbs = (Resolve-Path -LiteralPath $out).Path
-          & cmake -DTARGET_DIR="$outAbs" -P cmake/TrimRuntimeFiles.cmake
+          & cmake -DTARGET_DIR="$outAbs" -DRELEASE_PACKAGE=ON -P cmake/TrimRuntimeFiles.cmake
           if ($LASTEXITCODE -ne 0) { throw "运行时剔除失败（rc=$LASTEXITCODE）" }
 
           # 解压后要有一层顶层目录 Yumeiren/，而不是把 exe/DLL/data 直接摊在解压目录里

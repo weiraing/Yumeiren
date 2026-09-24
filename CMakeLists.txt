@@ -79,7 +79,14 @@ function(yumeiren_deploy_qt_runtime target)
         list(APPEND _yumeiren_pairs
             "$<TARGET_FILE:Qt6::QJpegPlugin>|imageformats/$<TARGET_FILE_NAME:Qt6::QJpegPlugin>")
     else()
-        message(WARNING "找不到 Qt6::QJpegPlugin —— 本地构建读不了 jpg，图库只会收录 png")
+        # 这里是**硬错误**而不是 warning：imageformats/qjpeg.dll 在
+        # cmake/TrimRuntimeFiles.cmake 的必需清单里，少了它末尾的断言一定会红。
+        # 留成 warning 的话，用户看到的是「运行时输出目录不完整」这种指向剔除逻辑的
+        # 误导性消息，而真因是「这个 Qt 没带 qjpeg 插件」。
+        # 判据与执行条件必须逐条对齐 —— 断言要它，这里就得保证它。
+        message(FATAL_ERROR
+            "找不到 Qt6::QJpegPlugin —— 图库读不了 jpg，且部署后的完整性断言会因此失败。"
+            "检查这个 Qt 是否带了 imageformats 插件。")
     endif()
 
     # 只部署 FFmpeg 后端。Qt 6 在 Windows 上默认就是它（实测运行时加载的正是
@@ -90,6 +97,13 @@ function(yumeiren_deploy_qt_runtime target)
         if(TARGET ${mediaPlugin})
             list(APPEND _yumeiren_pairs
                 "$<TARGET_FILE:${mediaPlugin}>|multimedia/$<TARGET_FILE_NAME:${mediaPlugin}>")
+        else()
+            # 同 QJpegPlugin：multimedia/ffmpegmediaplugin.dll 在必需清单里，
+            # 缺了它末尾的断言必红。原本这里是**静默跳过** —— 连一行提示都没有，
+            # 只能等断言报出「输出目录不完整」再去猜真因。宁可在配置期就说清楚。
+            message(FATAL_ERROR
+                "找不到 ${mediaPlugin} —— 视频壁纸无法解码，且部署后的完整性断言会因此失败。"
+                "检查这个 Qt 是否带了 qtmultimedia 的 FFmpeg 后端。")
         endif()
     endforeach()
 
@@ -173,6 +187,46 @@ function(yumeiren_deploy_webview2 target)
     else()
         message(WARNING "third_party/webview2/loader/WebView2Loader.dll 缺失，动态网页壁纸将不可用")
     endif()
+endfunction()
+
+# 剔除输出目录里的无用运行时文件，并断言目录完整。
+#
+# ⚠️ 必须排在**整条部署链的最后**，不能塞进 DeployQtRuntime.cmake：
+#   那个脚本是三个部署步骤共用的拷贝器，每次调用都会完整跑一遍。断言挂在它末尾，
+#   就变成在**只拷了一部分**的中间状态上做完整性检查 —— 2026-09-25 CI 实测红了：
+#   Qt 运行库那步跑完时 WebView2Loader.dll 还没被拷进来（它排在下一步），
+#   断言当场 FATAL_ERROR。本机没暴露是因为 build/ 里躺着上一次构建留下的旧文件，
+#   把断言蒙过去了；从零构建一样会红。
+#
+# 三个 target 共用同一个输出目录，所以这个 target 会被建三遍（各自的链末尾各一次）。
+#   刻意不合并成一个「排在全链最后」的 target：那会让 `--target Yumeiren` 把
+#   YumeirenTest / KanbanProbe 也拖进构建。多跑两遍只是几十次 stat，代价可以忽略。
+#
+# ⚠️ 断言的必需清单必须与部署条件**逐条对齐**：Live2D 与 WebView2 都来自不入库的
+#   third_party/，干净检出里合法缺席 —— 只有当前配置**确实会部署它们**时才声明，
+#   否则「没有 SDK 的正常构建」会在断言上红。
+function(yumeiren_trim_runtime target)
+    set(_args "-DTARGET_DIR=$<TARGET_FILE_DIR:${target}>")
+    if(YUMEIREN_WITH_LIVE2D)
+        list(APPEND _args "-DYUMEIREN_EXPECT_LIVE2D=ON")
+    endif()
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/webview2/loader/WebView2Loader.dll")
+        list(APPEND _args "-DYUMEIREN_EXPECT_WEBVIEW2=ON")
+    endif()
+
+    add_custom_target(yumeiren_trim_runtime_${target} ALL
+        COMMAND ${CMAKE_COMMAND} ${_args}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/TrimRuntimeFiles.cmake
+        COMMENT "剔除 ${target} 输出目录里的无用运行时文件"
+        VERBATIM)
+    # 同另外两个部署函数：ALL 只在整目录构建时才会被带上，
+    # `--target Yumeiren` 那条命令得靠这里显式挂。
+    add_dependencies(${target} yumeiren_trim_runtime_${target})
+    if(YUMEIREN_DEPLOY_SERIAL)
+        add_dependencies(yumeiren_trim_runtime_${target} ${YUMEIREN_DEPLOY_SERIAL})
+    endif()
+    set(YUMEIREN_DEPLOY_SERIAL
+        "${YUMEIREN_DEPLOY_SERIAL};yumeiren_trim_runtime_${target}" PARENT_SCOPE)
 endfunction()
 
 set(YUMEIREN_SOURCES
@@ -275,6 +329,8 @@ if(YUMEIREN_WITH_LIVE2D)
 endif()
 yumeiren_deploy_qt_runtime(Yumeiren)
 yumeiren_deploy_webview2(Yumeiren)
+# 部署链的最后一步：剔除无用文件 + 断言目录完整。顺序要求见函数上方的注释。
+yumeiren_trim_runtime(Yumeiren)
 
 set_target_properties(Yumeiren PROPERTIES
     OUTPUT_NAME "虞美人"
@@ -309,6 +365,7 @@ if(YUMEIREN_WITH_LIVE2D)
 endif()
 yumeiren_deploy_qt_runtime(YumeirenTest)
 yumeiren_deploy_webview2(YumeirenTest)
+yumeiren_trim_runtime(YumeirenTest)
 
 set(APP_RESOURCES
     resources/style.qss
@@ -389,7 +446,8 @@ if(YUMEIREN_WITH_LIVE2D AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/kanbanprob
     target_compile_definitions(KanbanProbe PRIVATE YUMEIREN_WITH_LIVE2D=1)
     yumeiren_deploy_cubism(KanbanProbe)
     yumeiren_deploy_qt_runtime(KanbanProbe)
-yumeiren_deploy_webview2(KanbanProbe)
+    yumeiren_deploy_webview2(KanbanProbe)
+    yumeiren_trim_runtime(KanbanProbe)
     # data/ 由上面那个 yumeiren_runtime_data 统一补齐（已挂 ALL，也已挂到 KanbanProbe 上）。
     # 不在这里另起一份：几个 target 写同一个输出目录，只会让 169 个文件的扫描白做几遍。
     add_dependencies(KanbanProbe yumeiren_runtime_data)
