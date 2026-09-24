@@ -1594,6 +1594,9 @@ void MainWindow::switchPage(int row)
         // 组件刚建好还没读过初值，进页就能看到对的。
         setWallStatusChips();
         selectWallTab(m_wallStack->currentIndex());
+        // 视频库对齐一次磁盘：用户在程序外往 data/video 里加了视频，进页就能看到，
+        // 不必再点一次「扫描」。内容没变时它自己会跳过重建（保住勾选态），见函数内说明。
+        refreshVideoLibraryIfChanged();
     }
     else if (row == 2) {
         selectKanbanTab(m_kanbanStack ? m_kanbanStack->currentIndex() : 0);

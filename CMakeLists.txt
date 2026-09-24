@@ -47,6 +47,10 @@ endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Multimedia MultimediaWidgets)
 
+# 部署 target 的串行链 —— 每个往 exe 输出目录补文件的 target 都往这里追加自己，
+# 后建的依赖前一个。空列表起步。为什么要串行见 yumeiren_deploy_qt_runtime() 里那段注释。
+set(YUMEIREN_DEPLOY_SERIAL "")
+
 # 把目标运行时需要的 Qt 库与插件补齐到它的输出目录。
 #
 # 挂在 ALL 上的独立 target，而不是 TARGET 的 POST_BUILD —— 理由与 data/ 完全一样：
@@ -108,6 +112,20 @@ function(yumeiren_deploy_qt_runtime target)
         VERBATIM)
     # 让「只构建这一个目标」也走到补齐：ALL 只在整目录构建时才会被带上。
     add_dependencies(${target} yumeiren_deploy_runtime_${target})
+
+    # ⚠️ 几个部署 target 之间必须串行，不能让 ninja 并发跑。
+    # 本仓库三个 exe 的输出目录相同，而 ninja 默认按核数并行 —— 实测两个进程同时写
+    # 同一个 qwindows.dll 时，后一个以写方式打开目标文件被拒：
+    #   file COPY_FILE failed to copy .../qwindows.dll ... because: Permission denied (output)
+    # 整次构建 BUILD_RC=1（2026-09-24 从零构建首次复现，第 43/211 步）。
+    # 根因**不是**内容不一致 —— 源是同一份、字节序列也逐字节相同；冲突发生在
+    # **同时打开同一个目标文件句柄**这一层，所以「交错写不改结果」的理由救不了它。
+    # Qt 运行库与 WebView2 Loader 写的是同一个目录，因此共用同一条链。
+    if(YUMEIREN_DEPLOY_SERIAL)
+        add_dependencies(yumeiren_deploy_runtime_${target} ${YUMEIREN_DEPLOY_SERIAL})
+    endif()
+    set(YUMEIREN_DEPLOY_SERIAL
+        "${YUMEIREN_DEPLOY_SERIAL};yumeiren_deploy_runtime_${target}" PARENT_SCOPE)
 endfunction()
 
 # WebView2 Loader DLL：动态网页壁纸用。运行时本体是系统组件(Edge WebView2
@@ -127,6 +145,14 @@ function(yumeiren_deploy_webview2 target)
             COMMENT "补齐 ${target} 的 WebView2 Loader"
             VERBATIM)
         add_dependencies(${target} yumeiren_deploy_webview2_${target})
+
+        # 与 Qt 运行库共用同一条串行链 —— 落点是同一个输出目录，
+        # 理由与判据见 yumeiren_deploy_qt_runtime() 里那段注释。
+        if(YUMEIREN_DEPLOY_SERIAL)
+            add_dependencies(yumeiren_deploy_webview2_${target} ${YUMEIREN_DEPLOY_SERIAL})
+        endif()
+        set(YUMEIREN_DEPLOY_SERIAL
+            "${YUMEIREN_DEPLOY_SERIAL};yumeiren_deploy_webview2_${target}" PARENT_SCOPE)
     else()
         message(WARNING "third_party/webview2/loader/WebView2Loader.dll 缺失，动态网页壁纸将不可用")
     endif()
@@ -287,14 +313,29 @@ set(APP_RESOURCES
 # ninja 判定 no work to do 时它根本不执行 —— 用户删掉 build/data 后重编译就永远补不回来。
 # 判据是「逐文件补齐」而非「整个 data 不存在」：别的构建步骤只要先建出 build/data/models，
 # 整目录判据就会被顶掉，结果只剩 models 一份。
+#
+# ⚠️ 目标目录必须写 $<TARGET_FILE_DIR:Yumeiren>，**不能**写 ${CMAKE_BINARY_DIR}：
+# Visual Studio 这类**多配置**生成器把 exe 放在 <build>/Release/，而 CMAKE_BINARY_DIR 是
+# <build>/，写死就把 data 补到了 exe 的**上一层**。后果是**静默失效** —— 构建全绿、包也能下，
+# 解开一看一个素材都没有（看板娘无模型、图库为空）。本机是 Ninja 单配置，两者恰好相等，
+# 所以本地从没暴露；CI 用 MSVC 多配置，一推就中。
+# 实测（Ninja Multi-Config，同样把 exe 放 <build>/Release/，只构建本 target）：
+#   ${CMAKE_BINARY_DIR}    → <build>/data          169 个文件，与 exe **不同层** ❌
+#   $<TARGET_FILE_DIR:...> → <build>/Release/data             与 exe **同层** ✅
+#
+# ⚠️ 还必须在下面给每个需要 data 的目标 add_dependencies：`cmake --build ... --target Yumeiren`
+# **不会**带 ALL 目标，只挂 ALL 的话 CI 那条命令根本不跑它（同样静默、同样全绿）。
+# 上面两个 deploy 函数就是这么做的（见 yumeiren_deploy_qt_runtime 里那句注释），这里原先漏了。
 add_custom_target(yumeiren_runtime_data ALL
     COMMAND ${CMAKE_COMMAND}
             -DSRC_DIR=${CMAKE_CURRENT_SOURCE_DIR}/data
-            -DDST_DIR=${CMAKE_BINARY_DIR}/data
+            "-DDST_DIR=$<TARGET_FILE_DIR:Yumeiren>/data"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CopyRuntimeData.cmake
     COMMENT "补齐 data/ 到编译输出目录（已有文件不动）"
     VERBATIM
 )
+add_dependencies(Yumeiren yumeiren_runtime_data)
+add_dependencies(YumeirenTest yumeiren_runtime_data)
 
 qt_add_resources(Yumeiren app_res
     PREFIX "/"
@@ -332,7 +373,7 @@ if(YUMEIREN_WITH_LIVE2D AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/kanbanprob
     yumeiren_deploy_cubism(KanbanProbe)
     yumeiren_deploy_qt_runtime(KanbanProbe)
 yumeiren_deploy_webview2(KanbanProbe)
-    # 不单独复制 data/models：它与上面的 yumeiren_runtime_data 抢同一个目标目录，
-    # 先建出 build/data 就会把整份 data 的补齐判据顶掉。
+    # data/ 由上面那个 yumeiren_runtime_data 统一补齐（已挂 ALL，也已挂到 KanbanProbe 上）。
+    # 不在这里另起一份：几个 target 写同一个输出目录，只会让 169 个文件的扫描白做几遍。
     add_dependencies(KanbanProbe yumeiren_runtime_data)
 endif()

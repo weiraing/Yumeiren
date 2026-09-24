@@ -27,9 +27,15 @@
 #   时间戳用秒数比较而不是 IS_NEWER_THAN —— 后者在两者相同时返回真，会让每次都退化成
 #   内容比对。
 #
-# 落点相同的多个目标(本仓库三个 exe 都在 build/)会并发跑本脚本、可能同时写同一个文件。
-#   这是良性的：源文件是同一份，写入的字节序列也逐字节相同，交错的写不会改变结果 ——
-#   所以不必为此加锁。
+# 落点相同的多个目标(本仓库三个 exe 都在 build/)会并发跑本脚本、同时写同一个文件。
+#   ⚠️ 这不是良性的 —— 曾经的理由是「源是同一份、写入的字节序列也逐字节相同，交错的写
+#   不会改变结果，所以不必加锁」。2026-09-24 从零构建实测把这条推翻了：两个进程同时写
+#   qwindows.dll 时，后一个以写方式打开目标文件被拒 ——
+#     file COPY_FILE failed to copy .../qwindows.dll ... because: Permission denied (output)
+#   整次构建 BUILD_RC=1。冲突发生在**文件句柄**这一层，与内容是否相同无关，
+#   所以「字节序列一样」救不了它。
+#   解法不在本脚本里：调用方把部署 target 串成一条依赖链(CMakeLists.txt 的
+#   YUMEIREN_DEPLOY_SERIAL)，同一时刻只让一个进程写这个目录。
 
 if(NOT DEFINED DST_DIR)
     message(FATAL_ERROR "需要 -DDST_DIR=<可执行文件目录>")

@@ -133,8 +133,8 @@ Live2D Cubism 驱动的无边框透明桌面宠物，常驻桌面、可拖动、
 
 ## 🚀 安装使用
 
-1. 到 [Releases](https://github.com/weiraing/Yumeiren/releases) 下载 `Yumeiren-portable-vX.X.X-win64.zip`，解压到任意目录（免安装，Qt 运行时已内置）。
-2. 运行 `虞美人.exe`，同意 UAC 管理员授权（写入配置、注册 Hook DLL、重启资源管理器均需要）。
+1. 到 [Releases](https://github.com/weiraing/Yumeiren/releases) 下载 `Yumeiren-portable-vX.X.X-win64.zip`，解压到任意目录，会得到一层 `Yumeiren/` 文件夹（免安装，Qt 运行时已内置）。
+2. 运行 `Yumeiren/虞美人.exe`，同意 UAC 管理员授权（写入配置、注册 Hook DLL、重启资源管理器均需要）。
 3. 在「文件夹美化」页选择图片与效果，点击**应用**，打开任意文件夹查看效果；不想要了点击**恢复**即可完全卸载。
 
 > ⚠️ 程序需以管理员身份运行（清单里写死了 `requireAdministrator`）；杀软若误报属于此类

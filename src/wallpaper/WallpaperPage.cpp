@@ -952,12 +952,12 @@ QWidget *MainWindow::buildWallpaperPage()
     lay->addWidget(m_wallStack);
     return page;
 }
-// 以 data/video(含子目录)为准重建视频列表 —— 与网页库刷新同语义：列表即目录镜像。
-void MainWindow::scanVideoDir()
+// 扫描 data/video(含子目录)得到文件清单。**只读**：不建目录、不碰配置、不碰 UI。
+// 「点扫描」与「切页自动刷新」共用这一份逻辑，两条路的结果才不会各说各话。
+QStringList MainWindow::videoFilesOnDisk() const
 {
     const QString videoDir = QCoreApplication::applicationDirPath()
                              + QStringLiteral("/data/video");
-    QDir().mkpath(videoDir);
     const QStringList nameFilters = {
         QStringLiteral("*.mp4"),  QStringLiteral("*.webm"), QStringLiteral("*.mkv"),
         QStringLiteral("*.avi"),  QStringLiteral("*.mov"),  QStringLiteral("*.wmv")};
@@ -966,12 +966,49 @@ void MainWindow::scanVideoDir()
     while (it.hasNext())
         found << it.next();
     found.sort();
+    return found;
+}
 
-    VideoWallpaper::instance().setPlaylist(found);
-    AppConfig &st = AppConfig::instance();
-    st.setValue(ConfigKeys::Video::Playlist, found);
+// 把清单落到播放列表、配置与列表 UI —— 两条刷新路径的**唯一落点**。
+// 配置必须跟着写：否则重启后列表又回到旧的一份，用户会以为刚加的视频丢了。
+void MainWindow::applyVideoPlaylist(const QStringList &files)
+{
+    VideoWallpaper::instance().setPlaylist(files);
+    AppConfig::instance().setValue(ConfigKeys::Video::Playlist, files);
     refreshVideoList();
+}
+
+// 「扫描」按钮：以 data/video(含子目录)为准重建视频列表 —— 与网页库刷新同语义：
+// 列表即目录镜像。这条是**用户显式点的**，所以写一行底部日志给个反馈。
+void MainWindow::scanVideoDir()
+{
+    QDir().mkpath(QCoreApplication::applicationDirPath() + QStringLiteral("/data/video"));
+    const QStringList found = videoFilesOnDisk();
+    applyVideoPlaylist(found);
     setLog(QStringLiteral("刷新完成：data/video 共 %1 个视频").arg(found.size()), false);
+}
+
+// 切到动态壁纸页时（见 switchPage）对齐一次磁盘：用户在程序外往 data/video 里放了视频，
+// 进页就能看到，不必再点一次「扫描」。
+//
+// 两处刻意的克制：
+//  1. **内容没变就只兜页脚、不重建列表** —— refreshVideoList() 会 clear() 整棵树，把用户
+//     已经勾好待删的条目一起清掉。切一次页丢一次勾选是纯损失。
+//  2. **不建目录、不写日志** —— 这是切页的高频路径。程序往 data/ 里创建任何东西都会让
+//     构建期的素材复制失效（见 MEMORY「data/ 的归属与复制」那条铁律）；底部那行日志也该
+//     留给用户操作的反馈，不该被一次切页刷成「刷新完成…」。
+void MainWindow::refreshVideoLibraryIfChanged()
+{
+    if (!m_videoLib)
+        return;
+    const QStringList found = videoFilesOnDisk();
+    if (found == VideoWallpaper::instance().playlist()) {
+        updateVideoLibraryInfo();
+        updateVideoButtons();
+        updatePlayingHighlight();
+        return;
+    }
+    applyVideoPlaylist(found);
 }
 
 // 删除勾选的视频：文件移入回收站(可撤销)并同步移出播放列表。若正在播放其中

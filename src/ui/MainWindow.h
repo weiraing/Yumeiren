@@ -77,6 +77,9 @@ private slots:
     void startVideo();
     void stopVideo();
     void refreshVideoList();
+    // 切到动态壁纸页时对齐一次磁盘（见 switchPage）：内容真变了才重建列表，
+    // 没变就只兜一次页脚/按钮 —— 重建会清空勾选，不该因为切了一次页就丢。
+    void refreshVideoLibraryIfChanged();
     void onVideoStateChanged(const QString &text);
     void updateVideoLibraryInfo(); // 视频库页脚：统计信息 · 状态 · 当前视频名
     void updateVideoButtons();
@@ -120,6 +123,15 @@ private:
     void refreshWebLibrary();          // 扫描 data/web 下的页面与 Web 项目
     void setWebSource(const QString &source, bool activate);
     void removeCheckedWebItems();      // 删除网页库勾选项(移入回收站)
+
+    // —— 视频库 ——
+    // 扫描 data/video(含子目录)得到文件清单。**只读**：不建目录、不碰配置、不碰 UI。
+    // scanVideoDir() 与 refreshVideoLibraryIfChanged() 共用这一份扫描逻辑。
+    QStringList videoFilesOnDisk() const;
+    // 把文件清单落到播放列表、配置与列表 UI —— 两条刷新路径的**唯一落点**，
+    // 保证「点扫描」与「切页自动刷新」的结果完全一致。
+    void applyVideoPlaylist(const QStringList &files);
+
     QSlider *makeSlider(int min, int max, int value, QLabel **valueLabel,
                         const QString &suffix = QString());
 

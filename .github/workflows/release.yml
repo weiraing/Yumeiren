@@ -125,10 +125,21 @@ jobs:
           $out = "build/Release"
           # 拷贝 Qt DLL/插件与 VC 运行时到 exe 旁，做成免安装目录
           windeployqt --release --no-translations --compiler-runtime "$out/虞美人.exe"
+
+          # 解压后要有一层顶层目录 Yumeiren/，而不是把 exe/DLL/data 直接摊在解压目录里
+          # —— 那样在同一个目录里解两个版本会互相覆盖。
+          # 不能靠 `Compress-Archive -Path $out` 拿到这层：那样顶层名会是源目录的**基名**
+          # ("Release")，跟产品名对不上。所以先中转一份到 build/stage/Yumeiren/，
+          # 再压那个目录(`-Path <目录>` 会把该目录本身作为顶层项收进包)。
+          $stage = "build/stage/Yumeiren"
+          if (Test-Path "build/stage") { Remove-Item -Recurse -Force "build/stage" }
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item -Path "$out/*" -Destination $stage -Recurse -Force
+
           $zip = "Yumeiren-portable-v$env:YUMEIREN_VERSION-win64.zip"
-          Compress-Archive -Path "$out/*" -DestinationPath $zip -Force
+          Compress-Archive -Path $stage -DestinationPath $zip -Force
           "ZIP_NAME=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "已打包：$zip"
+          Write-Host "已打包：$zip(顶层目录 Yumeiren/)"
 
       - name: 上传构建产物(Artifact,保留 7 天)
         uses: actions/upload-artifact@v4
