@@ -133,7 +133,7 @@ Live2D Cubism 驱动的无边框透明桌面宠物，常驻桌面、可拖动、
 
 ## 🚀 安装使用
 
-1. 到 [Releases](https://github.com/weiraing/Yumeiren/releases) 下载 `Yumeiren-portable-vX.X.X-win64.zip`，解压到任意目录，会得到一层 `Yumeiren/` 文件夹（免安装，Qt 运行时已内置）。
+1. 到 [Releases](https://github.com/weiraing/Yumeiren/releases) 下载 `Yumeiren-portable-vX.X.X-win64.zip`，解压到任意目录，会得到一层 `Yumeiren/` 文件夹（免安装，Qt 运行时与 MSVC 运行库均已内置）。
 2. 运行 `Yumeiren/虞美人.exe`，同意 UAC 管理员授权（写入配置、注册 Hook DLL、重启资源管理器均需要）。
 3. 在「文件夹美化」页选择图片与效果，点击**应用**，打开任意文件夹查看效果；不想要了点击**恢复**即可完全卸载。
 
@@ -396,6 +396,22 @@ GitHub Release（附自动生成的变更说明）；**Actions 页面手动触�
 直接失败 —— 这是为了拦住「版本号只在 CMake 变量里对、却没写进 exe 资源」这种只看编译日志发现不了的
 静默失效。标签与 `VERSION` 文件不一致时**只警告、不阻断**（打个小补丁标签就发版是合理需求），但发版时
 建议**先改 `VERSION` 再打标签**，让两者始终同步。
+
+打包那两步还各带一组断言，理由都是**同一种坏**：缺了不报错，只是东西不在包里。
+
+| 判据 | 拦住什么 |
+| --- | --- |
+| `CMakeCache.txt` 里 `YUMEIREN_WITH_LIVE2D:BOOL=ON` | 第三方源码没就位 → 编成占位实现，看板娘空白 |
+| build 后 exe 旁有 `Live2DCubismCore.dll` + `FrameworkShaders/` | 运行期文件落到 exe 的上一层（多配置生成器） |
+| 解压便携包：Live2D 后端 + `WebView2Loader.dll` + **MSVC 运行时** + `data/` 四个子目录 | 发出去是个跑不起来 / 功能残缺的包 |
+| 解压便携包：不含 `*.lib` `*.pdb` 等 | 构建中间产物混进发布包 |
+
+> ⚠️ **MSVC 运行库这一条是踩出来的**：`windeployqt --compiler-runtime` 靠 `VCINSTALLDIR` 定位
+> VS 的 Redist 目录，而 runner 的环境里没有这个变量 —— 它不是报错，是**静默跳过**（只留一行
+> Warning，退出码 0）。于是 v1.0.2 那个包顶层 23 个文件里一个 CRT DLL 都没有，而 exe 与
+> `Qt6*.dll` 加起来有 24 处导入 `vcruntime140.dll` —— 没装 VC++ 运行库的机器上双击就是
+> 「找不到 vcruntime140.dll」。现在工作流先用 `vswhere` 补上 `VCINSTALLDIR`，再从 VS 的
+> Redist 目录兜底拷一份，最后断言；三步都不成立就直接红。
 
 ---
 

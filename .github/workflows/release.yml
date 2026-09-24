@@ -302,8 +302,58 @@ jobs:
         shell: pwsh
         run: |
           $out = "build/Release"
+
+          # —— 先让 windeployqt 找得到 MSVC 的再分发包 ——
+          # `--compiler-runtime` 靠环境变量 VCINSTALLDIR 去定位 VS 的 Redist 目录，而 runner 的
+          # pwsh 里**没有**这个变量。缺了它 windeployqt **不报错、直接跳过**，日志里只留一行：
+          #   Warning: Cannot find Visual Studio installation directory, VCINSTALLDIR is not set.
+          # 退出码仍是 0。实测 v1.0.2 那个包就是这样 —— 顶层 23 个文件里一个 CRT DLL 都没有，
+          # 而 exe 与 Qt6*.dll 加起来有 24 处导入 vcruntime140.dll。后果不是「少点东西」：
+          # 没装 VC++ 运行库的干净机器上双击 exe 直接弹「找不到 vcruntime140.dll」，根本起不来。
+          # 所以这里先用 vswhere 把 VCINSTALLDIR 补上，再跑 windeployqt；下面还有一道自己
+          # 拷贝的兜底 + 一道断言 —— 不赌 windeployqt 认不认得出 VS 的版本布局。
+          $vsRoot = ''
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (Test-Path -LiteralPath $vswhere) {
+            $vsRoot = @(& $vswhere -latest -products * -property installationPath)[0]
+          }
+          if ($vsRoot) {
+            $env:VCINSTALLDIR = (Join-Path $vsRoot 'VC') + '\'
+            Write-Host "VCINSTALLDIR = $env:VCINSTALLDIR"
+          } else {
+            Write-Host '::warning::vswhere 没找到 VS 安装目录，windeployqt 的 --compiler-runtime 会跳过；下面靠兜底拷贝补。'
+          }
+
           # 拷贝 Qt DLL/插件与 VC 运行时到 exe 旁，做成免安装目录
           windeployqt --release --no-translations --compiler-runtime "$out/虞美人.exe"
+
+          # —— MSVC C++ 运行时：兜底自己拷 ——
+          # windeployqt 是按它自己编译时认识的 VS 版本号去拼 Redist 路径的，VS 换代（比如
+          # Microsoft.VC143.CRT → VC144.CRT）就可能又静默跳过。这里不猜版本号，直接在 Redist
+          # 树里按 vcruntime140.dll 反查它所在的目录，把那一目录的 DLL 全拷过来。
+          $crtNeeded = @(
+            'vcruntime140.dll', 'vcruntime140_1.dll',
+            'msvcp140.dll', 'msvcp140_1.dll', 'msvcp140_2.dll'
+          )
+          $crtMissing = @($crtNeeded | Where-Object { -not (Test-Path -LiteralPath (Join-Path $out $_) -PathType Leaf) })
+          if ($crtMissing.Count -gt 0) {
+            # 排除 debug_nonredist（不可再分发的调试版）与 onecore（另一套 API 集）——
+            # 两者路径里同样带 `x64`，不排掉就可能拷到错的那份。
+            $crtSrc = @()
+            if ($vsRoot) {
+              $crtSrc = @(Get-ChildItem -Path (Join-Path $vsRoot 'VC\Redist\MSVC') -Recurse -Filter 'vcruntime140.dll' -File -ErrorAction SilentlyContinue |
+                          Where-Object { $_.FullName -match '\\x64\\' -and $_.FullName -notmatch 'debug_nonredist|onecore' } |
+                          Select-Object -First 1)
+            }
+            if ($crtSrc.Count -eq 0) {
+              throw "缺 MSVC 运行时（$($crtMissing -join ', ')），且在 VS 的 Redist 里也找不到 —— 发出去就是个双击起不来的包。"
+            }
+            Copy-Item -Path (Join-Path $crtSrc[0].Directory.FullName '*.dll') -Destination $out -Force
+            Write-Host "已从 $($crtSrc[0].Directory.FullName) 补齐 MSVC 运行时"
+          }
+          $crtMissing = @($crtNeeded | Where-Object { -not (Test-Path -LiteralPath (Join-Path $out $_) -PathType Leaf) })
+          if ($crtMissing.Count -gt 0) { throw "MSVC 运行时仍缺：$($crtMissing -join ', ')" }
+          Write-Host 'MSVC 运行时就位。'
 
           # 解压后要有一层顶层目录 Yumeiren/，而不是把 exe/DLL/data 直接摊在解压目录里
           # —— 那样在同一个目录里解两个版本会互相覆盖。
@@ -314,6 +364,19 @@ jobs:
           if (Test-Path "build/stage") { Remove-Item -Recurse -Force "build/stage" }
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item -Path "$out/*" -Destination $stage -Recurse -Force
+
+          # 构建中间产物不进包。MSVC 把静态库落在与 exe **同一个**输出目录（`build/Release/`），
+          # 于是一句 `Copy-Item $out/*` 就把 `yumeiren_cubism_framework.lib` +
+          # `yumeiren_glew.lib`（实测 4.9MB）一起发了出去 —— 用户解压后看到两个 .lib 只会困惑。
+          # .exp / .pdb / .ilk 同理。**只扫顶层**：中间产物只可能挨着 exe，`data/` 这类子目录
+          # 一个都不碰（按扩展名递归删会在素材目录里误伤）。
+          $junkExt = @('.lib', '.exp', '.pdb', '.ilk', '.iobj', '.ipdb', '.tlog', '.obj', '.res', '.log')
+          $junk = @(Get-ChildItem -LiteralPath $stage -File |
+                    Where-Object { $junkExt -contains $_.Extension.ToLower() })
+          if ($junk.Count -gt 0) {
+            $junk | ForEach-Object { Write-Host "  剔除中间产物：$($_.Name)" }
+            $junk | Remove-Item -Force
+          }
 
           $zip = "Yumeiren-portable-v$env:YUMEIREN_VERSION-win64.zip"
           Compress-Archive -Path $stage -DestinationPath $zip -Force
@@ -347,16 +410,43 @@ jobs:
             throw '便携包顶层没有 exe'
           }
 
+          # 逐项点名。三类都是「缺了不报错、只是功能没了」的东西，只能靠这里拦：
+          #   Live2D 后端 —— 缺了看板娘是空白的，日志里一行都没有；
+          #   WebView2 Loader —— 缺了网页壁纸降级成「运行时不可用」；
+          #   MSVC 运行时 —— 缺了干净机器上**根本起不来**（最狠的一类）。
           $need = @(
             'Live2DCubismCore.dll',
-            'FrameworkShaders/VertShaderSrc.vert'
+            'FrameworkShaders/VertShaderSrc.vert',
+            'WebView2Loader.dll',
+            'vcruntime140.dll',
+            'vcruntime140_1.dll',
+            'msvcp140.dll'
           )
           $missing = @($need | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root $_) -PathType Leaf) })
           if ($missing.Count -gt 0) {
             $missing | ForEach-Object { Write-Host "  缺：$_" }
-            throw "便携包里缺 Live2D 后端文件（共 $($missing.Count) 项）—— 发出去就是个没有看板娘的包。"
+            throw "便携包里缺运行期文件（共 $($missing.Count) 项）—— 发出去就是个跑不起来的包。"
           }
-          Write-Host '便携包校验通过：顶层 Yumeiren/，Live2D 后端文件齐全。'
+
+          # data/ 是「素材缺失只降级、不报错」的那一类：四个子目录都得在，否则用户下到的
+          # 是个看板娘没模型、图库空空的包。目录名来自 README 里写死的固定结构。
+          $dataDirs = @('models', 'image', 'video', 'web')
+          $noData = @($dataDirs | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root "data/$_") -PathType Container) })
+          if ($noData.Count -gt 0) {
+            throw "便携包的 data/ 里缺子目录：$($noData -join ', ')"
+          }
+
+          # 反向判据：构建中间产物一个都不该出现在包里（打包那步剔过，这里验的是**真发出去
+          # 的那个 zip**，中间任何一次拷贝把它带回来都拦得住）。
+          $junkExt = @('.lib', '.exp', '.pdb', '.ilk', '.iobj', '.ipdb', '.tlog', '.obj')
+          $junk = @(Get-ChildItem -LiteralPath $root -Recurse -File |
+                    Where-Object { $junkExt -contains $_.Extension.ToLower() })
+          if ($junk.Count -gt 0) {
+            $junk | ForEach-Object { Write-Host "  多出来：$($_.FullName)" }
+            throw "便携包里混进了 $($junk.Count) 个构建中间产物（见上方清单）。"
+          }
+
+          Write-Host '便携包校验通过：顶层 Yumeiren/，Live2D 后端 + WebView2 Loader + MSVC 运行时 + data/ 齐全，无中间产物。'
 
       - name: 上传构建产物(Artifact,保留 7 天)
         uses: actions/upload-artifact@v4
@@ -371,4 +461,7 @@ jobs:
         with:
           name: Yumeiren v${{ steps.ver.outputs.version }}
           files: ${{ env.ZIP_NAME }}
+          # 默认行为是「找不到就警告、照样建一个没有附件的 Release」—— 那是最难发现的一种坏：
+          # 页面看着发出去了，用户点进去没有包。宁可这一步红。
+          fail_on_unmatched_files: true
           generate_release_notes: true
