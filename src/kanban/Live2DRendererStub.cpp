@@ -87,6 +87,23 @@ QString Live2DRenderer::drawableOpacityText(const QStringList &) const
 {
     return QStringLiteral("未接入 SDK");
 }
+// ⚠️ 这两个必须给定义，哪怕基类里已经有内联实现。头文件把 `meshHideText()` /
+// `refreshMeshHide()` 声明成了 override，**虚表就指向 Live2DRenderer 自己那份符号**，
+// 基类那个内联的只是「没被覆盖时的兜底」，顶不上。少了就是 LNK2001（ld 那边报
+// undefined reference）—— 而且只在 YUMEIREN_WITH_LIVE2D=OFF 的构建里才会暴露：
+// 本机装了 SDK，编的一直是 Live2DRendererCubism.cpp，这两条路径根本编不到。
+//
+// 语义上转发给基类即可 —— 占位后端没有「网格隐藏清单」这回事，基类的空串 / 无操作
+// 正是正确行为（界面拿空串决定「状态行不多那一段」，不是当诊断输出，所以这里**不能**
+// 跟上面几个诊断方法一样返回「未接入 SDK」）。转发而不是重写，是为了留一个状态写入点。
+QString Live2DRenderer::meshHideText() const
+{
+    return KanbanRenderer::meshHideText();
+}
+void Live2DRenderer::refreshMeshHide()
+{
+    KanbanRenderer::refreshMeshHide();
+}
 void Live2DRenderer::pointerMove(const QPointF &) {}
 // 必须给这个定义：头文件里声明成了 override，虚表会指向这个符号而非基类的内联实现，
 // 不定义就是链接错误(ld 报 undefined reference)。函数体转发给基类，保持
