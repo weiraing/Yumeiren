@@ -144,64 +144,63 @@ endfunction()
 #      界面上什么都看不到，也不报错。
 #      官方示例 proj.win.cmake/CMakeLists.txt 里有同样的 copy_directory 步骤。
 #
-# 挂在 ALL 上的**单个**共享 target，而不是每个目标的 POST_BUILD，两个理由：
+# 挂在 ALL 上的独立 target（每个目标一个），而不是目标的 POST_BUILD：
 #   1. POST_BUILD 只在目标真正重新链接时才跑 —— 用户删掉 FrameworkShaders/ 之后
 #      重编译永远补不回来，而症状正是上面说的「一片空白且不报错」。与 data/、
 #      Qt 运行库是同一类坑，用同一种解法。
-#   2. 三个 exe 的输出目录相同，各自 POST_BUILD 会**并发**往同一个
-#      FrameworkShaders/ 里 copy_directory，实测会随机报
-#      "Error copying directory from ... to ..." 把整次构建打挂。只做一次就没有这个问题。
+#   2. 并发问题不靠「只做一个 target」解决，靠 CMakeLists 那条 YUMEIREN_DEPLOY_SERIAL
+#      串行链（理由与判据见 yumeiren_deploy_qt_runtime() 里那段注释）—— 于是每个目标
+#      可以有自己的复制 target，各自落到**自己**的输出目录，不必再要求「输出目录一致」。
 #
-# 前提：调用本函数的各目标输出目录一致(本仓库三个 exe 都在 build/ 根)。不一致会
-# 直接 FATAL_ERROR 报出来，而不是悄悄把库补到别人的目录里。
+# ⚠️ 落点必须写成 $<TARGET_FILE_DIR:${target}>，**不能**取 RUNTIME_OUTPUT_DIRECTORY
+#    再回退到 ${CMAKE_CURRENT_BINARY_DIR}。本仓库没给目标设过 RUNTIME_OUTPUT_DIRECTORY，
+#    于是回退值就成了唯一的取值，而它只在**单配置**生成器(Ninja)下恰好等于输出目录：
+#      Ninja          ${CMAKE_CURRENT_BINARY_DIR} = <build>          = exe 所在 ✅
+#      MSVC 多配置     ${CMAKE_CURRENT_BINARY_DIR} = <build>，exe 在 <build>/Release ❌
+#    2026-09-24 CI 第一次编真 Live2D 就是这么挂的：Core DLL 与 FrameworkShaders/ 落到
+#    exe 的上一层，构建全绿、断言才把它拦下来。本机只有 Ninja，复现要靠
+#    `-G "Ninja Multi-Config"`（多配置布局与 MSVC 一致，能用 MinGW 跑）。
 function(yumeiren_deploy_cubism target)
     if(NOT YUMEIREN_CUBISM_RUNTIME_DLLS)
         return()
     endif()
 
-    get_target_property(_yumeiren_cubism_out ${target} RUNTIME_OUTPUT_DIRECTORY)
-    if(NOT _yumeiren_cubism_out)
-        set(_yumeiren_cubism_out "${CMAKE_CURRENT_BINARY_DIR}")
-    endif()
-
-    get_property(_yumeiren_cubism_dir GLOBAL PROPERTY YUMEIREN_CUBISM_DEPLOY_DIR)
-    if(NOT _yumeiren_cubism_dir)
-        set_property(GLOBAL PROPERTY YUMEIREN_CUBISM_DEPLOY_DIR "${_yumeiren_cubism_out}")
-    elseif(NOT _yumeiren_cubism_dir STREQUAL _yumeiren_cubism_out)
-        message(FATAL_ERROR
-            "Cubism 运行期文件的复制只做一份，但 ${target} 的输出目录"
-            "(${_yumeiren_cubism_out})与先前目标的(${_yumeiren_cubism_dir})不同。"
-            "请给输出目录不同的目标另建一个复制 target。")
-    endif()
-
-    if(NOT TARGET yumeiren_runtime_cubism)
+    if(NOT TARGET yumeiren_runtime_cubism_${target})
         # 命令直接写进 add_custom_target：POST_BUILD 只对「有构建步骤」的目标成立，
         # 挂在自定义 target 上永远不会执行。
         set(_yumeiren_cubism_cmds
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${_yumeiren_cubism_out}")
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${target}>")
 
         foreach(_dll ${YUMEIREN_CUBISM_RUNTIME_DLLS})
             list(APPEND _yumeiren_cubism_cmds
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${_dll}" "${_yumeiren_cubism_out}")
+                    "${_dll}" "$<TARGET_FILE_DIR:${target}>")
         endforeach()
 
         if(YUMEIREN_CUBISM_SHADER_DIR AND EXISTS "${YUMEIREN_CUBISM_SHADER_DIR}")
             list(APPEND _yumeiren_cubism_cmds
                 COMMAND ${CMAKE_COMMAND} -E copy_directory
                     "${YUMEIREN_CUBISM_SHADER_DIR}"
-                    "${_yumeiren_cubism_out}/FrameworkShaders")
+                    "$<TARGET_FILE_DIR:${target}>/FrameworkShaders")
         else()
             message(WARNING
                 "没找到 Cubism 的 Standard 着色器目录，Live2D 会加载失败并画不出东西："
                 "${YUMEIREN_CUBISM_SHADER_DIR}")
         endif()
 
-        add_custom_target(yumeiren_runtime_cubism ALL ${_yumeiren_cubism_cmds}
-            COMMENT "复制 Cubism 运行期文件(Core DLL + FrameworkShaders/)"
+        add_custom_target(yumeiren_runtime_cubism_${target} ALL ${_yumeiren_cubism_cmds}
+            COMMENT "复制 ${target} 的 Cubism 运行期文件(Core DLL + FrameworkShaders/)"
             VERBATIM)
+
+        # 与 Qt 运行库/WebView2 共用同一条串行链 —— 落点是同一个输出目录，
+        # 并发写同一文件会 Permission denied，理由见 yumeiren_deploy_qt_runtime()。
+        if(YUMEIREN_DEPLOY_SERIAL)
+            add_dependencies(yumeiren_runtime_cubism_${target} ${YUMEIREN_DEPLOY_SERIAL})
+        endif()
+        set(YUMEIREN_DEPLOY_SERIAL
+            "${YUMEIREN_DEPLOY_SERIAL};yumeiren_runtime_cubism_${target}" PARENT_SCOPE)
     endif()
 
     # 让「只构建这一个目标」也走到复制：ALL 只在整目录构建时才会被带上。
-    add_dependencies(${target} yumeiren_runtime_cubism)
+    add_dependencies(${target} yumeiren_runtime_cubism_${target})
 endfunction()
