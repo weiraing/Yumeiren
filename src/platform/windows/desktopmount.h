@@ -17,7 +17,17 @@ bool isWorkerValid();
 // 只挂在 Progman 兜底上时为 false(部分 Win11 构建不合成该子窗口)；心跳会持续重查
 bool hasRealWorker();
 
-// 挂到 WorkerW 下；logicalTarget 是 Qt 逻辑坐标，内部按物理像素换算，否则副屏位置错误
+// 挂到图标层之后（桌面最底）。
+// logicalTarget 是 Qt 逻辑坐标，内部按物理像素换算，否则副屏位置错误。
+//
+// **只有一种挂法**（2026-09-24 定案，取消原「网页交互」档）：SetParent 到 WorkerW，
+// 成为桌面窗口的子窗口。最稳，图标正常、绝对不抢鼠标 —— 代价是**收不到任何鼠标消息**
+// （子窗口在 DefView 的命中层之下，WindowFromPoint 恒命中 explorer 的 SHELLDLL_DefView）。
+// 壁纸是"挂着看"的东西，这个代价是设计选择，不是缺陷。
+//
+// ⚠️ 别再试图"保持顶层窗口插到 Progman 之上"来让它吃鼠标 —— 那条路要显式剥掉
+//    WS_EX_LAYERED，剥掉后**桌面图标会被壁纸盖住**，且顶层窗口的 z 序会被别的程序
+//    扰动、必须每 10s 重挂维护。这是 2026-09-24 实测过的取舍，用户已明确不要。
 void mountBehindIcons(QWidget *window, const QRect &logicalTarget);
 void unmountWindow(QWidget *window);
 
@@ -34,7 +44,6 @@ bool isOnBattery();
 // 把同 exe 已运行实例的主窗口(标题精确匹配、有实际尺寸)调到前台，最小化则先还原；找不到实例或主窗口返回 false，由调用方兜底
 bool activateExistingInstanceWindow(const QString &mainWindowTitle,
                                     QString *reason = nullptr);
-
 // 资源友好模式：亲和性限制到 maxCores 个逻辑核，优先分属不同物理核(避开 SMT 兄弟对)；实测(32核机,1080p30)内存-27%、显存-36%、CPU 不变。核数本就不多时返回 false
 bool applyProcessAffinityLimit(int maxCores);
 

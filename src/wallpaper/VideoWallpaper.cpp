@@ -1,7 +1,6 @@
 // VideoWallpaper 核心实现：播放列表管理、播放器生命周期、挂起策略和错误恢复。
 #include "VideoWallpaper.h"
 
-#include "app/AppInfo.h"
 #include "wallpaper/WebWallpaper.h"
 #include "config/AppConfig.h"
 #include "core/Diagnostics.h"
@@ -249,7 +248,6 @@ void VideoWallpaper::playIndex(int index, qint64 resumePos)
         }
         // 循环策略必须每次都断言：列表从 1 个变多个时走 sameSource 快路径，漏掉会遗留单曲循环
         applyLoopPolicy(out.player);
-        applyPlaybackRate(out.player);
         out.audio->setVolume(first ? qBound(0, m_volume, 100) / 100.0 : 0);
         out.audio->setMuted(!first);
         out.player->play();
@@ -501,19 +499,24 @@ void VideoWallpaper::evaluateSuspend()
     }
 
     int reasons = 0;
-    // 判据与"谁在前台"无关：全屏应用前面压着小窗口时桌面依然不可见，只看前台会误判成已回桌面
-    if (m_pauseOnFullscreen && winhelper::isFullscreenWindowPresent())
-        reasons |= SuspendFullscreen;
-    // 遮挡判定只在主屏铺放时安全(多输出时曾实测每秒反复暂停/恢复)，多屏档位已删、
-    // 现在恒为单输出主屏铺放，故无条件启用。
-    if (m_pauseOnFullscreen && winhelper::isDesktopCoveredByWindow())
-        reasons |= SuspendCovered;
+    // 便宜判据(系统调用级)放最前：锁屏/熄屏/电池任一成立就已挂起，后面两次
+    // 全量 EnumWindows+OpenProcess 的全屏/遮挡扫描就没必要再跑，空闲笔记本上
+    // 每秒省一轮窗口枚举。
     if (winhelper::isWorkstationLocked())
         reasons |= SuspendLocked;
     if (!m_monitorOn)
         reasons |= SuspendMonitorOff;
     if (m_pauseOnBattery && winhelper::isOnBattery())
         reasons |= SuspendBattery;
+    // 判据与"谁在前台"无关：全屏应用前面压着小窗口时桌面依然不可见，只看前台会误判成已回桌面
+    if (reasons == 0 && m_pauseOnFullscreen) {
+        if (winhelper::isFullscreenWindowPresent())
+            reasons |= SuspendFullscreen;
+        // 遮挡判定只在主屏铺放时安全(多输出时曾实测每秒反复暂停/恢复)，多屏档位已删、
+        // 现在恒为单输出主屏铺放，故无条件启用。
+        if (winhelper::isDesktopCoveredByWindow())
+            reasons |= SuspendCovered;
+    }
     m_suspendReasons = reasons;
     // 挂载健康检查复用同一条 1s 心跳：Progman 兜底在部分 Win11 不被 DWM 合成，故兜底状态由 scheduleMountFix 持续重查
     if (mountIsStale() || !winhelper::hasRealWorker())
@@ -675,12 +678,4 @@ void VideoWallpaper::longSuspendRelease()
         trimMemory(); // 立刻把释放后的页还给系统
     emit playbackStateChanged(
         QStringLiteral("暂停较久，已释放壁纸资源；回到桌面自动恢复"));
-}
-void VideoWallpaper::setAutostart(bool on)
-{
-    appinfo::setAutostart(on);
-}
-bool VideoWallpaper::autostartEnabled() const
-{
-    return appinfo::autostartEnabled();
 }

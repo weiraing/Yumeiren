@@ -49,6 +49,7 @@ class MediaLibraryCard;
 
 namespace winhelper {
 class GlobalHotkey;
+class WakeupListener;
 }
 
 /**
@@ -275,10 +276,10 @@ private:
     QCheckBox *m_batteryBox = nullptr;
     QCheckBox *m_reclaimBox = nullptr;
     QCheckBox *m_affinityBox = nullptr;   // 资源友好模式(限制逻辑核, 重启生效)
-    QCheckBox *m_autostartBox = nullptr;
+    // 「开机自动启动」的唯一入口在**托盘右键菜单**（SystemTrayController），
+    // 本页与看板娘页都不再有同名复选框。
     // 动态网页壁纸页(WebView2)
     QButtonGroup *m_webRefreshGroup = nullptr;  // 刷新策略：互斥单选，id 就是 WebWallpaper::RefreshMode 枚举值
-    QButtonGroup *m_webInteractGroup = nullptr;  // 交互模式：互斥单选，id 0=网页展示(穿透) / 1=网页交互
     QButtonGroup *m_webFpsGroup = nullptr;  // 帧率：互斥单选，按钮 id 就是 fps 值(0=跟随页面)
     QSlider *m_webVolumeSlider = nullptr;
     QLabel *m_webVolumeVal = nullptr;
@@ -295,7 +296,6 @@ private:
     QPushButton *m_playBtn = nullptr;
     QPushButton *m_pauseBtn = nullptr;
     QButtonGroup *m_fpsGroup = nullptr;     // 帧率：互斥单选，按钮 id 就是 fps 值(0=跟随视频帧率)
-    QCheckBox *m_fpsKeepSpeedBox = nullptr; // 限速方式：保速丢帧 / 慢动作
     // 视频库页脚第二段(状态)：壁纸层最后一次 playbackStateChanged 的原文。
     // 存原文而不是自己拼短词 —— 「检测到全屏应用，已自动暂停」这类"为什么"不能丢。
     QString m_videoStateText;
@@ -381,11 +381,14 @@ private:
     QRadioButton *m_kanbanGazeMedium = nullptr;
     QRadioButton *m_kanbanGazeStrong = nullptr;
     QCheckBox *m_trayMinimizeBox = nullptr;
-    QCheckBox *m_kanbanAutostartBox = nullptr; // 与壁纸页 m_autostartBox 同一个注册表项
     QKeySequenceEdit *m_kanbanHotkeyEdit = nullptr;
     winhelper::GlobalHotkey *m_kanbanHotkey = nullptr; // 显示/隐藏看板娘的全局快捷键
     // 回填设置时挡住「控件变化 = 用户改动」，否则会把刚读的值再写回去。
     bool m_kanbanSyncing = false;
+    // 二次启动的「唤起主窗口」收信口。见 winhelper::WakeupListener 的头注释：
+    // 主窗口 hide() 后原生 HWND 虽在、但**不可见**，且窗口类名会被 Qt 新建的辅助窗口
+    // 弄混，跨进程没法可靠地"叫醒"它 —— 所以要有这个常驻的独立线程窗口来收消息。
+    winhelper::WakeupListener *m_wakeup = nullptr;
 };
 
 #endif // MAINWINDOW_H

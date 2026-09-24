@@ -51,7 +51,6 @@ public:
     bool isSuspended() const { return m_suspendReasons != 0; }
 
     // —— 设置(全部即时生效并落盘) ——
-    void setInteractive(bool on);
     void setVolume(int percent);      // 计量为百分比；0=取消声音播放(WebView2 无音量级)，>0 出声
     void setZoomPercent(int percent); // 50~200
     void setRefreshMode(int mode);
@@ -69,7 +68,6 @@ public:
     // —— 查询(界面只读) ——
     QString source() const { return m_source; }
     int refreshMode() const { return m_refreshMode; }
-    bool interactive() const { return m_interactive; }
     int volume() const { return m_volume; }
     int zoomPercent() const { return m_zoomPercent; }
     int fpsCap() const { return m_fpsCap; }
@@ -95,7 +93,6 @@ private:
     void attachController();
     void applySettings();
     void applyBounds();
-    void applyInteractive();
     void applyAudio();
     void suspendNoop();
     void applySuspend(bool suspend);
@@ -127,7 +124,6 @@ private:
 
     // —— 设置镜像(单一来源在配置；这里只是缓存) ——
     int m_refreshMode = Realtime;
-    bool m_interactive = false;
     int m_volume = 0;  // 0=静音(默认：壁纸别出声，用户要声音自己开)
     int m_zoomPercent = 100;
     int m_fpsCap = 0;

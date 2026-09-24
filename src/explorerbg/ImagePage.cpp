@@ -15,6 +15,7 @@
 #include <QFileDialog>
 #include <QGridLayout>
 #include <QGuiApplication>
+#include <QImageReader>
 #include <QLabel>
 #include <QListWidget>
 #include <QPainter>
@@ -29,6 +30,26 @@
 #include <QVBoxLayout>
 
 namespace {
+
+// 只解到需要的尺寸：大图(如 4K)先按文件头在解码内缩放，避免先完整展开几十 MB
+// 再缩到几百像素宽。各格式插件的 scaledSize 路径自带平滑，最后再用 Smooth 把
+// 残余尺寸校准到目标，画质与"全尺寸解码+一次 Smooth"等价。头信息无效或图不大时
+// 退化为整图解码，与旧路径一致。
+QImage decodeDownscaled(const QString &path, const QSize &target)
+{
+    QImageReader reader(path);
+    const QSize source = reader.size();
+    if (!target.isEmpty() && source.isValid() && !source.isEmpty()
+        && (source.width() > target.width() || source.height() > target.height())) {
+        reader.setScaledSize(source.scaled(target, Qt::KeepAspectRatio));
+    }
+    QImage image = reader.read();
+    if (!image.isNull() && !target.isEmpty()
+        && (image.width() > target.width() || image.height() > target.height())) {
+        image = image.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    }
+    return image;
+}
 
 class GalleryDelegate : public QStyledItemDelegate
 {
@@ -409,8 +430,11 @@ QWidget *MainWindow::buildImagePage()
 
     lay->addWidget(rightCard, 5);
 
+    // 滑条一个拖动会触发几十次 valueChanged，每次都跑完整条预览流水线
+    // (LUT+3 遍 box blur+整幅预览重画)会卡 GUI 线程；接防抖入口，拖动中每 60ms
+    // 才重画一次，与窗口 resize 的合并策略一致。
     for (QSlider *s : {m_rotate, m_scale, m_brightness, m_contrast, m_blur, m_transparency})
-        connect(s, &QSlider::valueChanged, this, &MainWindow::updateImagePreview);
+        connect(s, &QSlider::valueChanged, this, &MainWindow::scheduleImagePreview);
 
     scroll->setWidget(page);
     return scroll;
@@ -467,7 +491,8 @@ void MainWindow::rebuildGallery()
             // 后台线程只做解码+缩放+落盘，不触碰 UI；回到 GUI 线程的回调必须先过
             // 存活闸门(见 m_thumbTasksLive / ~MainWindow)。
             QThreadPool::globalInstance()->start([this, res, thumb] {
-                QImage img(res);
+                // 解码内缩放：不再对 4K 素材先完整展开再缩，省峰值内存与解码时间
+                QImage img = decodeDownscaled(res, QSize(300, 220));
                 if (img.isNull())
                     return;
                 // 完整显示(不裁剪)并保留透明通道：PNG 透明区域透出卡片底色
@@ -580,14 +605,20 @@ void MainWindow::updateImagePreview()
     else if (!m_customImage.isEmpty())
         path = m_customImage;
 
-    // 源图按“路径+修改时间”缓存：调参和拖动窗口会反复重画，磁盘解码只做一次。
+    // 源图按"路径+修改时间"缓存：调参和拖动窗口会反复重画，磁盘解码只做一次。
+    // 解码直接按 900 预览宽收口：4K 图不再先展开几十 MB 再缩；真实原生尺寸从
+    // 文件头取(不解码)，头信息无效时才退回解码结果。
     const qint64 mtime = QFileInfo(path).lastModified().toMSecsSinceEpoch();
     const QString srcKey = path + QLatin1Char('#') + QString::number(mtime);
     if (srcKey != m_previewSrcKey) {
-        QImage decoded(path);
-        m_previewSrcNative = decoded.size();
+        QImageReader reader(path);
+        const QSize nativeSize = reader.size();
+        if (nativeSize.isValid() && nativeSize.width() > 900)
+            reader.setScaledSize(QSize(900, qMax(1, nativeSize.height() * 900 / nativeSize.width())));
+        QImage decoded = reader.read();
         if (!decoded.isNull() && decoded.width() > 900)
             decoded = decoded.scaledToWidth(900, Qt::SmoothTransformation);
+        m_previewSrcNative = nativeSize.isValid() && !nativeSize.isEmpty() ? nativeSize : decoded.size();
         m_previewSrcCache = decoded;
         m_previewSrcKey = srcKey;
     }

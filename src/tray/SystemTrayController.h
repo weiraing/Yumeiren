@@ -77,6 +77,9 @@ private:
     QAction *m_actGazeWeak = nullptr;
     QAction *m_actGazeMedium = nullptr;
     QAction *m_actGazeStrong = nullptr;
+    // 开机自启：全软件唯一入口（2026-09-24 起，原来壁纸页/看板娘页各有一个同名复选框，
+    // 已删）。勾选写 HKCU\...\Run，勾选态每次弹出菜单时从注册表现读（见 updateMenuState）。
+    QAction *m_actAutostart = nullptr;
     QAction *m_actQuit = nullptr;
 
     bool m_available = false;

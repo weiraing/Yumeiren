@@ -162,6 +162,7 @@ set(YUMEIREN_SOURCES
     src/platform/windows/desktopmount.cpp
     src/platform/windows/globalhotkey.cpp
     src/platform/windows/shellfileops.cpp
+    src/platform/windows/wakeuplistener.cpp
     src/platform/windows/webview2boot.cpp
     # tray/ module
     src/tray/SystemTrayController.cpp

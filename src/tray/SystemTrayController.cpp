@@ -188,6 +188,25 @@ void SystemTrayController::buildContextMenu()
             m_kanban->setMouseThrough(through);
     });
 
+    // 「开机自启」放在「关闭软件」正上方、分隔线之下 —— 它是全软件唯一入口
+    // （壁纸页与看板娘页的同名复选框 2026-09-24 已删）。勾选态从注册表现读，
+    // 不缓存布尔：用户可能在别处（任务管理器→启动项、注册表）改掉。
+    m_contextMenu->addSeparator();
+    m_actAutostart = m_contextMenu->addAction(QStringLiteral("开机自启"));
+    m_actAutostart->setCheckable(true);
+    connect(m_actAutostart, &QAction::triggered, this, [this](bool on) {
+        appinfo::setAutostart(on);
+        // 写注册表可能失败（权限/安全软件拦截）：再读回一次，勾选态一律以真实结果为准，
+        // 免得菜单显示"已勾选"而实际没生效。
+        const bool actual = appinfo::autostartEnabled();
+        applog::log(applog::Level::Info,
+                       QStringLiteral("开机自启: %1")
+                           .arg(actual ? QStringLiteral("已开启") : QStringLiteral("已关闭")),
+                       QStringLiteral("Tray"));
+        if (m_actAutostart->isChecked() != actual)
+            m_actAutostart->setChecked(actual);
+    });
+
     m_contextMenu->addSeparator();
     m_actQuit = addEntry(m_contextMenu, QStringLiteral("关闭软件"), [this] {
         emit quitRequested();
@@ -215,14 +234,19 @@ void SystemTrayController::updateMenuState()
                                                   : QStringLiteral("暂停"));
 
     const bool kanbanRunning = m_kanban && m_kanban->isRunning();
-    // 同页面 updateKanbanControls()：唯一该置灰的是 Stopping 那一瞬——窗口与渲染器
-    // 正在拆，再点一次会撞上非法状态转移。
+    // ⚠️ 暂停也必须算「不可切动作」：`playNext()` 第一行的守卫里就有
+    // `m_machine.isPaused()` → 暂停时**静默 return**。而 `isRunning()` 对 Paused
+    // 返回 true（见 `KanbanTypes.h` 的 stateIsRunning），所以只判 isRunning 会让
+    // 菜单项**可点却什么都不做** —— 用户报的「播放下一个没反应」就是这个。
+    // 判据必须与执行条件一致（同 KanbanSettingsPage::updateKanbanControls 的 `!paused`）。
+    const bool kanbanPaused = m_kanban && m_kanban->isPaused();
     const bool kanbanStopping =
         m_kanban && m_kanban->state() == kanban::State::Stopping;
     m_actKanbanToggle->setEnabled(m_kanban && !kanbanStopping);
     m_actKanbanPause->setEnabled(kanbanRunning);
     // 跟随渲染器的可播动作数置灰：点了没反应比灰掉更让人怀疑程序坏了。
-    m_actKanbanNext->setEnabled(kanbanRunning && m_kanban->canPlayNextMotion());
+    m_actKanbanNext->setEnabled(kanbanRunning && !kanbanPaused
+                                && m_kanban->canPlayNextMotion());
     // 四档开关不禁用：没跑时也能先定偏好，下次启动生效；但没注入控制器时无从
     // 读回状态，此时整组灰掉更诚实。
     {
@@ -249,6 +273,11 @@ void SystemTrayController::updateMenuState()
         m_actKanbanThrough->setEnabled(m_kanban && !kanbanStopping);
         m_actKanbanThrough->setChecked(m_kanban && m_kanban->mouseThrough());
     }
+
+    // 开机自启：每次弹出都从注册表现读，不缓存 —— 用户可能在任务管理器「启动项」
+    // 或注册表里直接改掉，缓存一份布尔就会跟真实状态脱节。
+    if (m_actAutostart)
+        m_actAutostart->setChecked(appinfo::autostartEnabled());
 
     const QString tip = QStringLiteral("%1 - 动态壁纸%2 / 看板娘%3")
                             .arg(appinfo::displayName(),

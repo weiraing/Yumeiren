@@ -443,9 +443,9 @@ QWidget *MainWindow::buildVideoWallpaperPage()
         AppConfig &st = AppConfig::instance();
         st.setValue(ConfigKeys::Video::AffinityLimit, on);
     });
-    m_autostartBox = new QCheckBox(QStringLiteral("开机自动启动"), leftCard);
-    m_autostartBox->setChecked(VideoWallpaper::instance().autostartEnabled());
-    leftLay->addWidget(m_autostartBox);
+    // 「开机自动启动」不在这两页里 —— 已收口到**托盘右键菜单**（见 SystemTrayController），
+    // 那是全软件唯一一处。2026-09-24 定案：原来壁纸页与看板娘页各有一个同名复选框、
+    // 靠 toggled 互相同步，属于"同一个注册表项有三个入口"，状态容易打架。
 
     // 帧率：互斥单选四档，按钮 id **就是 fps 值**(0=跟随视频帧率，>0=手动上限)，
     // 于是不需要再维护一张「下标→值」的对照表 —— 旧版是下拉框，下标与值错位
@@ -486,21 +486,6 @@ QWidget *MainWindow::buildVideoWallpaperPage()
         AppConfig::instance().setValue(ConfigKeys::Video::TargetFps, fps);
     });
     leftLay->addLayout(fpsRow);
-
-    // 限帧方式(二选一，默认保速丢帧)。两档的省法完全不同，用词必须写清楚。
-    m_fpsKeepSpeedBox = new QCheckBox(QStringLiteral("限帧时保持播放速度"), leftCard);
-    m_fpsKeepSpeedBox->setChecked(true);
-    m_fpsKeepSpeedBox->setToolTip(tooltipstyle::format(QStringLiteral(
-            "勾选（默认）：丢掉多余的帧，画面速度与素材一致。解码器照常满速跑，"
-            "省不到解码那一段开销 —— 4K60 限 24 时 3D 引擎约降 20%。\n"
-            "取消勾选：按上限放慢播放（慢动作），解码器一起减速 —— 同样条件下 "
-            "3D 引擎约降 50%，内存/显存同步下降。资源最省的档位，代价是画面明显变慢。")));
-    connect(m_fpsKeepSpeedBox, &QCheckBox::toggled, this, [this](bool on) {
-        VideoWallpaper::instance().setKeepSpeed(on);
-        AppConfig &st = AppConfig::instance();
-        st.setValue(ConfigKeys::Video::FpsKeepSpeed, on);
-    });
-    leftLay->addWidget(m_fpsKeepSpeedBox);
 
     // 左列**不再固定宽度**，而是拿到一个可收缩的下限：窗口变宽时多出来的空间依然
     // 全给右侧播放列表(左列被 stretch 压到最小)，窗口变窄时左列能跟着收。
@@ -588,14 +573,6 @@ QWidget *MainWindow::buildVideoWallpaperPage()
         VideoWallpaper::instance().setReclaimMemory(on);
         AppConfig &st = AppConfig::instance();
         st.setValue(ConfigKeys::Video::Reclaim, on);
-    });
-    connect(m_autostartBox, &QCheckBox::toggled, this, [this](bool on) {
-        VideoWallpaper::instance().setAutostart(on);
-        // 看板娘页的同名复选框是同一个注册表项，两处勾选状态保持一致。
-        if (m_kanbanAutostartBox && m_kanbanAutostartBox->isChecked() != on) {
-            QSignalBlocker blocker(m_kanbanAutostartBox);
-            m_kanbanAutostartBox->setChecked(on);
-        }
     });
     connect(&VideoWallpaper::instance(), &VideoWallpaper::playbackStateChanged,
             this, &MainWindow::onVideoStateChanged);
@@ -714,38 +691,7 @@ QWidget *MainWindow::buildWebWallpaperPage()
     }
     grid->addLayout(refreshRow, 0, 1);
 
-    grid->addWidget(new QLabel(QStringLiteral("交互模式"), leftCard), 1, 0);
-    // 两档互斥单选，按钮 id 直接承载语义值：0 = 网页展示(鼠标穿透)、1 = 网页交互。
-    // ⚠️ 这两个名字最容易记反：「网页展示」才是**穿透**（只看不摸，鼠标落到桌面），
-    // 「网页交互」才吃鼠标。档位名是用户定的(2026-09-23)，别再改回上一版的
-    // 「允许鼠标交互 / 仅展示(穿透点击)」—— 那一版还是下拉框，且默认选的是「允许交互」。
-    // 出厂默认「网页展示」= false：见 AppConfig 的 kBoolDefaultTrue(该项已移出那张表)。
-    m_webInteractGroup = new QButtonGroup(this);
-    m_webInteractGroup->setExclusive(true);
-    auto *interactRow = new QHBoxLayout();
-    interactRow->setSpacing(6);
-    interactRow->addStretch(1);   // 按钮靠右，与上面「刷新策略」同一观感
-    const QString interactTip = tooltipstyle::format(
-        QStringLiteral("网页壁纸挂在桌面图标后面，两种模式都不影响点图标，差别只在桌面空白处：\n"
-                       "「网页展示」鼠标穿透，空白处的点击/框选/右键菜单照常落到桌面；\n"
-                       "「网页交互」网页接收鼠标，页面里的按钮、链接、滚动才能用。"));
-    auto addInteractOption = [&](int id, const QString &label) {
-        auto *btn = new QRadioButton(label, leftCard);
-        btn->setToolTip(interactTip);
-        m_webInteractGroup->addButton(btn, id);
-        interactRow->addWidget(btn);
-    };
-    // 顺序即左右顺序：网页展示 / 网页交互
-    addInteractOption(0, QStringLiteral("网页展示"));
-    addInteractOption(1, QStringLiteral("网页交互"));
-    // idClicked 只在**用户点击**时发；程序 setChecked 不发 → 回填不会反过来写配置。
-    connect(m_webInteractGroup, &QButtonGroup::idClicked, this, [](int id) {
-        WebWallpaper::instance().setInteractive(id == 1);   // 内部会顺手写配置
-    });
-    m_webInteractGroup->button(WebWallpaper::instance().interactive() ? 1 : 0)->setChecked(true);
-    grid->addLayout(interactRow, 1, 1);
-
-    grid->addWidget(new QLabel(QStringLiteral("帧率"), leftCard), 2, 0);
+    grid->addWidget(new QLabel(QStringLiteral("帧率"), leftCard), 1, 0);
     // 与视频壁纸页同一套档位与写法(见 buildVideoWallpaperPage 里那段注释)：
     // 按钮 id 就是 fps 值，「默认」= 跟随页面(值 0，不设上限)，出厂默认 30。
     // 页面这边的值取自 WebWallpaper 已加载的设置(不是直接读配置)，与旧版一致。
@@ -786,7 +732,7 @@ QWidget *MainWindow::buildWebWallpaperPage()
         }
         m_webFpsGroup->button(cap)->setChecked(true);
     }
-    grid->addLayout(webFpsRow, 2, 1);
+    grid->addLayout(webFpsRow, 1, 1);
 
     grid->addWidget(new QLabel(QStringLiteral("音量"), leftCard), 3, 0);
     auto *volRow = new QHBoxLayout();

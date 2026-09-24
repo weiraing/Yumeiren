@@ -51,38 +51,6 @@ void VideoWallpaper::setTargetFps(int fps)
         return; // 值未变不重算：启动时 loadSettings 会重复回填
     m_targetFps = bounded;
     resetFramePacing(); // 立刻生效，不沿用旧节拍的下一个截止时刻
-    for (const VideoOutput &out : std::as_const(m_outputs))
-        if (isLiveOutput(out))
-            applyPlaybackRate(out.player);
-}
-void VideoWallpaper::setKeepSpeed(bool on)
-{
-    if (m_keepSpeed == on)
-        return;
-    m_keepSpeed = on;
-    resetFramePacing();
-    for (const VideoOutput &out : std::as_const(m_outputs))
-        if (isLiveOutput(out))
-            applyPlaybackRate(out.player);
-}
-void VideoWallpaper::applyPlaybackRate(QMediaPlayer *player)
-{
-    if (!player)
-        return;
-    double rate = 1.0;
-    const int fps = effectiveTargetFps();
-    // 保速档必须恒为 1.0(限帧由 forwardFrame 丢帧完成，再放慢会两头都限)；只有慢动作档才用速率限帧
-    if (!m_keepSpeed && fps > 0) {
-        const double src = player->metaData()
-                               .value(QMediaMetaData::VideoFrameRate)
-                               .toDouble();
-        if (src > fps + 0.5)
-            rate = fps / src;
-    }
-    applog::log(applog::Level::Debug,
-        QStringLiteral("setPlaybackRate(%1) keepSpeed=%2 fps=%3")
-            .arg(rate).arg(m_keepSpeed ? 1 : 0).arg(fps));
-    player->setPlaybackRate(rate);
 }
 void VideoWallpaper::setVolume(int percent)
 {

@@ -61,9 +61,6 @@ inline constexpr auto RandomLegacy = "video/random";
 inline constexpr auto PauseFullscreen = "video/pauseFullscreen";
 inline constexpr auto PauseBattery = "video/pauseBattery";
 inline constexpr auto TargetFps = "video/targetFps";
-// 限帧方式：true=保速丢帧(画面速度不变)，false=慢动作(setPlaybackRate 放慢，
-// 更省资源但画面变慢)。见 VideoWallpaper::setKeepSpeed。
-inline constexpr auto FpsKeepSpeed = "video/fpsKeepSpeed";
 inline constexpr auto Reclaim = "video/reclaim";
 inline constexpr auto AffinityLimit = "video/affinityLimit";
 inline constexpr auto Diag = "video/diag";
@@ -74,9 +71,6 @@ namespace Web {
 inline constexpr auto Enabled = "web/enabled";           // 上次退出时在跑(启动恢复判据)
 inline constexpr auto Source = "web/source";
 inline constexpr auto RefreshMode = "web/refreshMode";   // 0=实时 1=快照·每分钟 2=快照·每小时
-// 允许鼠标交互(否则点击穿透)。**默认关**(2026-09-23 用户定案，原默认开)：
-// 界面上「网页展示」= false、「网页交互」= true，默认档是「网页展示」。
-inline constexpr auto Interactive = "web/interactive";
 inline constexpr auto Volume = "web/volume";             // 0=静音；WebView2 只有静音两档
 inline constexpr auto Zoom = "web/zoom";                 // 50~200
 inline constexpr auto FpsCap = "web/fpsCap";             // 0=跟随页面自身帧率(默认档);出厂 30

@@ -183,9 +183,11 @@ private:
 };
 
 // 浏览器启动参数：关后台联网与组件更新(壁纸不需要)，HTTP 磁盘缓存限幅 128MB
-// —— user-data 目录默认会无限涨。
+// —— user-data 目录默认会无限涨。BackForwardCache 关闭：换页后旧页面会在内存里
+// 驻留一份序列化状态等待前进/后退复用，壁纸没有这类交互，纯属浪费。
 constexpr wchar_t kBrowserArguments[] =
-    L"--disable-background-networking --disable-component-update --disk-cache-size=134217728";
+    L"--disable-background-networking --disable-component-update --disk-cache-size=134217728"
+    L" --disable-features=BackForwardCache";
 // 运行时兼容版本下限：低于它的 Evergreen 会被拒绝创建环境。有意低于 vendored
 // SDK 的 152.0.4191.47 —— 本模块只用到 ICoreWebView2_8 及更早的接口，放宽一档
 // 可以多覆盖旧的运行时安装。将来用到更新接口时再同步抬高(参考
@@ -193,10 +195,14 @@ constexpr wchar_t kBrowserArguments[] =
 // CORE_WEBVIEW_TARGET_PRODUCT_VERSION)。
 constexpr wchar_t kTargetCompatibleVersion[] = L"148.0.3967.54";
 
-// ICoreWebView2EnvironmentOptions 的最小实现：只实现 v1 的 8 个属性(顺序必须与
-// MIDL 声明一致，乱序=虚表错位)，运行时对 Options2+ 的 QI 拿到 E_NOINTERFACE 后
-// 会退回默认值 —— 这是接口契约允许的。手写而不引入 WRL：MinGW 侧 WRL 不可靠。
-class EnvironmentOptions final : public ICoreWebView2EnvironmentOptions
+// ICoreWebView2EnvironmentOptions 的最小实现：v1 的 8 个属性(顺序必须与 MIDL
+// 声明一致，乱序=虚表错位) + Options5 的 EnableTrackingPrevention。运行时对其余
+// OptionsN 的 QI 拿到 E_NOINTERFACE 后会退回默认值 —— 这是接口契约允许的。
+// 关 TrackingPrevention：它对每个网络请求/脚本 URL 做反追踪检查，是持续的
+// CPU/内存开销；壁纸内容是用户自选页面且无表单/登录隐私面，收益为零。
+// 手写而不引入 WRL：MinGW 侧 WRL 不可靠。
+class EnvironmentOptions final : public ICoreWebView2EnvironmentOptions,
+                                 public ICoreWebView2EnvironmentOptions5
 {
 public:
     STDMETHODIMP QueryInterface(REFIID riid, void **out) override
@@ -205,6 +211,11 @@ public:
             return E_POINTER;
         if (riid == IID_ICoreWebView2EnvironmentOptions || riid == IID_IUnknown) {
             *out = static_cast<ICoreWebView2EnvironmentOptions *>(this);
+            AddRef();
+            return S_OK;
+        }
+        if (riid == IID_ICoreWebView2EnvironmentOptions5) {
+            *out = static_cast<ICoreWebView2EnvironmentOptions5 *>(this);
             AddRef();
             return S_OK;
         }
@@ -236,6 +247,16 @@ public:
         return S_OK;
     }
     STDMETHODIMP put_AllowSingleSignOnUsingOSPrimaryAccount(BOOL) override { return S_OK; }
+
+    // ICoreWebView2EnvironmentOptions5：get 返回 FALSE 即默认关闭反追踪检查。
+    STDMETHODIMP get_EnableTrackingPrevention(BOOL *value) override
+    {
+        if (!value)
+            return E_POINTER;
+        *value = FALSE;
+        return S_OK;
+    }
+    STDMETHODIMP put_EnableTrackingPrevention(BOOL) override { return S_OK; }
 
 private:
     static HRESULT copyOut(LPCWSTR src, LPWSTR *out)
@@ -307,7 +328,15 @@ class WebHostWidget : public QWidget
 public:
     WebHostWidget()
     {
-        setWindowFlags(Qt::FramelessWindowHint | Qt::Tool);
+        // WindowTransparentForInput = WS_EX_TRANSPARENT：壁纸只负责显示，不吃鼠标 ——
+        // 桌面空白处的点击/框选/右键菜单照常落到桌面。与视频壁纸宿主
+        // (VideoWallpaperOutput.cpp 的 QVideoWidget)同一套标志。
+        //
+        // ⚠️ 别去掉这一位。取消「网页交互」档之前，它是 applyInteractive() 按档
+        //    动态设的；那个函数已随交互档一起删掉，现在必须固定在这里，
+        //    否则壁纸窗口会抢走桌面空白处的鼠标，桌面就像"冻结"了。
+        setWindowFlags(Qt::FramelessWindowHint | Qt::Tool
+                       | Qt::WindowTransparentForInput);
         setMouseTracking(false);
     }
     void setSnapshot(const QImage &img)
@@ -482,9 +511,6 @@ void WebWallpaper::loadSettings()
 {
     AppConfig &config = AppConfig::instance();
     m_refreshMode = config.value(QString::fromLatin1(ConfigKeys::Web::RefreshMode), 0).toInt();
-    // 兜底 false = 「网页展示」(鼠标穿透)，与 AppConfig 的布尔默认表一致
-    // (2026-09-23 用户定案，原为 true)。
-    m_interactive = config.value(QString::fromLatin1(ConfigKeys::Web::Interactive), false).toBool();
     m_volume = config.value(QString::fromLatin1(ConfigKeys::Web::Volume), 0).toInt();
     m_zoomPercent = config.value(QString::fromLatin1(ConfigKeys::Web::Zoom), 100).toInt();
     m_fpsCap = config.value(QString::fromLatin1(ConfigKeys::Web::FpsCap), 30).toInt();
@@ -701,6 +727,7 @@ bool WebWallpaper::start(QString *error, const QString &source)
         return false;
     }
     m_host->show();
+    // 挂成 WorkerW 的子窗口（桌面最底、鼠标穿透）—— 壁纸只负责显示，不接收鼠标。
     winhelper::mountBehindIcons(m_host, m_host->geometry());
 
     // 浏览器用户数据目录：登录态/缓存都落在 .cache/web-profile(清缓存可带走)。
@@ -857,7 +884,6 @@ void WebWallpaper::attachController()
 
     applySettings();
     applyBounds();
-    applyInteractive();
     if (m_suspendReasons != 0)
         applySuspend(true);
 
@@ -907,8 +933,8 @@ void WebWallpaper::attachController()
         navigateReal();
     }
     applog::log(applog::Level::Info,
-                   QStringLiteral("网页壁纸已挂载: %1 (refresh=%2 interactive=%3)")
-                       .arg(m_source).arg(m_refreshMode).arg(m_interactive),
+                   QStringLiteral("网页壁纸已挂载: %1 (refresh=%2)")
+                       .arg(m_source).arg(m_refreshMode),
                    QStringLiteral("WebWallpaper"));
 #endif
 }
@@ -934,33 +960,6 @@ void WebWallpaper::applyBounds()
     const qreal dpr = m_host->devicePixelRatioF();
     const RECT bounds{0, 0, int(m_host->width() * dpr), int(m_host->height() * dpr)};
     m_controller->put_Bounds(bounds);
-#endif
-}
-
-void WebWallpaper::applyInteractive()
-{
-#ifdef Q_OS_WIN
-    if (!m_host || !m_host->testAttribute(Qt::WA_WState_Created))
-        return;
-    // 仅展示 = 鼠标穿透，**只靠 WS_EX_TRANSPARENT**。
-    //
-    // ⚠️ 千万别顺手把 WS_EX_LAYERED 加回来。mountBehindIcons() 特意剥掉了它(见
-    // desktopmount.cpp 那段注释)：Win11 的 DWM **不合成跨进程挂载的分层子窗口**，
-    // 加上去的表现是「挂载日志一切正常、窗口就是永远不出现在桌面上」—— 极难查。
-    // 2026-09-23 踩过：把「网页展示」改成默认档后立刻复现(23:10 那四次挂载全是
-    // interactive=0)；翻历史日志才看清所有能用的挂载都是 interactive=1，且唯一一次
-    // interactive=0 在 4 秒后就被改回 1。
-    //
-    // ⚠️ 所以这里**无论哪一档都先把 LAYERED 剥掉**：它一旦被加上，DWM 就不再合成这个
-    // 窗口，而且**切回「网页交互」也不会自己恢复** —— 那一档只清 TRANSPARENT，不动 LAYERED。
-    const HWND hwnd = reinterpret_cast<HWND>(m_host->winId());
-    LONG ex = GetWindowLongW(hwnd, GWL_EXSTYLE);
-    ex &= ~LONG(WS_EX_LAYERED);
-    if (m_interactive)
-        ex &= ~WS_EX_TRANSPARENT;
-    else
-        ex |= WS_EX_TRANSPARENT;
-    SetWindowLongW(hwnd, GWL_EXSTYLE, ex);
 #endif
 }
 
@@ -1326,13 +1325,6 @@ void WebWallpaper::destroyPipeline()
 }
 
 // —— 设置 setters：即时生效 + 落盘 ——
-
-void WebWallpaper::setInteractive(bool on)
-{
-    m_interactive = on;
-    AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Web::Interactive), on);
-    applyInteractive();
-}
 
 void WebWallpaper::setVolume(int percent)
 {

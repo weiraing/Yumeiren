@@ -12,7 +12,6 @@
 
 #include "app/ApplicationRuntimeState.h"
 #include "app/ApplicationShutdown.h"
-#include "app/AppInfo.h"
 #include "kanban/KanbanController.h"
 #include "kanban/KanbanModelManager.h"
 #include "kanban/KanbanRenderer.h"
@@ -748,22 +747,9 @@ QWidget *MainWindow::buildKanbanParamCard(QWidget *parent)
     trayTitle->setObjectName(QStringLiteral("GroupTitle"));
     lay->addWidget(trayTitle);
 
-    // 软件自启：与壁纸页的「开机自动启动」是同一个注册表项(appinfo)，两处复选框
-    // 由 toggled 处理器互相同步，哪边勾都算数。
-    m_kanbanAutostartBox = new QCheckBox(QStringLiteral("开机自动启动"), card);
-    m_kanbanAutostartBox->setToolTip(tooltipstyle::format(
-        QStringLiteral("开机后自动运行本软件：壁纸与看板娘按上次退出时的状态恢复")));
-    m_kanbanAutostartBox->setChecked(appinfo::autostartEnabled());
-    connect(m_kanbanAutostartBox, &QCheckBox::toggled, this, [this](bool on) {
-        if (m_kanbanSyncing)
-            return;
-        appinfo::setAutostart(on);
-        if (m_autostartBox && m_autostartBox->isChecked() != on) {
-            QSignalBlocker blocker(m_autostartBox);
-            m_autostartBox->setChecked(on);
-        }
-    });
-    addCheckRow(m_kanbanAutostartBox);
+    // 「开机自动启动」不在这页 —— 已收口到**托盘右键菜单**（关闭软件上方那项）。
+    // 2026-09-24 定案：原来壁纸页与看板娘页各有一个同名复选框，靠 toggled 互相同步，
+    // 等于同一个注册表项有三个入口，状态容易打架。
 
     auto *trayRow = new QHBoxLayout();
     trayRow->setSpacing(14);

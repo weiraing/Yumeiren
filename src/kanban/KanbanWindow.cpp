@@ -646,12 +646,18 @@ bool KanbanWindow::eventFilter(QObject *watched, QEvent *event)
         QAction *pauseAct = menu.addAction(QStringLiteral("暂停 / 恢复"));
         connect(pauseAct, &QAction::triggered, this, &KanbanWindow::pauseResumeRequested);
         QAction *nextAct = menu.addAction(QStringLiteral("切换动作"));
-        // 可播动作不足两个就置灰：只有一个时「切换」等于原地重播。判据收在渲染器基类。
-        nextAct->setEnabled(m_renderer && m_renderer->canPlayNextMotion());
+        // ⚠️ 暂停时必须一并置灰：`playNext()` 第一行守卫就含 `isPaused()` → 静默 return，
+        // 可点却什么都不做，用户看到的就是「点了没反应」。判据必须与执行条件一致
+        // （同 SystemTrayController::updateMenuState 与 KanbanSettingsPage 的口径）。
+        // 另外可播动作不足两个也置灰：只有一个时「切换」等于原地重播。判据收在渲染器基类。
+        nextAct->setEnabled(!m_pausedVisual && m_renderer
+                            && m_renderer->canPlayNextMotion());
         connect(nextAct, &QAction::triggered, this, &KanbanWindow::playNextRequested);
         QAction *exprAct = menu.addAction(QStringLiteral("切换表情"));
+        // 同理暂停时也置灰（`nextExpression()` 有同样的 isPaused 守卫）。
         // 没有表情的模型就把入口置灰(点了没反应比灰掉更让人怀疑坏了)，数量问当前渲染器。
-        exprAct->setEnabled(m_renderer && m_renderer->expressionCount() > 0);
+        exprAct->setEnabled(!m_pausedVisual && m_renderer
+                            && m_renderer->expressionCount() > 0);
         connect(exprAct, &QAction::triggered, this, &KanbanWindow::nextExpressionRequested);
         QAction *modelAct = menu.addAction(QStringLiteral("切换模型"));
         connect(modelAct, &QAction::triggered, this, &KanbanWindow::nextModelRequested);

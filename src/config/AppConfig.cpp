@@ -66,7 +66,6 @@ const char *kBoolRules[] = {
     ConfigKeys::Video::WasPlaying,
     ConfigKeys::Video::PauseFullscreen,
     ConfigKeys::Video::PauseBattery,
-    ConfigKeys::Video::FpsKeepSpeed,
     ConfigKeys::Video::Reclaim,
     ConfigKeys::Video::AffinityLimit,
     ConfigKeys::Video::Diag,
@@ -83,7 +82,6 @@ const char *kBoolRules[] = {
     ConfigKeys::Tray::Enabled,
     ConfigKeys::Tray::MinimizeToTrayOnClose,
     ConfigKeys::Web::Enabled,
-    ConfigKeys::Web::Interactive,
 };
 
 // 布尔项缺省值表：列在这里的默认开，其余默认关。用表是为了新增键时只看一处。
@@ -92,7 +90,6 @@ const char *kBoolDefaultTrue[] = {
     ConfigKeys::Effect::ClearBarBg,
     ConfigKeys::Effect::ClearWinUIBg,
     ConfigKeys::Video::PauseFullscreen,
-    ConfigKeys::Video::FpsKeepSpeed,
     ConfigKeys::Video::Reclaim,
     ConfigKeys::Video::AffinityLimit,
     ConfigKeys::Kanban::AlwaysOnTop,
@@ -110,8 +107,6 @@ const char *kBoolDefaultTrue[] = {
     // 有后台任务时点关闭应「隐藏而不是退出」，故默认开；读取端(closeEvent /
     // 界面勾选框)默认值同为 true。
     ConfigKeys::Tray::MinimizeToTrayOnClose,
-    // 网页壁纸的 Web::Interactive 原本在这里(默认开)。2026-09-23 用户定案改为**默认关**：
-    // 界面上是两档互斥单选，默认档「网页展示」(鼠标穿透)。现在它不在本表里，即默认 false。
 };
 
 bool boolDefaultFor(const char *key)

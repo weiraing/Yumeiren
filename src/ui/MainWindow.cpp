@@ -12,6 +12,7 @@
 #include "kanban/KanbanController.h"
 #include "kanban/KanbanModelManager.h"
 #include "platform/windows/desktopmount.h"
+#include "platform/windows/wakeuplistener.h"
 #include "tray/SystemTrayController.h"
 #include "ui/UiStyle.h"
 #include "wallpaper/VideoWallpaper.h"
@@ -288,6 +289,16 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 
     // 看板娘与托盘放在最后装配：控件树、设置回填、视频壁纸恢复都已就位。
     setupKanbanAndTray();
+    // 常驻收信口：二次启动的「唤起主窗口」消息要能找到一个**永不隐藏**的 HWND。
+    // 它跑在独立线程上（不是 GUI 线程）—— 实测建在 GUI 线程上的窗口会跟主窗口
+    // 同生共死，主窗口 hide() 时一起被销毁，跨进程就又找不到投递目标了。
+    m_wakeup = new winhelper::WakeupListener(this);
+    connect(m_wakeup, &winhelper::WakeupListener::wakeupRequested, this,
+            &MainWindow::showFromTray);
+    if (!m_wakeup->start())
+        applog::log(applog::Level::Warning,
+                    QStringLiteral("唤起收信口启动失败，二次启动将退回弹窗提示"),
+                    QStringLiteral("UI"));
     applog::logObjectEvent("create", this,
                               QStringLiteral("size=%1x%2").arg(width()).arg(height()));
 }
@@ -298,6 +309,12 @@ MainWindow::~MainWindow()
 {
     QMutexLocker guard(&m_thumbTasksMutex);
     m_thumbTasksLive = false;
+    // 收信口是 this 的子对象，这里显式 stop() 是为了**在 Qt 销毁子对象之前**把线程收干净
+    // —— 否则析构过程中线程还可能回调到半销毁的 MainWindow。
+    if (m_wakeup) {
+        m_wakeup->stop();
+        m_wakeup = nullptr;
+    }
     applog::logObjectEvent("destroy", this);
 }
 
@@ -1100,8 +1117,6 @@ void MainWindow::loadSettings()
             btn->setChecked(true);
         VideoWallpaper::instance().setTargetFps(targetFps);
     }
-    m_fpsKeepSpeedBox->setChecked(s.value(ConfigKeys::Video::FpsKeepSpeed, true).toBool());
-    VideoWallpaper::instance().setKeepSpeed(m_fpsKeepSpeedBox->isChecked());
     m_reclaimBox->setChecked(s.value(ConfigKeys::Video::Reclaim, true).toBool());
     m_affinityBox->setChecked(s.value(ConfigKeys::Video::AffinityLimit, true).toBool());
     VideoWallpaper::instance().setPauseOnFullscreen(m_fullscreenPauseBox->isChecked());

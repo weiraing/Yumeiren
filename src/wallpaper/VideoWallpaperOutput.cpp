@@ -190,7 +190,6 @@ void VideoWallpaper::layoutOutputs()
                     .arg(m_playbackSessionId)
                     .arg(QFileInfo(out.player->source().toLocalFile()).fileName()));
             applyAudioPolicy(out, carriesAudio);
-            applyPlaybackRate(out.player);
             const QSize res = out.player->metaData()
                                   .value(QMediaMetaData::Resolution).toSize();
             if (!res.isValid())
@@ -209,7 +208,6 @@ void VideoWallpaper::layoutOutputs()
             if (autoFps != m_autoFps) {
                 m_autoFps = autoFps;
                 resetFramePacing();
-                applyPlaybackRate(out.player);
                 applog::log(applog::Level::Info,
                     QStringLiteral("自动限帧: %1x%2 对屏幕 %3x%4 → 上限=%5")
                         .arg(res.width()).arg(res.height())
@@ -293,8 +291,7 @@ void VideoWallpaper::forwardFrame(const QVideoFrame &frame, const QMediaPlayer *
     if (!dst)
         return;
     const int fps = effectiveTargetFps();
-    // 不限帧与慢动作档都整帧直通：慢动作档的限帧已由 setPlaybackRate 在上游完成
-    if (fps <= 0 || !m_keepSpeed) {
+    if (fps <= 0) { // 不限帧：整帧直通
         dst->setVideoFrame(frame);
         return;
     }

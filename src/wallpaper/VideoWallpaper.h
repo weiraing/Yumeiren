@@ -53,14 +53,9 @@ public:
     void setPauseOnFullscreen(bool on);
     void setPauseOnBattery(bool on);
     void setReclaimMemory(bool on);
-    void setAutostart(bool on);
-    bool autostartEnabled() const;
     void setVolume(int percent);      // 计量为百分比；0=取消声音播放(音频轨一并停掉)
     void setMonitorOn(bool on);
     void setTargetFps(int fps);
-    // true 保速丢帧(速率恒 1.0，多余帧在 QVideoSink 中转处丢弃)；false 慢动作(最省资源但画面变慢)
-    void setKeepSpeed(bool on);
-    bool keepSpeed() const { return m_keepSpeed; }
     // 有效帧率上限：手动设置优先，其次是自动限帧
     int effectiveTargetFps() const;
     // 当前是否处于自动限帧状态
@@ -141,7 +136,6 @@ private:
     // 重试耗尽或素材无视频轨时调用；仅首个输出允许调用(防 MirrorAll 重复推进)
     void handleUnplayable(const QString &reason);
     void trimMemory();
-    void applyPlaybackRate(QMediaPlayer *player);
     void applyAudioPolicy(const VideoOutput &out, bool carriesAudio);
     void applyLoopPolicy(QMediaPlayer *player);
     void emitTrackState();
@@ -169,7 +163,6 @@ private:
     int m_watchStalls = 0;
     // 帧率上限(0=跟随视频原生帧率)。默认 24：实测 4K60 内存/显存/CPU 约 -40%
     int m_targetFps = 24;
-    bool m_keepSpeed = true; // true=保速丢帧(默认) / false=慢动作
     int m_autoFps = 0; // 本次会话的自动限帧值，绝不写进用户配置
 
     // 错误恢复：每曲目独立失败计数，跳过一次即入失败名单不再轮换(免坏曲目每圈重建解码器)；全部进名单才整体停播
