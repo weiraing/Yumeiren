@@ -237,6 +237,23 @@ set_target_properties(Yumeiren PROPERTIES
     OUTPUT_NAME "虞美人"
 )
 
+# MSVC 会**自己生成并嵌入**一个 manifest（链接行里能看到 `/MANIFEST:EMBED,ID=1`），而
+# resources/app.rc.in 里已经有一个 `1 24 "app.manifest"` —— 类型同为 RT_MANIFEST、ID 同为 1，
+# CVTRES 直接报 `CVT1100: duplicate resource. type:MANIFEST, name:1`，链接随之
+# `LNK1123: failure during conversion to COFF` 失败。
+#
+# 为什么本机一直没暴露：本机两个 build 目录都是 MinGW（CLion 自带 g++ + Ninja），
+# windres/ld 不做这件事；CI 是第一次用 MSVC 编，一编就撞上。
+#
+# 关掉链接器自己那份，让 resources/app.manifest.in 成为唯一来源 —— 它本来就承载着
+# assemblyIdentity 版本、requestedExecutionLevel、DPI 感知这些项目自己的意图。
+# 实测（VS 18 + Ninja 的最小复现，rc 里放一条 `1 24 "x.manifest"`）：
+#   不加 → CVT1100 + LNK1123；加了 → 链接通过，且用 mt.exe 从 exe 里抽出 RT_MANIFEST，
+#   内容正是项目自己的 manifest（不是链接器生成的通用那份）。
+if(MSVC)
+    target_link_options(Yumeiren PRIVATE "/MANIFEST:NO")
+endif()
+
 qt_add_executable(YumeirenTest WIN32
     ${YUMEIREN_SOURCES}
 )
