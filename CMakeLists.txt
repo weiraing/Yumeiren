@@ -69,7 +69,24 @@ function(yumeiren_deploy_qt_runtime target)
             "$<TARGET_FILE:Qt6::QWindowsIntegrationPlugin>|platforms/$<TARGET_FILE_NAME:Qt6::QWindowsIntegrationPlugin>")
     endif()
 
-    foreach(mediaPlugin Qt6::QFFmpegMediaPlugin Qt6::QWindowsMediaPlugin)
+    # 图片格式插件必须显式部署：插件**不在 exe 的导入表**里，是运行时按需
+    # QLibrary 加载的，所以 $<TARGET_RUNTIME_DLLS> 一个都抓不到。少了 qjpeg，
+    # 图库会把 jpg 列出来、点开却加载失败 —— 既不报错也不提示（png 内建于
+    # QtGui，不受影响，所以这个缺口在只测 png 时看不出来）。
+    # 只部署 qjpeg：gif / ico / svg 都不在产品支持的格式里（见 ImagePage.cpp 的
+    # galleryNameFilters()），拷进来只会被剔除脚本删掉。
+    if(TARGET Qt6::QJpegPlugin)
+        list(APPEND _yumeiren_pairs
+            "$<TARGET_FILE:Qt6::QJpegPlugin>|imageformats/$<TARGET_FILE_NAME:Qt6::QJpegPlugin>")
+    else()
+        message(WARNING "找不到 Qt6::QJpegPlugin —— 本地构建读不了 jpg，图库只会收录 png")
+    endif()
+
+    # 只部署 FFmpeg 后端。Qt 6 在 Windows 上默认就是它（实测运行时加载的正是
+    # ffmpegmediaplugin），windowsmediaplugin 是备胎、且从头到尾没被加载过 ——
+    # 拷它进来只会白占 0.28MB 再被剔除脚本删掉（清单见 cmake/TrimRuntimeFiles.cmake）。
+    # 若将来真要切 Windows 后端（QT_MEDIA_BACKEND=windows），把这里加回来即可。
+    foreach(mediaPlugin Qt6::QFFmpegMediaPlugin)
         if(TARGET ${mediaPlugin})
             list(APPEND _yumeiren_pairs
                 "$<TARGET_FILE:${mediaPlugin}>|multimedia/$<TARGET_FILE_NAME:${mediaPlugin}>")

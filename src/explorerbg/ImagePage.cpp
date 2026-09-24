@@ -35,6 +35,33 @@ namespace {
 // 再缩到几百像素宽。各格式插件的 scaledSize 路径自带平滑，最后再用 Smooth 把
 // 残余尺寸校准到目标，画质与"全尺寸解码+一次 Smooth"等价。头信息无效或图不大时
 // 退化为整图解码，与旧路径一致。
+// 图库收录哪些后缀 = 「产品想支持的」∩「当前 Qt 实际能解的」。
+//
+// 为什么必须取交集：解码能力取决于部署了哪些 imageformats 插件 —— png 内建于
+// QtGui，jpg 要 qjpeg.dll，webp 更要 Qt 的 qtimageformats 模块（windeployqt 不会
+// 凭 exe 的导入表发现它）。过滤器一旦硬编码，就会和实际能力脱节：这里曾经写着
+// *.webp，而发布包里根本没有 qwebp 插件 —— 用户把 webp 丢进图库目录，程序把它
+// 列出来、点开却加载失败，既不报错也不提示，只能靠自己发现「这张图是坏的」。
+//
+// 取交集之后声明与能力永远一致：装了插件就自动支持，没装就不列出来。
+QStringList galleryNameFilters()
+{
+    static const QStringList kIntended = {
+        QStringLiteral("png"), QStringLiteral("jpg"), QStringLiteral("jpeg"),
+        QStringLiteral("bmp"), QStringLiteral("webp")};
+    const QList<QByteArray> supported = QImageReader::supportedImageFormats();
+    QStringList filters;
+    for (const QString &ext : kIntended) {
+        if (supported.contains(ext.toLatin1()))
+            filters.append(QStringLiteral("*.") + ext);
+    }
+    // 兜底：QDirIterator 收到**空**的 nameFilters 会匹配所有文件（连 .txt 都收）。
+    // png 是 QtGui 内建的，正常走不到这里。
+    if (filters.isEmpty())
+        filters.append(QStringLiteral("*.png"));
+    return filters;
+}
+
 QImage decodeDownscaled(const QString &path, const QSize &target)
 {
     QImageReader reader(path);
@@ -456,9 +483,8 @@ void MainWindow::rebuildGallery()
 {
     m_presets.clear();
     if (!m_presetDir.isEmpty() && QDir(m_presetDir).exists()) {
-        const QStringList nameFilters = {QStringLiteral("*.png"), QStringLiteral("*.jpg"),
-                                         QStringLiteral("*.jpeg"), QStringLiteral("*.bmp"),
-                                         QStringLiteral("*.webp")};
+        // 后缀由「产品意图 ∩ 实际解码能力」现算 —— 别在这里写死，见 galleryNameFilters()。
+        const QStringList nameFilters = galleryNameFilters();
         QDirIterator it(m_presetDir, nameFilters, QDir::Files,
                         QDirIterator::Subdirectories);
         while (it.hasNext()) {

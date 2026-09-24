@@ -41,6 +41,11 @@ if(NOT DEFINED DST_DIR)
     message(FATAL_ERROR "需要 -DDST_DIR=<可执行文件目录>")
 endif()
 
+# 无用文件清单（与 CI 打包共用同一份，见 cmake/TrimRuntimeFiles.cmake 文件头）。
+# 它同时提供 yumeiren_trim_runtime_files() —— 本脚本末尾用它清掉目标目录里的
+# 历史残留（早先的构建已经把那些文件拷进去过，光靠「拷贝时跳过」清不掉）。
+include("${CMAKE_CURRENT_LIST_DIR}/TrimRuntimeFiles.cmake")
+
 if(NOT IS_DIRECTORY "${DST_DIR}")
     file(MAKE_DIRECTORY "${DST_DIR}")
 endif()
@@ -89,6 +94,15 @@ foreach(_src IN LISTS FILES)
         continue()
     endif()
     get_filename_component(_name "${_src}" NAME)
+    # 清单里的东西连拷都不拷 —— $<TARGET_RUNTIME_DLLS> 会带上 Qt6Concurrent
+    # 这类无人引用的模块（实测 MinGW 的依赖树里就有），拷进来再删纯属白费 IO。
+    #
+    # 用 list(FIND) 而不是 `IN_LIST`：本文件在 `cmake -P` 脚本模式下运行，那里没有
+    # project()，CMP0057 仍是 OLD，`IN_LIST` 会直接报 "Unknown arguments specified"。
+    list(FIND YUMEIREN_TRIM_FILES "${_name}" _trim_idx)
+    if(NOT _trim_idx EQUAL -1)
+        continue()
+    endif()
     _yumeiren_sync_one("${_src}" "${DST_DIR}/${_name}")
 endforeach()
 
@@ -105,6 +119,11 @@ foreach(_pair IN LISTS PAIRS)
     string(SUBSTRING "${_pair}" 0 ${_bar} _src)
     math(EXPR _after "${_bar} + 1")
     string(SUBSTRING "${_pair}" ${_after} -1 _rel)
+    # 同 FILES 循环：用 list(FIND) 而非 IN_LIST，理由见上面那段注释。
+    list(FIND YUMEIREN_TRIM_FILES "${_rel}" _trim_idx)
+    if(NOT _trim_idx EQUAL -1)
+        continue()
+    endif()
     _yumeiren_sync_one("${_src}" "${DST_DIR}/${_rel}")
 endforeach()
 
@@ -113,3 +132,6 @@ message(STATUS "Qt 运行时: 新补 ${YUMEIREN_COPIED_N} 个、已是最新 ${Y
 if(YUMEIREN_MISSING)
     message(STATUS "Qt 运行时: 源文件不存在(跳过) ${YUMEIREN_MISSING}")
 endif()
+
+# 清掉目标目录里的历史残留（早先的构建拷进来过），并断言必需文件齐全。
+yumeiren_trim_runtime_files("${DST_DIR}")

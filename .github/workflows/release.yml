@@ -354,12 +354,33 @@ jobs:
             if ($crtSrc.Count -eq 0) {
               throw "缺 MSVC 运行时（$($crtMissing -join ', ')），且在 VS 的 Redist 里也找不到 —— 发出去就是个双击起不来的包。"
             }
-            Copy-Item -Path (Join-Path $crtSrc[0].FullName '*.dll') -Destination $out -Force
-            Write-Host "已从 $($crtSrc[0].FullName) 补齐 MSVC 运行时"
+            # 只拷白名单里那几个，**不是** `*.dll` 一把梭。Redist 目录里同时还躺着
+            # concrt140 / vccorlib140 / msvcp140_atomic_wait / msvcp140_codecvt_ids /
+            # vcruntime140_threads —— 实测一个都不会被加载（三层证据见
+            # cmake/TrimRuntimeFiles.cmake 文件头）。拷进来再删既白费 IO，又平白
+            # 给了它们「哪天漏删」的机会。
+            foreach ($dll in $crtNeeded) {
+              Copy-Item -LiteralPath (Join-Path $crtSrc[0].FullName $dll) -Destination $out -Force
+            }
+            Write-Host "已从 $($crtSrc[0].FullName) 补齐 MSVC 运行时（$($crtNeeded.Count) 个）"
           }
           $crtMissing = @($crtNeeded | Where-Object { -not (Test-Path -LiteralPath (Join-Path $out $_) -PathType Leaf) })
           if ($crtMissing.Count -gt 0) { throw "MSVC 运行时仍缺：$($crtMissing -join ', ')" }
           Write-Host 'MSVC 运行时就位。'
+
+          # —— 剔除运行时里用不到的文件 ——
+          # 清单只有一份：cmake/TrimRuntimeFiles.cmake（本地构建也调它，见
+          # cmake/DeployQtRuntime.cmake）。**不要**在这里再抄一遍清单 ——
+          # 本地走 CMake 拷贝、CI 走 windeployqt，两条路径带进来的多余文件不同，
+          # 但「哪些是无用的」是同一个事实，写两份必然漂移。
+          #
+          # 这条路径由 windeployqt 带进来的多余东西比本地多得多：图片格式插件
+          # (qgif/qico/qsvg)、style 插件、触摸插件、TLS 后端、D3Dcompiler、
+          # Qt6Svg / Qt6Concurrent。逐个核对过都没被加载 —— 端到端验证（视频壁纸
+          # 起播 + 看板娘 Live2D 渲染首帧）与未删减的包逐行一致，0 条错误。
+          $outAbs = (Resolve-Path -LiteralPath $out).Path
+          & cmake -DTARGET_DIR="$outAbs" -P cmake/TrimRuntimeFiles.cmake
+          if ($LASTEXITCODE -ne 0) { throw "运行时剔除失败（rc=$LASTEXITCODE）" }
 
           # 解压后要有一层顶层目录 Yumeiren/，而不是把 exe/DLL/data 直接摊在解压目录里
           # —— 那样在同一个目录里解两个版本会互相覆盖。
@@ -465,6 +486,26 @@ jobs:
           if (Test-Path -LiteralPath (Join-Path $root 'vc_redist.x64.exe') -PathType Leaf) {
             throw '便携包里混进了 vc_redist.x64.exe（windeployqt 放的运行库安装器）—— CRT DLL 已在包里，不需要它。'
           }
+
+          # 反向判据：剔除清单里的无用文件一个都不该出现在包里。
+          # 清单**现从** cmake/TrimRuntimeFiles.cmake 读，不在这里重列 —— 打包那步
+          # 剔过，这里验的是真发出去的那个 zip，中间任何一次拷贝把它带回来都拦得住。
+          # 清单走文件而不是 stdout：CMake 的 message() 走 stderr，管道接不到。
+          $trimListFile = Join-Path $env:RUNNER_TEMP 'yumeiren-trim-list.txt'
+          & cmake "-DPRINT_LIST=$trimListFile" -P cmake/TrimRuntimeFiles.cmake
+          if ($LASTEXITCODE -ne 0) { throw "读剔除清单失败（rc=$LASTEXITCODE）" }
+          $trimList = @(Get-Content -LiteralPath $trimListFile |
+                        ForEach-Object { $_.Trim() } | Where-Object { $_ })
+          if ($trimList.Count -lt 5) {
+            throw "从 cmake/TrimRuntimeFiles.cmake 读到的剔除清单只有 $($trimList.Count) 项，可疑（脚本被改坏了？）"
+          }
+          $stillThere = @($trimList | Where-Object {
+            Test-Path -LiteralPath (Join-Path $root ($_ -replace '/', '\')) -PathType Leaf })
+          if ($stillThere.Count -gt 0) {
+            $stillThere | ForEach-Object { Write-Host "  该剔没剔：$_" }
+            throw "便携包里还有 $($stillThere.Count) 个无用文件没被剔除（清单见上方）。"
+          }
+          Write-Host "已确认剔除清单里的 $($trimList.Count) 项都不在包里。"
 
           Write-Host '便携包校验通过：顶层 Yumeiren/，Live2D 后端 + WebView2 Loader + MSVC 运行时 + data/ 齐全，无中间产物。'
 
