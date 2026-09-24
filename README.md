@@ -215,10 +215,11 @@ cmake --build build --target Yumeiren
 > `docs/` 里早先已入库的那几个文件仍被跟踪）。**`data/` 不在排除之列 —— 素材是随仓库提供的**，
 > 克隆下来就有得用。SDK 仍然没有：CMake 会探测到它缺失并自动走占位渲染路径，直接就能编译。
 >
-> MinGW 的一个已知差异：Cubism **Core 官方只提供 MSVC 的 `.lib`/`.dll`**。本项目不去链 MSVC
-> 导入库（CRT 不匹配），也不用 `gendef + dlltool` 现场生成 `.a`（部分 MinGW 发行版不带这套
-> 工具），而是**把 `.dll` 直接放到链接行上** —— GNU ld 会自己读 PE 导出表。这些都已在
-> `cmake/Live2DCubism.cmake` 里处理好。
+> MinGW 的一个已知差异：Cubism **Core 官方只提供 MSVC 的 `.lib`/`.dll`**。两条路各有各的接法 ——
+> MSVC 直接链官方的 `.lib`；MinGW 不去链它（CRT 不匹配），也不用 `gendef + dlltool` 现场生成
+> `.a`（部分 MinGW 发行版不带这套工具），而是**把 `.dll` 直接放到链接行上** —— GNU ld 会自己
+> 读 PE 导出表。分岔点在 `cmake/Live2DCubism.cmake` 里。注意 **MSVC 那条路只在 CI 上跑过**
+> （本机只有 MinGW），改这块时别只编 MinGW 就以为两条都好。
 
 ### 3. （可选）准备 `third_party/`，以及换成自己的 `data/`
 
@@ -240,10 +241,28 @@ data/                       # ← 已随仓库提供，下面这些子目录直�
 └── web/                    # 网页壁纸（每个子目录一份 index.html）
 ```
 
-| 组件 | 下载地址 |
-| --- | --- |
-| Cubism Native SDK | <https://www.live2d.com/en/sdk/download/native/>（选 Native，版本 5 R.5 / Core 6.0.1） |
-| GLEW 源码 | <https://github.com/nigels-com/glew/releases>（下 `glew-2.3.1.tgz` 的 **source** 包） |
+| 组件 | 版本 | 下载直链（与 CI 用的是同一个源） |
+| --- | --- | --- |
+| Cubism Native SDK | 5 R.5 | <https://cubism.live2d.com/sdk-native/bin/CubismSdkForNative-5-r.5.zip> |
+| GLEW 源码 | 2.3.1 | <https://github.com/nigels-com/glew/releases/download/glew-2.3.1/glew-2.3.1.zip> |
+
+> 上面两条都**不需要登录或鉴权**，`curl -O` 就能拿 —— CI 就是这么取的（见
+> `.github/workflows/release.yml` 的「准备第三方源码」一步）。CI 只搬 `Core/` 与 `Framework/`，
+> 跳过占 29MB 的 `Samples/`；想手工照着做：
+
+```bash
+# Cubism：把 Core/ 与 Framework/ 挪到 third_party/cubism/
+curl -LO https://cubism.live2d.com/sdk-native/bin/CubismSdkForNative-5-r.5.zip
+unzip CubismSdkForNative-5-r.5.zip
+mkdir -p third_party/cubism
+cp -r CubismSdkForNative-5-r.5/{Core,Framework,LICENSE.md,NOTICE.md,cubism-info.yml} third_party/cubism/
+
+# GLEW：只要 include/ 与 src/
+curl -LO https://github.com/nigels-com/glew/releases/download/glew-2.3.1/glew-2.3.1.zip
+unzip glew-2.3.1.zip
+mkdir -p third_party/glew
+cp -r glew-2.3.1/{include,src,LICENSE.txt} third_party/glew/
+```
 
 **校验 SDK 是否摆对** —— 下面两个文件必须存在，CMake 就是靠它们探测的：
 

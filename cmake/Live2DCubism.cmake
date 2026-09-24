@@ -13,10 +13,11 @@
 #      FRAMEWORK_* 缓存变量与平台目录推导，MinGW 下改动量比我们自己 glob 还大；
 #   2. 只要 OpenGL 渲染路径：Rendering/{D3D9,D3D11,Metal,Vulkan} 整体排除；
 #   3. GL 上下文由 Qt(QOpenGLWidget)提供，所以不需要 GLFW；
-#   4. Core 官方只给 MSVC 的 .lib/.dll。MinGW 下不去链 MSVC 导入库(CRT 不匹配)，
-#      也刻意不用 gendef+dlltool 现场生成 .a —— 那套工具在部分 MinGW 发行版里
-#      并不随编译器安装(本机 CLion 自带的那份就没有)。改成把 .dll 直接放到
-#      链接行上：GNU ld 会自己读 PE 导出表，效果与导入库完全一致。
+#   4. Core 官方只给 MSVC 的 .lib/.dll，两种编译器各有各的接法：MSVC 直接链 .lib；
+#      MinGW 下不去链 MSVC 导入库(CRT 不匹配)，也刻意不用 gendef+dlltool 现场生成
+#      .a —— 那套工具在部分 MinGW 发行版里并不随编译器安装(本机 CLion 自带的那份
+#      就没有)。改成把 .dll 直接放到链接行上：GNU ld 会自己读 PE 导出表，效果与
+#      导入库完全一致。分岔点见下面「Core：链接方式按编译器分岔」。
 
 # 默认指向仓库内已解压的 third_party/(见 docs/dev/REFACTORING_GUIDE.md 的目录规范)。
 # 两者都可用 -D 覆盖，指向仓库外的 SDK/GLEW 副本也能工作。
@@ -65,19 +66,32 @@ function(yumeiren_live2d_dependencies out_sources out_libraries out_dlls)
         endif()
     endif()
 
-    # —— Core：把 DLL 直接交给链接器 ——
-    set(_core_dll "${YUMEIREN_CUBISM_SDK}/Core/dll/windows/x86_64/Live2DCubismCore.dll")
+    # —— Core：链接方式按编译器分岔 ——
+    # 官方在同一个目录里同时给了运行库与 MSVC 导入库，两种编译器各取所需：
+    #   MSVC —— 用 .lib，这是 link.exe 的标准输入；
+    #   GNU  —— 直接给 .dll，让 ld 读 PE 导出表(见文件头第 4 条；MinGW 下链 MSVC
+    #           的 .lib 会因 CRT 不匹配出问题)。
+    # 两边都必须是绝对路径，否则会被当成 -l 参数去找同名库。
+    # ⚠️ MSVC 分支是给 CI 用的(CI 跑 win64_msvc2022_64)，本机只有 MinGW，所以那条路
+    # 只在 CI 上验证过 —— 本地改动这里时别只跑 MinGW 就以为两条路都好。
+    set(_core_dir "${YUMEIREN_CUBISM_SDK}/Core/dll/windows/x86_64")
+    set(_core_dll "${_core_dir}/Live2DCubismCore.dll")
+    set(_core_lib "${_core_dir}/Live2DCubismCore.lib")
     if(NOT EXISTS "${_core_dll}")
         message(FATAL_ERROR "没找到 64 位 Core 运行库：${_core_dll}")
+    endif()
+
+    if(MSVC AND EXISTS "${_core_lib}")
+        set(_core_link "${_core_lib}")
+    else()
+        set(_core_link "${_core_dll}")
     endif()
 
     if(NOT TARGET Live2DCubismCore)
         add_library(Live2DCubismCore INTERFACE)
         target_include_directories(Live2DCubismCore INTERFACE
             "${YUMEIREN_CUBISM_SDK}/Core/include")
-        # 注意：这里给的是 .dll 而不是 .lib/.a。GNU ld 能直接读 PE 导出表，
-        # 所以不需要导入库；写成绝对路径可避免被当成 -l 参数去找同名库。
-        target_link_libraries(Live2DCubismCore INTERFACE "${_core_dll}")
+        target_link_libraries(Live2DCubismCore INTERFACE "${_core_link}")
     endif()
 
     # —— Framework：只用 OpenGL 渲染路径 ——

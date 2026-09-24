@@ -18,6 +18,17 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-latest
+    # 第三方源码的版本号只写在这一处 —— 缓存 key、下载 URL、下载后的完整性校验
+    # 全从这两个变量取，所以「缓存里躺着哪版」和「URL 拉的哪版」不可能对不上。
+    env:
+      # 与本地 third_party/cubism/cubism-info.yml 的 `version:` 对齐。
+      CUBISM_SDK_VERSION: '5-r.5'
+      # GLEW 官方最新 release(2.3.1, 2026-01-24)。注意 GLEW 的 release 号与头文件里的
+      # 版本宏**不一致** —— 2.3.1 这个包的 glew.h 写的是 GLEW_VERSION_MICRO 4，本机那份
+      # 快照(2025-04-09)写的也是 4，但两个文件差了 785 行(扩展列表增补 + 一处 MinGW 的
+      # GLAPI 兜底定义被移除)。本项目只用 glewInit 与核心 GL 类型，这点差异无影响；
+      # 用官方 release 而不是 master 快照，是为了可复现 + 能钉 sha256(见下面准备步骤)。
+      GLEW_VERSION: '2.3.1'
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -82,6 +93,142 @@ jobs:
           modules: 'qtmultimedia'
           cache: true
 
+      # —— 第三方源码：Cubism SDK 与 GLEW ——
+      #
+      # 为什么不入库：`third_party/` 被 .gitignore 排除，这条规则当初**就是为 Cubism 的
+      # 专有许可设的**(Core/ 走 Live2D Proprietary Software License，见
+      # third_party/webview2/README.md 里记的既定决策)。本仓库是 PUBLIC，把 SDK 推上去
+      # 等于替 Live2D 做再分发；CI 从官方源现取则属于「使用者自行取得 SDK 后在 CI 里用」，
+      # 是另一回事。所以这里取、不入库，与本地开发者的做法保持一致。
+      #
+      # 顺带解决体积：整包 46MB(其中 Samples/ 占 29MB)，构建只要 Core/ + Framework/，
+      # 下面只搬这两棵子树。
+      #
+      # 两条来源都已核实无需鉴权、可脚本化：
+      #   Cubism  https://cubism.live2d.com/sdk-native/bin/CubismSdkForNative-<ver>.zip
+      #   GLEW    https://github.com/nigels-com/glew/releases/download/glew-<ver>/glew-<ver>.zip
+      - name: 缓存第三方源码 (Cubism SDK + GLEW)
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/cubism
+            third_party/glew
+          key: thirdparty-cubism${{ env.CUBISM_SDK_VERSION }}-glew${{ env.GLEW_VERSION }}
+
+      - name: 准备第三方源码 (Cubism SDK + GLEW)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $cubismRoot = 'third_party/cubism'
+          $glewRoot   = 'third_party/glew'
+
+          # 判据点名到「构建真正会读的文件」，而不是「目录存不存在」—— 空目录、
+          # 解压到一半、缓存被写坏，目录判据全都判成「有」。
+          $cubismSentinels = @(
+            "$cubismRoot/Framework/src/CubismFramework.cpp",
+            "$cubismRoot/Core/include/Live2DCubismCore.h",
+            "$cubismRoot/Core/dll/windows/x86_64/Live2DCubismCore.dll",
+            "$cubismRoot/Core/dll/windows/x86_64/Live2DCubismCore.lib",
+            "$cubismRoot/Framework/src/Rendering/OpenGL/Shaders/Standard/VertShaderSrc.vert"
+          )
+          $glewSentinels = @(
+            "$glewRoot/include/GL/glew.h",
+            "$glewRoot/src/glew.c"
+          )
+
+          function Test-AllPresent([string[]]$paths) {
+            foreach ($p in $paths) {
+              if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { return $false }
+            }
+            return $true
+          }
+
+          $tmp = Join-Path $env:RUNNER_TEMP 'thirdparty'
+          if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
+          New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+
+          # —— Cubism ——
+          if (Test-AllPresent $cubismSentinels) {
+            Write-Host 'Cubism SDK：缓存命中，跳过下载。'
+          } else {
+            $url = "https://cubism.live2d.com/sdk-native/bin/CubismSdkForNative-$env:CUBISM_SDK_VERSION.zip"
+            $zip = Join-Path $tmp 'cubism.zip'
+            Write-Host "Cubism SDK：下载 $url"
+            Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+            Expand-Archive -Path $zip -DestinationPath $tmp -Force
+
+            # 压缩包顶层是 CubismSdkForNative-<ver>/，但这是官方自定的形状、没有承诺，
+            # 所以断言而不是假设 —— 真改了名字时报的是一句能看懂的话，而不是后面
+            # 「找不到 CubismFramework.cpp」。
+            $src = Join-Path $tmp "CubismSdkForNative-$env:CUBISM_SDK_VERSION"
+            if (-not (Test-Path -LiteralPath $src)) {
+              throw "解压后没看到 $src —— 官方是不是改了压缩包内的顶层目录名？"
+            }
+
+            if (Test-Path $cubismRoot) { Remove-Item -Recurse -Force $cubismRoot }
+            New-Item -ItemType Directory -Force -Path $cubismRoot | Out-Null
+            # Samples/ 有 29MB(压缩包的大头)，构建用不到，不搬。
+            foreach ($d in @('Framework', 'Core')) {
+              Copy-Item -LiteralPath (Join-Path $src $d) -Destination $cubismRoot -Recurse -Force
+            }
+            # 许可与版本信息跟着走：产物里得能说清用了谁的代码、哪一版。
+            foreach ($f in @('LICENSE.md', 'NOTICE.md', 'NOTICE.ja.md', 'cubism-info.yml', 'README.md')) {
+              $p = Join-Path $src $f
+              if (Test-Path -LiteralPath $p) { Copy-Item -LiteralPath $p -Destination $cubismRoot -Force }
+            }
+
+            # cubism-info.yml 里带着 SDK 自报的版本与 git 哈希，拿它当完整性佐证 ——
+            # 比「文件在不在」强一层：能挡住「下到了另一版 SDK、而文件路径恰好相同」。
+            $info = Get-Content -LiteralPath (Join-Path $cubismRoot 'cubism-info.yml') -Raw
+            $expect = "version: $env:CUBISM_SDK_VERSION"
+            if ($info -notmatch [regex]::Escape($expect)) {
+              throw "cubism-info.yml 里没有 '$expect' —— 下载到的不是预期版本。"
+            }
+          }
+
+          # —— GLEW ——
+          if (Test-AllPresent $glewSentinels) {
+            Write-Host 'GLEW：缓存命中，跳过下载。'
+          } else {
+            $ver = $env:GLEW_VERSION
+            $url = "https://github.com/nigels-com/glew/releases/download/glew-$ver/glew-$ver.zip"
+            $zip = Join-Path $tmp 'glew.zip'
+            Write-Host "GLEW：下载 $url"
+            Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+
+            # 官方 release 页公布了 sha256，钉死它 —— 这是唯一能挡住「下到半截的包」的
+            # 判据，而且失败信息直指问题，不像编译期报错那样绕。
+            $want = '09e0083ae46930aba9b53e72c92ee1a557e24ed393526fec26cb0ebabd834720'
+            $got  = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLower()
+            if ($got -ne $want) { throw "glew-$ver.zip 校验失败：期望 $want，实际 $got" }
+
+            Expand-Archive -Path $zip -DestinationPath $tmp -Force
+            $src = Join-Path $tmp "glew-$ver"
+            if (-not (Test-Path -LiteralPath $src)) { throw "解压后没看到 $src" }
+
+            if (Test-Path $glewRoot) { Remove-Item -Recurse -Force $glewRoot }
+            New-Item -ItemType Directory -Force -Path $glewRoot | Out-Null
+            # 只要 include/ 与 src/ —— 包里的 auto/ config/ doc/ build/ 是 GLEW 自己的
+            # 构建体系，我们不碰第三方源码，也就不需要它们。
+            foreach ($d in @('include', 'src')) {
+              Copy-Item -LiteralPath (Join-Path $src $d) -Destination $glewRoot -Recurse -Force
+            }
+            Copy-Item -LiteralPath (Join-Path $src 'LICENSE.txt') -Destination $glewRoot -Force
+          }
+
+          # 统一收口：不管上面走的是缓存还是下载，都再断言一次。缓存命中后没有校验的话，
+          # 一份写坏的缓存会被反复用下去、且从头到尾不报错。
+          $missing = @(
+            @($cubismSentinels + $glewSentinels) |
+              Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) }
+          )
+          if ($missing.Count -gt 0) {
+            $missing | ForEach-Object { Write-Host "  缺：$_" }
+            throw "第三方源码不完整（共 $($missing.Count) 个文件缺失，见上方清单）。"
+          }
+          Write-Host '第三方源码就位：Cubism SDK 与 GLEW 的关键文件齐全。'
+
       - name: 配置 CMake (MSVC, Release)
         shell: pwsh
         # ⚠️ -DYUMEIREN_VERSION 的值**必须带引号**，否则 PowerShell 会把它劈成两个参数：
@@ -93,8 +240,40 @@ jobs:
         # 值取自上一步写进 GITHUB_ENV 的 YUMEIREN_VERSION，与后面校验/包名同源。
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release "-DYUMEIREN_VERSION=$env:YUMEIREN_VERSION"
 
+      # 「探测式默认值」的代价就在这里：第三方源码没就位时 CMake 会**不声不响**退回占位
+      # 实现(src/kanban/Live2DRendererStub.cpp)，构建照样全绿，只是看板娘是空的 ——
+      # 之前几版 CI 产物就是这样，肉眼完全看不出来。这正是本次改动要消灭的失败模式，
+      # 所以在编译之前先断言，别让它有机会悄悄发生。
+      - name: 确认 Live2D 后端已启用
+        shell: pwsh
+        run: |
+          $cache = Get-Content build/CMakeCache.txt -Raw
+          if ($cache -notmatch 'YUMEIREN_WITH_LIVE2D:BOOL=ON') {
+            throw 'YUMEIREN_WITH_LIVE2D 不是 ON —— 第三方源码没就位，本次会编成占位实现。'
+          }
+          Write-Host 'YUMEIREN_WITH_LIVE2D=ON（真 Live2D 后端）'
+
       - name: 编译 Yumeiren
         run: cmake --build build --config Release --target Yumeiren
+
+      # 编译通过 ≠ 装得起来。Core 的 DLL 与 FrameworkShaders/ 是**运行期读盘**的：缺了
+      # 不报错，只往日志写一行 "Failed to load vertex shader"，然后拿着 ShaderProgram=0
+      # 一路画下去 —— 界面上什么都看不到。这两样由 yumeiren_runtime_cubism 在构建时补到
+      # exe 旁，这里点名验收，免得它们没被带进后面的便携包。
+      - name: 确认 Live2D 运行期文件已就位
+        shell: pwsh
+        run: |
+          $need = @(
+            'build/Release/Live2DCubismCore.dll',
+            'build/Release/FrameworkShaders/VertShaderSrc.vert',
+            'build/Release/FrameworkShaders/FragShaderSrc.frag'
+          )
+          $missing = @($need | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) })
+          if ($missing.Count -gt 0) {
+            $missing | ForEach-Object { Write-Host "  缺：$_" }
+            throw "Live2D 运行期文件缺失（共 $($missing.Count) 个）。"
+          }
+          Write-Host 'Live2D 运行期文件齐全。'
 
       # 这一步是「版本号真的贯通了」的证明：读的是 exe 里的 VERSIONINFO 资源，
       # 也就是 resources/app.rc.in 生成出来的东西。版本号若只在 CMake 变量里对、
@@ -140,6 +319,44 @@ jobs:
           Compress-Archive -Path $stage -DestinationPath $zip -Force
           "ZIP_NAME=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "已打包：$zip(顶层目录 Yumeiren/)"
+
+      # 直接验真正发出去的那个包，而不是它上游的目录 —— 中间任何一次拷贝漏了都拦得住。
+      # 用解压后看目录的办法，而不是读 zip 条目：Compress-Archive 在不同 PowerShell 版本
+      # 下生成的分隔符不一样(PS 5.1 用反斜杠)，按字符串比对条目名会莫名其妙地红。
+      - name: 校验便携包内容
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem -Filter 'Yumeiren-portable-*.zip' | Select-Object -First 1
+          if (-not $zip) { throw '没找到便携包' }
+
+          $probe = Join-Path $env:RUNNER_TEMP 'zipcheck'
+          if (Test-Path $probe) { Remove-Item -Recurse -Force $probe }
+          Expand-Archive -LiteralPath $zip.FullName -DestinationPath $probe -Force
+
+          # 顶层只许有一个目录，且必须叫 Yumeiren —— 早先那版把 exe/DLL/data 直接摊在
+          # 解压目录里，同一个目录解两个版本会互相覆盖。
+          $tops = @(Get-ChildItem -LiteralPath $probe | Select-Object -ExpandProperty Name)
+          if ($tops.Count -ne 1 -or $tops[0] -ne 'Yumeiren') {
+            throw "便携包顶层不是唯一的 Yumeiren/：$($tops -join ', ')"
+          }
+
+          $root = Join-Path $probe 'Yumeiren'
+          # exe 用通配而不是写死「虞美人.exe」：英文区域的 runner 未必装得下中文名，
+          # 真发生那件事时上游「校验 exe 版本资源」那一步会先红，这里只需确认顶层有可执行文件。
+          if (@(Get-ChildItem -LiteralPath $root -Filter '*.exe').Count -lt 1) {
+            throw '便携包顶层没有 exe'
+          }
+
+          $need = @(
+            'Live2DCubismCore.dll',
+            'FrameworkShaders/VertShaderSrc.vert'
+          )
+          $missing = @($need | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root $_) -PathType Leaf) })
+          if ($missing.Count -gt 0) {
+            $missing | ForEach-Object { Write-Host "  缺：$_" }
+            throw "便携包里缺 Live2D 后端文件（共 $($missing.Count) 项）—— 发出去就是个没有看板娘的包。"
+          }
+          Write-Host '便携包校验通过：顶层 Yumeiren/，Live2D 后端文件齐全。'
 
       - name: 上传构建产物(Artifact,保留 7 天)
         uses: actions/upload-artifact@v4

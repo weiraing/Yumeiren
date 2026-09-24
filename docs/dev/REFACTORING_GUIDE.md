@@ -234,6 +234,36 @@ set(YUMEIREN_SOURCES
 find third_party -type f -newermt "2026-09-01"     # 返回 0 个文件即从未改动
 ```
 
+### 9.5 CI 里怎么拿到 third_party（2026-09-24 定案）
+
+`third_party/` 不入库，所以 CI 的干净检出里没有 SDK。**做法是让工作流自己从官方源现取，
+而不是把 SDK 提交进仓库。**
+
+为什么不提交：`.gitignore` 排除 `third_party/` 这条规则当初**就是为 Cubism 的专有许可设的**
+（`Core/` 走 Live2D Proprietary Software License）。仓库是 PUBLIC，把 SDK 推上去等于替
+Live2D 做再分发；CI 从官方源现取则属于「使用者自行取得 SDK 后在 CI 里用」，是另一回事。
+顺带也避开了体积 —— 整包 46MB，其中 `Samples/` 就占 29MB 且构建完全用不到。
+
+落点与本地完全一致（`third_party/cubism`、`third_party/glew`），所以**不需要给 CMake 传任何
+开关**：探测式默认值看到文件就自动 `YUMEIREN_WITH_LIVE2D=ON`。
+
+关键判据（都写进了 `.github/workflows/release.yml`）：
+
+| 位置 | 判据 | 挡住什么 |
+| --- | --- | --- |
+| 准备步骤内 | 点名 7 个「构建真正会读的文件」是否存在 | 空目录、解压到一半、缓存被写坏 |
+| 准备步骤内 | GLEW 包 sha256 对齐官方公布值 | 下到半截的包 |
+| 准备步骤内 | 解压出的 `cubism-info.yml` 里 `version:` 是预期值 | 下到了另一版 SDK、而文件路径恰好相同 |
+| configure 之后 | `CMakeCache.txt` 里 `YUMEIREN_WITH_LIVE2D:BOOL=ON` | **最要命的一条**：探测失败会静默退回 `Live2DRendererStub.cpp`，构建全绿但看板娘是空的 |
+| build 之后 | `build/Release/` 下有 `Live2DCubismCore.dll` 与 `FrameworkShaders/` | 运行期读盘的东西没被部署过去（缺了不报错，只是白屏） |
+| 打包之后 | 解压便携包，顶层唯一是 `Yumeiren/` 且含上面两样 | 中间某次拷贝漏了 |
+
+> 「目录存在」不是判据 —— 空目录、半截解压都满足它。判据要点名到文件。
+
+版本号只有一处来源：工作流 job 级的 `env.CUBISM_SDK_VERSION` / `env.GLEW_VERSION`，
+缓存 key、下载 URL、完整性校验全从它取，所以不可能出现「缓存里躺着哪版」和「URL 拉的哪版」
+对不上。**升版本时改那两行**，缓存 key 会跟着变，旧缓存自然失效。
+
 ## 10. 文档规范
 
 ### 10.1 必需文档
