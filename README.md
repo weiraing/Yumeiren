@@ -404,7 +404,7 @@ GitHub Release（附自动生成的变更说明）；**Actions 页面手动触�
 | `CMakeCache.txt` 里 `YUMEIREN_WITH_LIVE2D:BOOL=ON` | 第三方源码没就位 → 编成占位实现，看板娘空白 |
 | build 后 exe 旁有 `Live2DCubismCore.dll` + `FrameworkShaders/` | 运行期文件落到 exe 的上一层（多配置生成器） |
 | 解压便携包：Live2D 后端 + `WebView2Loader.dll` + **MSVC 运行时** + `data/` 四个子目录 | 发出去是个跑不起来 / 功能残缺的包 |
-| 解压便携包：不含 `*.lib` `*.pdb` 等 | 构建中间产物混进发布包 |
+| 解压便携包：不含 `*.lib` `*.pdb` 等中间产物、不含 `vc_redist.x64.exe` | 构建中间产物或运行库安装器混进发布包 |
 
 > ⚠️ **MSVC 运行库这一条是踩出来的**：`windeployqt --compiler-runtime` 靠 `VCINSTALLDIR` 定位
 > VS 的 Redist 目录，而 runner 的环境里没有这个变量 —— 它不是报错，是**静默跳过**（只留一行
@@ -412,6 +412,10 @@ GitHub Release（附自动生成的变更说明）；**Actions 页面手动触�
 > `Qt6*.dll` 加起来有 24 处导入 `vcruntime140.dll` —— 没装 VC++ 运行库的机器上双击就是
 > 「找不到 vcruntime140.dll」。现在工作流先用 `vswhere` 补上 `VCINSTALLDIR`，再从 VS 的
 > Redist 目录兜底拷一份，最后断言；三步都不成立就直接红。
+>
+> 补上 `VCINSTALLDIR` 之后还发现第二层：**Qt 6.10 的 windeployqt 在 MSVC 下并不拷 CRT DLL，
+> 它拷的是 `vc_redist.x64.exe`**（18.7MB 的安装器，给「让用户自己装运行库」的场景用的）。
+> 所以 CRT DLL 那一步只能自己做；安装器则按名字摘掉 —— 便携包不需要它。
 
 ---
 

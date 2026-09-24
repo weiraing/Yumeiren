@@ -310,8 +310,8 @@ jobs:
           # 退出码仍是 0。实测 v1.0.2 那个包就是这样 —— 顶层 23 个文件里一个 CRT DLL 都没有，
           # 而 exe 与 Qt6*.dll 加起来有 24 处导入 vcruntime140.dll。后果不是「少点东西」：
           # 没装 VC++ 运行库的干净机器上双击 exe 直接弹「找不到 vcruntime140.dll」，根本起不来。
-          # 所以这里先用 vswhere 把 VCINSTALLDIR 补上，再跑 windeployqt；下面还有一道自己
-          # 拷贝的兜底 + 一道断言 —— 不赌 windeployqt 认不认得出 VS 的版本布局。
+          # 所以这里先用 vswhere 把 VCINSTALLDIR 补上（这是 --compiler-runtime 能正常工作的前提，
+          # 也是那行 Warning 消失的原因）；但**光有这个还不够** —— 见下面那段实测结论。
           $vsRoot = ''
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
           if (Test-Path -LiteralPath $vswhere) {
@@ -328,28 +328,34 @@ jobs:
           windeployqt --release --no-translations --compiler-runtime "$out/虞美人.exe"
 
           # —— MSVC C++ 运行时：兜底自己拷 ——
-          # windeployqt 是按它自己编译时认识的 VS 版本号去拼 Redist 路径的，VS 换代（比如
-          # Microsoft.VC143.CRT → VC144.CRT）就可能又静默跳过。这里不猜版本号，直接在 Redist
-          # 树里按 vcruntime140.dll 反查它所在的目录，把那一目录的 DLL 全拷过来。
+          # ⚠️ 实测（run 36026405728）：**光设 VCINSTALLDIR 是不够的**。Qt 6.10 的
+          # windeployqt 在 MSVC 下并不是把 CRT DLL 拷过来，而是把 **vc_redist.x64.exe**
+          # （18.7MB 的安装器）丢进输出目录 —— 那是给「让用户自己装运行库」的场景准备的，
+          # 对便携包没用。所以 CRT DLL 这一步必须自己做，不能指望 --compiler-runtime。
+          #
+          # Redist 下会同时躺着**好几个 VS 版本**的 CRT（runner 上实测有 14.29 / 14.38 / 14.51
+          # 三份），全都按 `Redist\MSVC\<版本>\x64\Microsoft.VC<NNN>.CRT` 摆放。取版本目录名
+          # 倒序的第一个 —— 字符串序在这里等价于版本序（都是 14.XX.YYYYY，位数一致）。
+          # MSVC 的 CRT 向后兼容（14.29 的 msvcp140.dll 跑 14.51 编出来的 exe 没问题），
+          # 但没理由发旧的那份。debug_nonredist / onecore 不在 `<版本>\x64` 下，天然不会被选到。
           $crtNeeded = @(
             'vcruntime140.dll', 'vcruntime140_1.dll',
             'msvcp140.dll', 'msvcp140_1.dll', 'msvcp140_2.dll'
           )
           $crtMissing = @($crtNeeded | Where-Object { -not (Test-Path -LiteralPath (Join-Path $out $_) -PathType Leaf) })
           if ($crtMissing.Count -gt 0) {
-            # 排除 debug_nonredist（不可再分发的调试版）与 onecore（另一套 API 集）——
-            # 两者路径里同样带 `x64`，不排掉就可能拷到错的那份。
             $crtSrc = @()
             if ($vsRoot) {
-              $crtSrc = @(Get-ChildItem -Path (Join-Path $vsRoot 'VC\Redist\MSVC') -Recurse -Filter 'vcruntime140.dll' -File -ErrorAction SilentlyContinue |
-                          Where-Object { $_.FullName -match '\\x64\\' -and $_.FullName -notmatch 'debug_nonredist|onecore' } |
+              $crtSrc = @(Get-ChildItem -Path (Join-Path $vsRoot 'VC\Redist\MSVC') -Directory -ErrorAction SilentlyContinue |
+                          Sort-Object Name -Descending |
+                          ForEach-Object { Get-ChildItem -Path (Join-Path $_.FullName 'x64') -Directory -Filter 'Microsoft.VC*.CRT' -ErrorAction SilentlyContinue } |
                           Select-Object -First 1)
             }
             if ($crtSrc.Count -eq 0) {
               throw "缺 MSVC 运行时（$($crtMissing -join ', ')），且在 VS 的 Redist 里也找不到 —— 发出去就是个双击起不来的包。"
             }
-            Copy-Item -Path (Join-Path $crtSrc[0].Directory.FullName '*.dll') -Destination $out -Force
-            Write-Host "已从 $($crtSrc[0].Directory.FullName) 补齐 MSVC 运行时"
+            Copy-Item -Path (Join-Path $crtSrc[0].FullName '*.dll') -Destination $out -Force
+            Write-Host "已从 $($crtSrc[0].FullName) 补齐 MSVC 运行时"
           }
           $crtMissing = @($crtNeeded | Where-Object { -not (Test-Path -LiteralPath (Join-Path $out $_) -PathType Leaf) })
           if ($crtMissing.Count -gt 0) { throw "MSVC 运行时仍缺：$($crtMissing -join ', ')" }
@@ -376,6 +382,15 @@ jobs:
           if ($junk.Count -gt 0) {
             $junk | ForEach-Object { Write-Host "  剔除中间产物：$($_.Name)" }
             $junk | Remove-Item -Force
+          }
+
+          # windeployqt 在 MSVC 下放的 **vc_redist.x64.exe** 也摘掉：CRT DLL 已经由上面那步
+          # 挨着 exe 摆好了，这个 18.7MB 的安装器对便携包没用 —— 留着只会让人以为「还得先装
+          # 它」，还平白多占 16% 体积（实测包从 101MB 涨到 119MB，一半是它）。
+          $redistInstaller = Join-Path $stage 'vc_redist.x64.exe'
+          if (Test-Path -LiteralPath $redistInstaller) {
+            Remove-Item -LiteralPath $redistInstaller -Force
+            Write-Host '  已移除 vc_redist.x64.exe（CRT DLL 已就位，便携包不需要安装器）'
           }
 
           $zip = "Yumeiren-portable-v$env:YUMEIREN_VERSION-win64.zip"
@@ -444,6 +459,11 @@ jobs:
           if ($junk.Count -gt 0) {
             $junk | ForEach-Object { Write-Host "  多出来：$($_.FullName)" }
             throw "便携包里混进了 $($junk.Count) 个构建中间产物（见上方清单）。"
+          }
+
+          # 同理，运行库安装器也不该在便携包里 —— CRT DLL 才是我们发的东西。
+          if (Test-Path -LiteralPath (Join-Path $root 'vc_redist.x64.exe') -PathType Leaf) {
+            throw '便携包里混进了 vc_redist.x64.exe（windeployqt 放的运行库安装器）—— CRT DLL 已在包里，不需要它。'
           }
 
           Write-Host '便携包校验通过：顶层 Yumeiren/，Live2D 后端 + WebView2 Loader + MSVC 运行时 + data/ 齐全，无中间产物。'
