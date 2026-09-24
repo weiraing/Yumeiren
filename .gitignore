@@ -28,7 +28,7 @@ tmp/
 tools/
 new-build/
 live2d-build/
-data/
+
 third_party/
 .workbuddy-ai/
 scripts

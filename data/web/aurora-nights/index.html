@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>极光之夜</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #04060e; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+(() => {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  let W = 0, H = 0, stars = [];
+
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cv.width = Math.floor(innerWidth * dpr);
+    H = cv.height = Math.floor(innerHeight * dpr);
+    cv.style.width = innerWidth + 'px';
+    cv.style.height = innerHeight + 'px';
+    const n = Math.floor((W * H) / (11000 * dpr * dpr));
+    stars = Array.from({ length: n }, () => ({
+      x: Math.random() * W,
+      y: Math.random() * H * 0.8,
+      r: (Math.random() * 1.2 + 0.4) * dpr,
+      p: Math.random() * Math.PI * 2,
+      s: 0.5 + Math.random() * 1.4
+    }));
+  }
+
+  // 一条极光带：逐列画垂直渐变幕帘，摆动的下缘由多组正弦叠加而成
+  function ribbon(t, baseY, amp, hue, alpha, step) {
+    const top = H * (baseY - 0.42);
+    const grad = ctx.createLinearGradient(0, top, 0, H * (baseY + 0.18));
+    grad.addColorStop(0, `hsla(${hue}, 85%, 60%, 0)`);
+    grad.addColorStop(0.72, `hsla(${hue}, 85%, 55%, ${alpha * 0.55})`);
+    grad.addColorStop(1, `hsla(${hue}, 90%, 62%, ${alpha})`);
+    ctx.fillStyle = grad;
+    const edge = [];
+    for (let x = 0; x <= W + step; x += step) {
+      const y = H * baseY
+        + Math.sin(x * 0.0016 + t * 0.9) * amp
+        + Math.sin(x * 0.0043 - t * 1.7) * amp * 0.45
+        + Math.sin(x * 0.011 + t * 2.6) * amp * 0.12;
+      ctx.fillRect(x, y - H * 0.42, step + 1, H * 0.42);
+      edge.push([x, y]);
+    }
+    // 下缘再描一遍更亮的光，让幕帘有"垂坠边缘"
+    ctx.beginPath();
+    edge.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+    ctx.strokeStyle = `hsla(${hue + 18}, 95%, 72%, ${alpha * 0.9})`;
+    ctx.lineWidth = 2 * (H / 1080);
+    ctx.stroke();
+  }
+
+  let last = performance.now();
+  function frame(now) {
+    const t = now / 1000;
+    ctx.fillStyle = '#04060e';
+    ctx.fillRect(0, 0, W, H);
+
+    // 星星(闪烁)
+    for (const s of stars) {
+      const tw = 0.35 + 0.65 * Math.abs(Math.sin(s.p + t * s.s));
+      ctx.globalAlpha = tw;
+      ctx.fillStyle = '#cfd8ff';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, 7);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // 月亮
+    const mg = ctx.createRadialGradient(W * 0.82, H * 0.16, 0, W * 0.82, H * 0.16, H * 0.16);
+    mg.addColorStop(0, 'rgba(230,238,255,0.85)');
+    mg.addColorStop(0.18, 'rgba(210,225,255,0.5)');
+    mg.addColorStop(1, 'rgba(210,225,255,0)');
+    ctx.fillStyle = mg;
+    ctx.fillRect(W * 0.62, 0, W * 0.38, H * 0.34);
+
+    // 三层极光
+    ctx.globalCompositeOperation = 'lighter';
+    ribbon(t * 0.55, 0.34, H * 0.06, 150, 0.34, Math.max(4, W / 260));
+    ribbon(t * 0.40 + 2, 0.40, H * 0.08, 130, 0.26, Math.max(5, W / 200));
+    ribbon(t * 0.32 + 5, 0.30, H * 0.05, 285, 0.20, Math.max(4, W / 240));
+    ctx.globalCompositeOperation = 'source-over';
+
+    last = now;
+    requestAnimationFrame(frame);
+  }
+
+  addEventListener('resize', resize);
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>星垂旷野</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #02030a; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+(() => {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  let W = 0, H = 0, dpr = 1, bg = null, twinks = [], meteors = [];
+
+  // 静态层(银河 + 远星 + 山脉)只在窗口变化时重画
+  function renderBG() {
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    const sky = g.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, '#02030a');
+    sky.addColorStop(0.6, '#0a1226');
+    sky.addColorStop(1, '#15223f');
+    g.fillStyle = sky;
+    g.fillRect(0, 0, W, H);
+
+    // 银河：沿对角的一条雾带，星星向带内聚拢
+    g.save();
+    g.translate(W * 0.5, H * 0.42);
+    g.rotate(-0.42);
+    const band = g.createLinearGradient(0, -H * 0.30, 0, H * 0.30);
+    band.addColorStop(0, 'rgba(150,170,255,0)');
+    band.addColorStop(0.5, 'rgba(170,185,255,0.13)');
+    band.addColorStop(1, 'rgba(150,170,255,0)');
+    g.fillStyle = band;
+    g.fillRect(-W, -H * 0.30, W * 2, H * 0.60);
+    for (let i = 0; i < 900; ++i) {
+      const x = (Math.random() - 0.5) * W * 2;
+      const y = (Math.random() - 0.5) * H * 0.5 * (Math.random() + 0.3);
+      g.globalAlpha = 0.25 + Math.random() * 0.6;
+      g.fillStyle = Math.random() < 0.12 ? '#ffe3c8' : '#dfe8ff';
+      g.fillRect(x, y, 1.1 * dpr, 1.1 * dpr);
+    }
+    g.globalAlpha = 1;
+    g.restore();
+    for (let i = 0; i < 350; ++i) {
+      g.globalAlpha = 0.15 + Math.random() * 0.5;
+      g.fillStyle = '#dfe8ff';
+      g.fillRect(Math.random() * W, Math.random() * H * 0.8, 1.1 * dpr, 1.1 * dpr);
+    }
+    g.globalAlpha = 1;
+
+    // 两层山脉剪影
+    const ridge = (yBase, height, color) => {
+      g.fillStyle = color;
+      g.beginPath();
+      g.moveTo(0, H);
+      let x = 0;
+      while (x < W) {
+        const w = (60 + Math.random() * 130) * dpr;
+        const h = yBase - Math.random() * height;
+        g.lineTo(x + w / 2, h);
+        x += w;
+        g.lineTo(x, yBase);
+      }
+      g.lineTo(W, H);
+      g.closePath();
+      g.fill();
+    };
+    ridge(H * 0.78, H * 0.13, '#0a1224');
+    ridge(H * 0.88, H * 0.10, '#05070f');
+    return c;
+  }
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cv.width = Math.floor(innerWidth * dpr);
+    H = cv.height = Math.floor(innerHeight * dpr);
+    cv.style.width = innerWidth + 'px';
+    cv.style.height = innerHeight + 'px';
+    bg = renderBG();
+    twinks = Array.from({ length: 46 }, () => ({
+      x: Math.random() * W, y: Math.random() * H * 0.7,
+      r: (0.6 + Math.random() * 1.2) * dpr,
+      p: Math.random() * Math.PI * 2, s: 0.6 + Math.random() * 1.6
+    }));
+    meteors = [];
+  }
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min((now - last) / 1000, 0.05);
+    last = now;
+    const t = now / 1000;
+    ctx.drawImage(bg, 0, 0);
+
+    // 前景闪烁星
+    for (const s of twinks) {
+      ctx.globalAlpha = 0.3 + 0.7 * Math.abs(Math.sin(s.p + t * s.s));
+      ctx.fillStyle = '#eef2ff';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, 7);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // 流星：稀疏出现，斜掠而过
+    if (Math.random() < dt * 0.35 && meteors.length < 3) {
+      const dir = Math.random() < 0.7 ? -1 : 1;
+      meteors.push({
+        x: W * (0.2 + Math.random() * 0.7), y: Math.random() * H * 0.4,
+        vx: dir * (280 + Math.random() * 260) * dpr,
+        vy: (170 + Math.random() * 160) * dpr,
+        life: 0, max: 0.8 + Math.random() * 0.7
+      });
+    }
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = meteors.length - 1; i >= 0; --i) {
+      const m = meteors[i];
+      m.life += dt;
+      m.x += m.vx * dt;
+      m.y += m.vy * dt;
+      const fade = 1 - m.life / m.max;
+      if (fade <= 0 || m.x < -100 || m.x > W + 100 || m.y > H * 0.85) {
+        meteors.splice(i, 1);
+        continue;
+      }
+      const trail = 0.16;
+      const tx = m.x - m.vx * trail, ty = m.y - m.vy * trail;
+      const g = ctx.createLinearGradient(m.x, m.y, tx, ty);
+      g.addColorStop(0, `rgba(240,248,255,${0.95 * fade})`);
+      g.addColorStop(1, 'rgba(240,248,255,0)');
+      ctx.strokeStyle = g;
+      ctx.lineWidth = 2 * dpr;
+      ctx.beginPath();
+      ctx.moveTo(m.x, m.y);
+      ctx.lineTo(tx, ty);
+      ctx.stroke();
+      const hg = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, 9 * dpr);
+      hg.addColorStop(0, `rgba(255,255,255,${0.8 * fade})`);
+      hg.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = hg;
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, 9 * dpr, 0, 7);
+      ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    requestAnimationFrame(frame);
+  }
+
+  addEventListener('resize', resize);
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

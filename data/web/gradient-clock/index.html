@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>流光时钟</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0a0a18; }
+  canvas { display: block; position: absolute; inset: 0; }
+  #clock {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    color: #f2f4ff;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    text-shadow: 0 2px 24px rgba(0, 0, 0, 0.55);
+    user-select: none;
+  }
+  #time { font-size: 15vw; font-weight: 200; letter-spacing: 0.04em; line-height: 1; }
+  #time small { font-size: 0.32em; font-weight: 300; opacity: 0.8; }
+  #date { margin-top: 2vh; font-size: 2.2vw; font-weight: 300; opacity: 0.85; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="clock">
+  <div id="time">--<small>:</small>--</div>
+  <div id="date"></div>
+</div>
+<script>
+(() => {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  const timeEl = document.getElementById('time');
+  const dateEl = document.getElementById('date');
+  let W = 0, H = 0;
+  // 流动的渐变色团：大半径径向渐变本身就是柔焦效果
+  const blobs = [
+    { c: [88, 101, 242],  r: 0.55, sp: 0.11 },
+    { c: [168, 85, 247],  r: 0.48, sp: 0.09 },
+    { c: [236, 72, 153],  r: 0.42, sp: 0.13 },
+    { c: [34, 211, 238],  r: 0.45, sp: 0.08 },
+    { c: [251, 146, 60],  r: 0.36, sp: 0.12 }
+  ].map((b, i) => ({ ...b, ph: i * 1.7 }));
+
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cv.width = Math.floor(innerWidth * dpr);
+    H = cv.height = Math.floor(innerHeight * dpr);
+    cv.style.width = innerWidth + 'px';
+    cv.style.height = innerHeight + 'px';
+  }
+
+  let last = performance.now();
+  function frame(now) {
+    const t = now / 1000;
+    ctx.fillStyle = '#0a0a18';
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'screen';
+    for (const b of blobs) {
+      const x = W * (0.5 + 0.34 * Math.sin(t * b.sp + b.ph));
+      const y = H * (0.5 + 0.30 * Math.cos(t * b.sp * 1.23 + b.ph * 2));
+      const r = Math.min(W, H) * b.r * (0.9 + 0.1 * Math.sin(t * 0.4 + b.ph));
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, `rgba(${b.c[0]},${b.c[1]},${b.c[2]},0.55)`);
+      g.addColorStop(1, `rgba(${b.c[0]},${b.c[1]},${b.c[2]},0)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    requestAnimationFrame(frame);
+  }
+
+  function tick() {
+    const d = new Date();
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    const ss = String(d.getSeconds()).padStart(2, '0');
+    timeEl.innerHTML = `${hh}<small>:</small>${mm}<small>:${ss}</small>`;
+    const week = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+    dateEl.textContent =
+      `${d.getFullYear()} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日 · ${week[d.getDay()]}`;
+  }
+
+  addEventListener('resize', resize);
+  resize();
+  tick();
+  setInterval(tick, 250);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

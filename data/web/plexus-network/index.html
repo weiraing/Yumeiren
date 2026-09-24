@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>星链粒子</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #07090f; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+(() => {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  let W = 0, H = 0, dpr = 1, dots = [];
+  const LINK = 0.14;   // 连线距离(相对屏宽比例)
+
+  // 交互模式下的鼠标状态：仅展示(穿透)模式收不到事件，粒子照常自主漂移
+  const mouse = { x: -99999, y: -99999, active: false };
+  addEventListener('mousemove', (e) => {
+    mouse.x = e.clientX * dpr;
+    mouse.y = e.clientY * dpr;
+    mouse.active = true;
+  });
+  addEventListener('mouseout', () => {
+    mouse.active = false;
+    mouse.x = -99999;
+    mouse.y = -99999;
+  });
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cv.width = Math.floor(innerWidth * dpr);
+    H = cv.height = Math.floor(innerHeight * dpr);
+    cv.style.width = innerWidth + 'px';
+    cv.style.height = innerHeight + 'px';
+    const n = Math.floor((W * H) / (16000 * dpr * dpr));
+    dots = Array.from({ length: n }, () => ({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      vx: (Math.random() - 0.5) * 0.022 * dpr,
+      vy: (Math.random() - 0.5) * 0.022 * dpr,
+      ivx: 0, ivy: 0,                     // 鼠标拨动的冲量(带阻尼，不累积)
+      r: (Math.random() * 1.6 + 0.9) * dpr
+    }));
+  }
+
+  let last = performance.now();
+  function frame() {
+    ctx.fillStyle = 'rgba(7,9,15,0.5)';
+    ctx.fillRect(0, 0, W, H);
+
+    const link = W * LINK;
+
+    // 光标当作一个虚拟粒子：影响半径内的粒子被轻轻推开，冲量随时间衰减，
+    // 于是粒子沿鼠标轨迹滑开、随后慢慢归位
+    const reach = W * 0.18;
+    for (const d of dots) {
+      if (mouse.active) {
+        const dx = d.x - mouse.x, dy = d.y - mouse.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < reach && dist > 0.001) {
+          const f = (1 - dist / reach) * 0.4 * dpr;
+          d.ivx += (dx / dist) * f;
+          d.ivy += (dy / dist) * f;
+        }
+      }
+      d.ivx *= 0.92;
+      d.ivy *= 0.92;
+      d.x += d.vx + d.ivx;
+      d.y += d.vy + d.ivy;
+      if (d.x < 0 || d.x > W) d.vx *= -1;
+      if (d.y < 0 || d.y > H) d.vy *= -1;
+    }
+
+    // 邻近连线，透明度随距离衰减
+    for (let i = 0; i < dots.length; ++i) {
+      const a = dots[i];
+      for (let j = i + 1; j < dots.length; ++j) {
+        const b = dots[j];
+        const dx = a.x - b.x, dy = a.y - b.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > link * link) continue;
+        const alpha = (1 - Math.sqrt(d2) / link) * 0.35;
+        ctx.strokeStyle = `rgba(120,170,255,${alpha})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+      }
+    }
+
+    // 光标与邻近粒子的连线 + 光标柔光点：交互反馈最直观的一层
+    if (mouse.active) {
+      const mLink = link * 1.2;
+      for (const d of dots) {
+        const dx = d.x - mouse.x, dy = d.y - mouse.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > mLink) continue;
+        const alpha = Math.pow(1 - dist / mLink, 0.7) * 0.7;
+        ctx.strokeStyle = `rgba(160,205,255,${alpha})`;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(mouse.x, mouse.y);
+        ctx.lineTo(d.x, d.y);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.arc(mouse.x, mouse.y, 5 * dpr, 0, 7);
+      ctx.fillStyle = 'rgba(160,205,255,0.14)';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(mouse.x, mouse.y, 2.2 * dpr, 0, 7);
+      ctx.fillStyle = 'rgba(235,245,255,0.98)';
+      ctx.fill();
+    }
+
+    // 粒子：外圈柔光 + 内核亮点
+    for (const d of dots) {
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, d.r * 2.6, 0, 7);
+      ctx.fillStyle = 'rgba(120,170,255,0.10)';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, d.r, 0, 7);
+      ctx.fillStyle = 'rgba(200,225,255,0.9)';
+      ctx.fill();
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  addEventListener('resize', resize);
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

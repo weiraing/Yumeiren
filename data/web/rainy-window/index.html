@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>雨夜流光</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #05060d; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+(() => {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  let W = 0, H = 0, dpr = 1, bokeh = null, drops = [], micro = [];
+
+  // 玻璃外的夜景：虚化的城市光斑(离屏，仅在窗口变化时重画)
+  function renderBokeh() {
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    const bg = g.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, '#04050c');
+    bg.addColorStop(0.5, '#0c1024');
+    bg.addColorStop(1, '#04050c');
+    g.fillStyle = bg;
+    g.fillRect(0, 0, W, H);
+    const palette = [
+      [255, 190, 120], [120, 180, 255], [255, 130, 165],
+      [140, 255, 220], [210, 160, 255], [255, 235, 190]
+    ];
+    for (let i = 0; i < 46; ++i) {
+      const [r, g2, b] = palette[(Math.random() * palette.length) | 0];
+      const x = Math.random() * W, y = H * (0.08 + Math.random() * 0.8);
+      const rad = (12 + Math.random() * 55) * dpr;
+      const a = 0.08 + Math.random() * 0.2;
+      const lg = g.createRadialGradient(x, y, 0, x, y, rad);
+      lg.addColorStop(0, `rgba(${r},${g2},${b},${a})`);
+      lg.addColorStop(1, `rgba(${r},${g2},${b},0)`);
+      g.fillStyle = lg;
+      g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+    }
+    return c;
+  }
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cv.width = Math.floor(innerWidth * dpr);
+    H = cv.height = Math.floor(innerHeight * dpr);
+    cv.style.width = innerWidth + 'px';
+    cv.style.height = innerHeight + 'px';
+    bokeh = renderBokeh();
+    drops = Array.from({ length: 30 }, () => ({
+      x: Math.random() * W, y: Math.random() * H,
+      r: (2.6 + Math.random() * 4.4) * dpr,
+      th: Math.random(),            // 越大越容易启动下滑
+      vy: 0
+    }));
+    micro = Array.from({ length: 70 }, () => ({
+      x: Math.random() * W, y: Math.random() * H,
+      r: (0.5 + Math.random() * 1.1) * dpr,
+      a: 0.05 + Math.random() * 0.12
+    }));
+  }
+
+  // 一滴水的画法：边缘聚光的透镜 + 左上高光 + 右下反光
+  function drawDrop(x, y, r, alpha) {
+    const g = ctx.createRadialGradient(x, y, r * 0.1, x, y, r);
+    g.addColorStop(0, 'rgba(190,215,245,0.05)');
+    g.addColorStop(0.75, 'rgba(190,215,245,0.06)');
+    g.addColorStop(0.92, 'rgba(230,242,255,0.16)');
+    g.addColorStop(1, 'rgba(255,255,255,0.26)');
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, 7);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x - r * 0.3, y - r * 0.34, r * 0.26, 0, 7);
+    ctx.fillStyle = 'rgba(255,255,255,0.38)';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + r * 0.16, y + r * 0.32, r * 0.42, 0, 7);
+    ctx.fillStyle = 'rgba(255,255,255,0.10)';
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min((now - last) / 16.666, 3);
+    last = now;
+    ctx.drawImage(bokeh, 0, 0);
+
+    // 静止微水珠
+    for (const m of micro) {
+      ctx.globalAlpha = m.a;
+      ctx.fillStyle = '#cfe2ff';
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, m.r, 0, 7);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // 雨滴：凝结变重 → 开始下滑 → 加速并留拖尾水痕
+    if (drops.length < 34 && Math.random() < 0.2)
+      drops.push({ x: Math.random() * W, y: Math.random() * H * 0.9,
+                   r: (2.6 + Math.random() * 4.4) * dpr, th: Math.random(), vy: 0 });
+    for (let i = drops.length - 1; i >= 0; --i) {
+      const d = drops[i];
+      d.r += 0.009 * dt * dpr;
+      const heavy = (4.2 + d.th * 2.6) * dpr;
+      if (d.vy === 0 && d.r > heavy)
+        d.vy = 0.35 * dpr;
+      if (d.vy > 0) {
+        d.vy += 0.011 * dt * dpr;
+        d.y += d.vy * dt;
+        d.x += Math.sin(d.y * 0.02 + d.th * 9) * 0.3 * dpr * dt;
+        if (Math.random() < 0.25)
+          drawDrop(d.x + (Math.random() - 0.5) * d.r, d.y - d.r * 2.4,
+                   d.r * 0.3 + Math.random() * d.r * 0.2, 0.5);
+      }
+      if (d.y > H + d.r * 2) {
+        drops.splice(i, 1);
+        continue;
+      }
+      drawDrop(d.x, d.y, d.r, 1);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  addEventListener('resize', resize);
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

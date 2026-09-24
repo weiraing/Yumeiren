@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>樱色梦境</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #2b1b33; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+(() => {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  let W = 0, H = 0, dpr = 1, petals = [], bokeh = [], branch = null;
+
+  // 右上角伸出的樱枝剪影 + 花簇，画到离屏画布(仅在窗口变化时重画)
+  function renderBranch() {
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    g.lineCap = 'round';
+    g.strokeStyle = '#241019';
+    const bx = W * 0.86;
+    g.lineWidth = 16 * dpr;
+    g.beginPath();
+    g.moveTo(bx, -20);
+    g.bezierCurveTo(bx - W * 0.05, H * 0.10, bx - W * 0.10, H * 0.14, bx - W * 0.19, H * 0.24);
+    g.stroke();
+    const twig = (x0, y0, cx, cy, x1, y1, w) => {
+      g.lineWidth = w * dpr;
+      g.beginPath(); g.moveTo(x0, y0);
+      g.quadraticCurveTo(cx, cy, x1, y1); g.stroke();
+    };
+    twig(bx - W * 0.05, H * 0.065, bx - W * 0.085, H * 0.085, bx - W * 0.115, H * 0.075, 7);
+    twig(bx - W * 0.10, H * 0.125, bx - W * 0.13, H * 0.16, bx - W * 0.16, H * 0.15, 6);
+    twig(bx - W * 0.15, H * 0.20, bx - W * 0.18, H * 0.22, bx - W * 0.21, H * 0.205, 5);
+    // 花簇：五瓣小圆绕花心
+    const bloom = (x, y, r) => {
+      for (let k = 0; k < 5; ++k) {
+        const a = (k / 5) * Math.PI * 2;
+        g.beginPath();
+        g.arc(x + Math.cos(a) * r * 0.8, y + Math.sin(a) * r * 0.8, r * 0.62, 0, 7);
+        g.fillStyle = 'rgba(255,205,220,0.92)';
+        g.fill();
+      }
+      g.beginPath();
+      g.arc(x, y, r * 0.34, 0, 7);
+      g.fillStyle = 'rgba(255,236,244,0.95)';
+      g.fill();
+    };
+    for (let i = 0; i < 26; ++i) {
+      const tt = 0.15 + Math.random() * 0.85;
+      bloom(bx - W * 0.21 * tt + (Math.random() - 0.5) * 40 * dpr,
+            H * 0.24 * tt + (Math.random() - 0.5) * 30 * dpr,
+            (4 + Math.random() * 5) * dpr);
+    }
+    return c;
+  }
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cv.width = Math.floor(innerWidth * dpr);
+    H = cv.height = Math.floor(innerHeight * dpr);
+    cv.style.width = innerWidth + 'px';
+    cv.style.height = innerHeight + 'px';
+    petals = Array.from({ length: 64 }, () => ({
+      x: Math.random() * W, y: Math.random() * H,
+      s: (3.2 + Math.random() * 4.6) * dpr,
+      vy: (0.35 + Math.random() * 0.5) * dpr,
+      ph: Math.random() * Math.PI * 2, swSp: 0.5 + Math.random() * 1.1,
+      rot: Math.random() * Math.PI * 2, spin: (Math.random() - 0.5) * 0.05,
+      hue: 336 + Math.random() * 16, lit: 56 + Math.random() * 12
+    }));
+    bokeh = Array.from({ length: 20 }, () => ({
+      x: Math.random() * W, y: Math.random() * H,
+      r: (70 + Math.random() * 130) * dpr,
+      vx: (Math.random() - 0.5) * 0.05 * dpr,
+      hue: 320 + Math.random() * 40, a: 0.05 + Math.random() * 0.08
+    }));
+    branch = renderBranch();
+  }
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min((now - last) / 16.666, 3);
+    last = now;
+    const t = now / 1000;
+
+    const sky = ctx.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, '#251431');
+    sky.addColorStop(0.55, '#6e3a58');
+    sky.addColorStop(0.85, '#c76a80');
+    sky.addColorStop(1, '#f2b8ac');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, H);
+
+    // 梦境光斑
+    ctx.globalCompositeOperation = 'screen';
+    for (const b of bokeh) {
+      b.x += b.vx * dt;
+      if (b.x < -b.r) b.x = W + b.r;
+      if (b.x > W + b.r) b.x = -b.r;
+      const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r);
+      g.addColorStop(0, `hsla(${b.hue}, 80%, 78%, ${b.a})`);
+      g.addColorStop(1, `hsla(${b.hue}, 80%, 78%, 0)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(b.x - b.r, b.y - b.r, b.r * 2, b.r * 2);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+
+    // 樱瓣：下落 + 正弦摆动 + 全局风
+    const wind = Math.sin(t * 0.25) * 0.6 + Math.sin(t * 0.11) * 0.4;
+    for (const p of petals) {
+      p.y += p.vy * dt;
+      p.x += (Math.sin(p.ph + t * p.swSp) * 0.5 + wind) * 0.7 * dt * dpr;
+      p.rot += p.spin * dt;
+      if (p.y > H + 24) { p.y = -24; p.x = Math.random() * W; }
+      if (p.x < -30) p.x = W + 30;
+      if (p.x > W + 30) p.x = -30;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      ctx.scale(1, 0.6);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, p.s, p.s * 0.66, 0, 0, 7);
+      ctx.fillStyle = `hsla(${p.hue}, 88%, ${p.lit}%, 0.92)`;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(-p.s * 0.2, -p.s * 0.2, p.s * 0.4, p.s * 0.26, 0, 0, 7);
+      ctx.fillStyle = 'hsla(345, 90%, 82%, 0.55)';
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // 樱枝剪影(最上层)
+    ctx.drawImage(branch, 0, 0);
+    requestAnimationFrame(frame);
+  }
+
+  addEventListener('resize', resize);
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

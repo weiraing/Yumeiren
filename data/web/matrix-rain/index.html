@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>数字雨</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+(() => {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  const GLYPHS = 'アイウエオカキクケコサシスセソ0123456789ABCDEFλ∆∑';
+  let W = 0, H = 0, cols = [], font = 0, step = 0;
+
+  function resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cv.width = Math.floor(innerWidth * dpr);
+    H = cv.height = Math.floor(innerHeight * dpr);
+    cv.style.width = innerWidth + 'px';
+    cv.style.height = innerHeight + 'px';
+    font = Math.max(14, Math.floor(16 * dpr));
+    step = font * 1.05;
+    const n = Math.ceil(W / step);
+    // 每列一个雨头起始行，错开出现
+    cols = Array.from({ length: n }, (_, i) => ({
+      y: Math.random() * -H / font,
+      speed: 0.35 + Math.random() * 0.55,   // 行/帧
+      bright: Math.random() < 0.12          // 少量亮头
+    }));
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    ctx.font = `${font}px "Consolas", monospace`;
+    ctx.textBaseline = 'top';
+  }
+
+  function frame() {
+    // 半透明黑底叠涂，形成拖尾
+    ctx.fillStyle = 'rgba(0, 5, 2, 0.09)';
+    ctx.fillRect(0, 0, W, H);
+    for (let i = 0; i < cols.length; ++i) {
+      const c = cols[i];
+      const x = i * step;
+      const row = Math.floor(c.y);
+      const y = row * font;
+      // 雨头亮，身后暗绿
+      ctx.fillStyle = c.bright ? '#d8ffe8' : '#baf7c9';
+      ctx.fillText(GLYPHS[(Math.random() * GLYPHS.length) | 0], x, y);
+      ctx.fillStyle = c.bright ? 'rgba(90,220,140,0.75)' : 'rgba(46,160,90,0.66)';
+      ctx.fillText(GLYPHS[(Math.random() * GLYPHS.length) | 0], x, y - font);
+      c.y += c.speed;
+      if (c.y * font > H && Math.random() < 0.02)
+        c.y = Math.random() * -30;   // 到底部后随机时机重生
+    }
+    requestAnimationFrame(frame);
+  }
+
+  addEventListener('resize', resize);
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

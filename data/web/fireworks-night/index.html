@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>烟花之夜</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #03050c; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+(() => {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  let W = 0, H = 0, dpr = 1;
+  let stars = [], houses = [], rockets = [], parts = [];
+  let nextLaunch = 0;
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cv.width = Math.floor(innerWidth * dpr);
+    H = cv.height = Math.floor(innerHeight * dpr);
+    cv.style.width = innerWidth + 'px';
+    cv.style.height = innerHeight + 'px';
+    stars = Array.from({ length: Math.floor(W * H / (12000 * dpr * dpr)) }, () => ({
+      x: Math.random() * W, y: Math.random() * H * 0.75,
+      r: (Math.random() * 1.1 + 0.3) * dpr,
+      p: Math.random() * 6.28, s: 0.5 + Math.random() * 1.5
+    }));
+    houses = Array.from({ length: 16 }, () => ({
+      x: Math.random() * W,
+      y: H * (0.88 + Math.random() * 0.08),
+      w: (14 + Math.random() * 26) * dpr,
+      h: (16 + Math.random() * 34) * dpr
+    }));
+  }
+
+  function launch(tx) {
+    const x = tx !== undefined ? tx : W * (0.15 + Math.random() * 0.7);
+    rockets.push({
+      x, y: H * 0.92,
+      vy: -(6.5 + Math.random() * 2.5) * dpr,
+      target: H * (0.14 + Math.random() * 0.3),
+      hue: Math.random() * 360,
+      ring: Math.random() < 0.3
+    });
+  }
+
+  function burst(rk) {
+    const n = rk.ring ? 64 : 80 + (Math.random() * 40 | 0);
+    for (let i = 0; i < n; i++) {
+      let a, sp;
+      if (rk.ring) {
+        a = (i / n) * Math.PI * 2;
+        sp = (3.2 + Math.random() * 0.6) * dpr;
+      } else {
+        a = Math.random() * Math.PI * 2;
+        sp = (0.8 + Math.pow(Math.random(), 0.5) * 3.4) * dpr;
+      }
+      const life = 55 + Math.random() * 45;
+      parts.push({
+        x: rk.x, y: rk.y,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        life, max: life,
+        hue: rk.hue + (Math.random() - 0.5) * 40,
+        r: (1 + Math.random() * 1.6) * dpr,
+        flick: Math.random() < 0.3
+      });
+    }
+  }
+
+  function frame(now) {
+    const t = now / 1000;
+
+    // 拖尾式淡出
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = 'rgba(3,5,12,0.20)';
+    ctx.fillRect(0, 0, W, H);
+
+    // 星空
+    for (const s of stars) {
+      ctx.globalAlpha = 0.25 + 0.55 * Math.abs(Math.sin(s.p + t * s.s));
+      ctx.fillStyle = '#dfe6ff';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, 7);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.globalCompositeOperation = 'lighter';
+
+    // 升空
+    if (t > nextLaunch) {
+      launch();
+      if (Math.random() < 0.35) setTimeout(() => launch(), 250 + Math.random() * 400);
+      nextLaunch = t + 0.9 + Math.random() * 1.4;
+    }
+    rockets = rockets.filter(rk => {
+      rk.y += rk.vy;
+      rk.vy *= 0.995;
+      ctx.fillStyle = `hsla(${rk.hue},95%,75%,0.9)`;
+      ctx.beginPath();
+      ctx.arc(rk.x, rk.y, 2.2 * dpr, 0, 7);
+      ctx.fill();
+      ctx.globalAlpha = 0.4;
+      ctx.beginPath();
+      ctx.arc(rk.x, rk.y - rk.vy * 2, 1.2 * dpr, 0, 7);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      if (rk.y <= rk.target) { burst(rk); return false; }
+      return true;
+    });
+
+    // 粒子
+    parts = parts.filter(p => {
+      p.life--;
+      if (p.life <= 0) return false;
+      p.vy += 0.045 * dpr;
+      p.vx *= 0.985;
+      p.vy *= 0.985;
+      p.x += p.vx;
+      p.y += p.vy;
+      const k = p.life / p.max;
+      let a = k * k;
+      if (p.flick && k < 0.5) a *= Math.random() < 0.5 ? 1 : 0.2;
+      ctx.globalAlpha = a;
+      ctx.fillStyle = `hsl(${p.hue},95%,${55 + k * 25}%)`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r * (0.4 + k * 0.6), 0, 7);
+      ctx.fill();
+      return true;
+    });
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+
+    // 山丘剪影与窗灯(每帧重绘，免得被拖尾糊掉)
+    ctx.fillStyle = '#04060e';
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    ctx.lineTo(0, H * 0.92);
+    for (let x = 0; x <= W; x += W / 8) {
+      ctx.quadraticCurveTo(x + W / 16, H * (0.84 + 0.06 * Math.sin(x * 0.004)), x + W / 8, H * 0.9);
+    }
+    ctx.lineTo(W, H);
+    ctx.closePath();
+    ctx.fill();
+    for (const hse of houses) {
+      ctx.fillStyle = '#06080f';
+      ctx.fillRect(hse.x, hse.y - hse.h, hse.w, hse.h);
+      ctx.fillStyle = `rgba(255,200,110,${0.5 + 0.3 * Math.sin(t * 2 + hse.x)})`;
+      ctx.fillRect(hse.x + hse.w * 0.25, hse.y - hse.h * 0.7, hse.w * 0.2, hse.h * 0.22);
+      if (hse.h > 30 * dpr) ctx.fillRect(hse.x + hse.w * 0.55, hse.y - hse.h * 0.4, hse.w * 0.2, hse.h * 0.22);
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  addEventListener('resize', resize);
+  resize();
+  requestAnimationFrame(frame);
+  addEventListener('pointerdown', e => {
+    const rect = cv.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * dpr;
+    launch(x);
+  });
+})();
+</script>
+</body>
+</html>

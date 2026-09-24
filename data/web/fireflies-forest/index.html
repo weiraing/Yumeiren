@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>森之萤</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #030711; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+(() => {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  let W = 0, H = 0, dpr = 1, forest = null, flies = [], stars = [];
+
+  // 三层杉树林剪影(离屏，仅在窗口变化时重画)
+  function renderForest() {
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    const fir = (x, base, h, color) => {
+      const w = h * 0.46;
+      g.fillStyle = color;
+      for (let k = 0; k < 3; ++k) {
+        const lh = h * (0.62 - k * 0.16);   // 每层三角的高
+        const ly = base - k * h * 0.26;     // 每层的底部
+        g.beginPath();
+        g.moveTo(x, ly - lh);
+        g.lineTo(x - w * (1 - k * 0.16), ly);
+        g.lineTo(x + w * (1 - k * 0.16), ly);
+        g.closePath();
+        g.fill();
+      }
+      g.fillRect(x - h * 0.03, base - h * 0.05, h * 0.06, h * 0.05);
+    };
+    const layer = (base, hMin, hMax, gap, color) => {
+      let x = -gap * Math.random();
+      while (x < W + gap) {
+        fir(x, base - Math.random() * hMin * 0.3, hMin + Math.random() * (hMax - hMin), color);
+        x += gap * (0.55 + Math.random() * 0.7);
+      }
+      g.fillStyle = color;
+      g.fillRect(0, base - 2 * dpr, W, H - base + 2 * dpr);
+    };
+    layer(H * 0.70, H * 0.10, H * 0.20, 90 * dpr, '#0a1420');
+    layer(H * 0.82, H * 0.16, H * 0.30, 130 * dpr, '#071019');
+    layer(H * 0.98, H * 0.26, H * 0.42, 190 * dpr, '#030810');
+    return c;
+  }
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cv.width = Math.floor(innerWidth * dpr);
+    H = cv.height = Math.floor(innerHeight * dpr);
+    cv.style.width = innerWidth + 'px';
+    cv.style.height = innerHeight + 'px';
+    forest = renderForest();
+    stars = Array.from({ length: 36 }, () => ({
+      x: Math.random() * W, y: Math.random() * H * 0.5,
+      r: (0.5 + Math.random()) * dpr, p: Math.random() * 7, s: 0.5 + Math.random()
+    }));
+    flies = Array.from({ length: 64 }, () => ({
+      x: Math.random() * W, y: H * (0.4 + Math.random() * 0.55),
+      r: (4.5 + Math.random() * 5.5) * dpr,
+      ph: Math.random() * Math.PI * 2,
+      bl: 0.5 + Math.random() * 1.6
+    }));
+  }
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min((now - last) / 16.666, 3);
+    last = now;
+    const t = now / 1000;
+
+    const sky = ctx.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, '#030711');
+    sky.addColorStop(0.6, '#081524');
+    sky.addColorStop(1, '#0d2230');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, H);
+
+    // 星与新月
+    for (const s of stars) {
+      ctx.globalAlpha = 0.3 + 0.7 * Math.abs(Math.sin(s.p + t * s.s));
+      ctx.fillStyle = '#dfe8ff';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, 7);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    const mx = W * 0.82, my = H * 0.14, mr = H * 0.05;
+    ctx.beginPath();
+    ctx.arc(mx, my, mr, 0, 7);
+    ctx.fillStyle = 'rgba(228,238,252,0.92)';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(mx - mr * 0.42, my - mr * 0.16, mr * 0.86, 0, 7);
+    ctx.fillStyle = '#050b16';
+    ctx.fill();
+
+    ctx.drawImage(forest, 0, 0);
+
+    // 雾带
+    ctx.globalCompositeOperation = 'screen';
+    for (let i = 0; i < 2; ++i) {
+      const my2 = H * (0.68 + i * 0.16) + Math.sin(t * 0.09 + i * 2.4) * H * 0.02;
+      const fog = ctx.createLinearGradient(0, my2 - H * 0.07, 0, my2 + H * 0.07);
+      fog.addColorStop(0, 'rgba(130,170,190,0)');
+      fog.addColorStop(0.5, `rgba(130,170,190,${0.05 + i * 0.03})`);
+      fog.addColorStop(1, 'rgba(130,170,190,0)');
+      ctx.fillStyle = fog;
+      ctx.fillRect(0, my2 - H * 0.07, W, H * 0.14);
+    }
+
+    // 萤火虫：游走 + 呼吸明灭
+    for (const f of flies) {
+      f.x += Math.sin(t * 0.23 + f.ph) * 0.4 * dpr * dt;
+      f.y += Math.cos(t * 0.19 + f.ph * 1.7) * 0.3 * dpr * dt;
+      if (f.x < 0) f.x = W; if (f.x > W) f.x = 0;
+      if (f.y < H * 0.32) f.y = H * 0.32;
+      if (f.y > H * 0.94) f.y = H * 0.94;
+      const pulse = Math.pow(Math.max(0, Math.sin(t * f.bl + f.ph)), 3);
+      const a = 0.15 + 0.85 * pulse;
+      const g = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, f.r * 2.4);
+      g.addColorStop(0, `rgba(216,255,150,${0.8 * a})`);
+      g.addColorStop(0.45, `rgba(178,240,100,${0.32 * a})`);
+      g.addColorStop(1, 'rgba(178,240,100,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(f.x, f.y, f.r * 2.4, 0, 7);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(f.x, f.y, 1.4 * dpr, 0, 7);
+      ctx.fillStyle = `rgba(240,255,210,${a})`;
+      ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    requestAnimationFrame(frame);
+  }
+
+  addEventListener('resize', resize);
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

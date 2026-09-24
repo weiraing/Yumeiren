@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>霓虹地平线</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0a0416; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+(() => {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  let W = 0, H = 0, dpr = 1, hz = 0, cx = 0;
+  let stars = [], ridgeFar = [], ridgeNear = [];
+
+  function ridge(n, amp, base) {
+    const pts = [];
+    for (let i = 0; i <= n; i++) {
+      const x = (i / n) * W;
+      const y = hz - base - Math.random() * amp
+        - Math.sin(i * 1.7) * amp * 0.3;
+      pts.push([x, y]);
+    }
+    return pts;
+  }
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cv.width = Math.floor(innerWidth * dpr);
+    H = cv.height = Math.floor(innerHeight * dpr);
+    cv.style.width = innerWidth + 'px';
+    cv.style.height = innerHeight + 'px';
+    hz = H * 0.62;
+    cx = W * 0.5;
+    stars = Array.from({ length: Math.floor(W * H / (13000 * dpr * dpr)) }, () => ({
+      x: Math.random() * W,
+      y: Math.random() * hz * 0.85,
+      r: (Math.random() * 1.1 + 0.3) * dpr,
+      p: Math.random() * 6.28,
+      s: 0.6 + Math.random() * 1.6
+    }));
+    ridgeFar = ridge(14, H * 0.10, H * 0.03);
+    ridgeNear = ridge(10, H * 0.14, 0);
+  }
+
+  function skyGrad() {
+    const g = ctx.createLinearGradient(0, 0, 0, hz);
+    g.addColorStop(0, '#0a0416');
+    g.addColorStop(0.5, '#2a0a3e');
+    g.addColorStop(1, '#8e2260');
+    return g;
+  }
+
+  function drawMountain(pts, fill, glow) {
+    ctx.beginPath();
+    ctx.moveTo(0, hz);
+    for (const [x, y] of pts) ctx.lineTo(x, y);
+    ctx.lineTo(W, hz);
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.beginPath();
+    pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+    ctx.strokeStyle = glow;
+    ctx.lineWidth = 1.5 * dpr;
+    ctx.stroke();
+  }
+
+  let frac = 0;
+  function frame(now) {
+    const t = now / 1000;
+
+    // 天空
+    ctx.fillStyle = skyGrad();
+    ctx.fillRect(0, 0, W, hz);
+
+    // 星星
+    for (const s of stars) {
+      ctx.globalAlpha = 0.3 + 0.7 * Math.abs(Math.sin(s.p + t * s.s));
+      ctx.fillStyle = '#e8e0ff';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, 7);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // 落日(条纹用同一天空渐变色挖空，保证无缝)
+    const R = Math.min(H * 0.22, W * 0.20);
+    const sy = hz - H * 0.06;
+    const sg = ctx.createLinearGradient(0, sy - R, 0, sy + R);
+    sg.addColorStop(0, '#ffe66d');
+    sg.addColorStop(0.5, '#ff8a4c');
+    sg.addColorStop(1, '#ff2e63');
+    ctx.fillStyle = sg;
+    ctx.beginPath();
+    ctx.arc(cx, sy, R, 0, 7);
+    ctx.fill();
+    ctx.fillStyle = skyGrad();
+    let yy = sy + R * 0.05, i = 0;
+    while (yy < sy + R) {
+      const gap = (1.5 + i * 1.6) * dpr;
+      ctx.fillRect(cx - R, yy, R * 2, gap);
+      yy += gap + (2.5 + i * 2.0) * dpr;
+      i++;
+    }
+
+    // 地面
+    const gg = ctx.createLinearGradient(0, hz, 0, H);
+    gg.addColorStop(0, '#160826');
+    gg.addColorStop(1, '#07030f');
+    ctx.fillStyle = gg;
+    ctx.fillRect(0, hz, W, H - hz);
+
+    // 透视网格
+    const rows = 20, cols = 24, A = 2.6;
+    frac = (t * 0.55) % 1;
+    ctx.lineWidth = Math.max(1, 1.2 * dpr);
+    for (let k = 1; k <= rows; k++) {
+      const d = k - frac;
+      const y = hz + (H - hz) * (A / (A + d));
+      ctx.strokeStyle = `rgba(0,255,235,${0.15 + 0.5 * (A / (A + d))})`;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(W, y);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(255,60,180,0.35)';
+    for (let k = -cols; k <= cols; k++) {
+      const xb = cx + k * (W / cols) * 1.4;
+      ctx.beginPath();
+      ctx.moveTo(cx, hz);
+      ctx.lineTo(xb, H);
+      ctx.stroke();
+    }
+
+    // 山脉剪影(在网格之上，压住地平线)
+    drawMountain(ridgeFar, '#1c0a34', 'rgba(255,80,190,0.35)');
+    drawMountain(ridgeNear, '#0d0420', 'rgba(0,240,255,0.45)');
+
+    // 地平线光带
+    const hgl = ctx.createLinearGradient(0, hz - 6 * dpr, 0, hz + 6 * dpr);
+    hgl.addColorStop(0, 'rgba(255,60,180,0)');
+    hgl.addColorStop(0.5, 'rgba(255,90,200,0.85)');
+    hgl.addColorStop(1, 'rgba(255,60,180,0)');
+    ctx.fillStyle = hgl;
+    ctx.fillRect(0, hz - 6 * dpr, W, 12 * dpr);
+
+    // 暗角
+    const vg = ctx.createRadialGradient(cx, H * 0.5, H * 0.25, cx, H * 0.5, H * 0.85);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(0,0,0,0.45)');
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, W, H);
+
+    requestAnimationFrame(frame);
+  }
+
+  addEventListener('resize', resize);
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

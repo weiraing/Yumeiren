@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>流光墨影</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #08080f; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+(() => {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  let W = 0, H = 0, dpr = 1, ps = [];
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cv.width = Math.floor(innerWidth * dpr);
+    H = cv.height = Math.floor(innerHeight * dpr);
+    cv.style.width = innerWidth + 'px';
+    cv.style.height = innerHeight + 'px';
+    // 铺底色(拖尾从纯底色开始)
+    ctx.fillStyle = '#08080f';
+    ctx.fillRect(0, 0, W, H);
+    const n = Math.floor((W * H) / (2400 * dpr * dpr));
+    ps = Array.from({ length: n }, () => ({
+      x: Math.random() * W, y: Math.random() * H,
+      life: 120 + Math.random() * 380
+    }));
+  }
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min((now - last) / 16.666, 3);
+    last = now;
+    const t = now / 1000;
+
+    // 半透明底涂：旧轨迹缓缓淡出，新轨迹不断织入
+    ctx.fillStyle = 'rgba(8, 8, 15, 0.038)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.globalCompositeOperation = 'lighter';
+    const hueBase = (t * 5) % 360;
+    const sp = 1.35 * dpr;
+    for (const p of ps) {
+      // 伪流场：角度由几组正弦叠加，随时间缓慢演变
+      const a = Math.sin(p.x * 0.0017 + t * 0.12) * 1.9
+              + Math.cos(p.y * 0.0023 - t * 0.09) * 1.9
+              + Math.sin((p.x + p.y) * 0.0008 + t * 0.05) * 1.2;
+      const nx = p.x + Math.cos(a) * sp * dt;
+      const ny = p.y + Math.sin(a) * sp * dt;
+      ctx.strokeStyle = `hsla(${(hueBase + a * 42 + 360) % 360}, 85%, 64%, 0.5)`;
+      ctx.lineWidth = 1.4 * dpr;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(nx, ny);
+      ctx.stroke();
+      p.x = nx;
+      p.y = ny;
+      p.life -= dt;
+      if (p.life < 0 || p.x < -8 || p.x > W + 8 || p.y < -8 || p.y > H + 8) {
+        p.x = Math.random() * W;
+        p.y = Math.random() * H;
+        p.life = 140 + Math.random() * 380;
+      }
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    requestAnimationFrame(frame);
+  }
+
+  addEventListener('resize', resize);
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

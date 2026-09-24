@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>大漠孤烟</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #12060f; }
+  canvas { display: block; }
+  .poem {
+    position: fixed; top: 6%; left: 4%;
+    writing-mode: vertical-rl; letter-spacing: 0.55em;
+    font: 300 20px/1 "STKaiti", "KaiTi", serif;
+    color: rgba(255, 226, 190, 0.30);
+    text-shadow: 0 0 14px rgba(0,0,0,0.5);
+    user-select: none; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div class="poem">大漠孤煙直</div>
+<script>
+(() => {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  let W = 0, H = 0, dpr = 1;
+  let dunes = null, smokeSource = null;
+  let smoke = [], grains = [], birds = [], birdNext = 3000;
+
+  const rand = (a, b) => a + Math.random() * (b - a);
+
+  // 沙丘轮廓线: 正弦叠加，返回从 ridgeY 到屏幕底部的路径
+  function dunePath(g, ridgeBase, amp, freq, phase) {
+    g.beginPath();
+    g.moveTo(0, H);
+    g.lineTo(0, ridgeBase + Math.sin(phase) * amp);
+    for (let x = 0; x <= W; x += 6 * dpr) {
+      const u = x / W;
+      const y = ridgeBase
+        + Math.sin(u * freq * 6.28 + phase) * amp
+        + Math.sin(u * freq * 2.1 * 6.28 + phase * 1.7) * amp * 0.35;
+      g.lineTo(x, y);
+    }
+    g.lineTo(W, H);
+    g.closePath();
+  }
+
+  // 远景沙丘离屏缓存(含烽火台剪影)
+  function renderDunes() {
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d');
+
+    dunePath(g, H * 0.60, H * 0.030, 1.3, 0.8);
+    g.fillStyle = '#4a1f2a';
+    g.fill();
+
+    dunePath(g, H * 0.68, H * 0.045, 0.9, 2.6);
+    g.fillStyle = '#341421';
+    g.fill();
+
+    // 烽火台立于中层丘脊
+    const sx = W * rand(0.62, 0.72);
+    const ridgeY = H * 0.68 + Math.sin(0.9 * 6.28 + 2.6) * H * 0.045;
+    const tw = 26 * dpr, th = 62 * dpr;
+    g.fillStyle = '#1c0a14';
+    g.beginPath();
+    g.moveTo(sx - tw, ridgeY + 4);
+    g.lineTo(sx - tw * 0.55, ridgeY - th);
+    g.lineTo(sx + tw * 0.55, ridgeY - th);
+    g.lineTo(sx + tw, ridgeY + 4);
+    g.closePath();
+    g.fill();
+    g.fillRect(sx - tw * 0.75, ridgeY - th - 7 * dpr, tw * 1.5, 7 * dpr);
+    smokeSource = { x: sx, y: ridgeY - th - 8 * dpr };
+
+    dunePath(g, H * 0.82, H * 0.060, 0.7, 4.9);
+    g.fillStyle = '#1e0b16';
+    g.fill();
+
+    dunePath(g, H * 0.95, H * 0.050, 0.5, 1.9);
+    g.fillStyle = '#12060f';
+    g.fill();
+
+    // 丘脊高光
+    g.strokeStyle = 'rgba(255,160,90,0.10)';
+    g.lineWidth = 1.5 * dpr;
+    dunePath(g, H * 0.82, H * 0.060, 0.7, 4.9);
+    g.stroke();
+
+    return c;
+  }
+
+  function resetSmoke(p, fresh) {
+    p.x = smokeSource.x + rand(-2, 2) * dpr;
+    p.y = smokeSource.y;
+    p.age = fresh ? rand(0, 260) : 0;
+    p.max = rand(520, 760);
+    p.r = rand(3, 6) * dpr;
+    p.vy = rand(0.42, 0.62) * dpr;
+    p.wob = rand(0, Math.PI * 2);
+    p.wobAmp = rand(0.10, 0.30) * dpr;   // 振幅小 → 烟柱近乎垂直
+  }
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cv.width = Math.floor(innerWidth * dpr);
+    H = cv.height = Math.floor(innerHeight * dpr);
+    cv.style.width = innerWidth + 'px';
+    cv.style.height = innerHeight + 'px';
+    dunes = renderDunes();
+    smoke = [];
+    for (let i = 0; i < 130; ++i) { const p = {}; resetSmoke(p, true); smoke.push(p); }
+    grains = [];
+    for (let i = 0; i < 70; ++i) {
+      grains.push({ x: rand(0, W), y: rand(H * 0.72, H), v: rand(0.5, 2.2) * dpr, a: rand(0.03, 0.12), r: rand(0.5, 1.4) * dpr });
+    }
+    birds = [];
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function frame(t) {
+    // 落日暮空
+    const sky = ctx.createLinearGradient(0, 0, 0, H * 0.75);
+    sky.addColorStop(0, '#1b0c2e');
+    sky.addColorStop(0.45, '#571e3e');
+    sky.addColorStop(0.8, '#b3542e');
+    sky.addColorStop(1, '#e8964e');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, H);
+
+    // 落日(半轮沉入远丘)
+    const sunX = W * 0.30, sunY = H * 0.585, sunR = Math.min(W, H) * 0.085;
+    const halo = ctx.createRadialGradient(sunX, sunY, sunR * 0.4, sunX, sunY, sunR * 3.2);
+    halo.addColorStop(0, 'rgba(255,170,80,0.55)');
+    halo.addColorStop(1, 'rgba(255,170,80,0)');
+    ctx.fillStyle = halo;
+    ctx.fillRect(sunX - sunR * 3.5, sunY - sunR * 3.5, sunR * 7, sunR * 7);
+    const disc = ctx.createLinearGradient(0, sunY - sunR, 0, sunY + sunR);
+    disc.addColorStop(0, '#ffd27a');
+    disc.addColorStop(1, '#f2762e');
+    ctx.fillStyle = disc;
+    ctx.beginPath();
+    ctx.arc(sunX, sunY, sunR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 沙丘
+    ctx.drawImage(dunes, 0, 0);
+
+    // 孤烟: 直上的烟柱，越升越散
+    ctx.globalCompositeOperation = 'lighter';
+    for (const p of smoke) {
+      p.age += 1;
+      if (p.age > p.max) { resetSmoke(p, false); continue; }
+      const k = p.age / p.max;
+      p.y -= p.vy * (1 + k * 0.4);
+      p.x += Math.sin(p.wob + p.age * 0.02) * p.wobAmp + 0.06 * dpr;  // 极轻的风偏
+      const r = p.r * (1 + k * 4.2);
+      const a = 0.11 * (1 - k) * (k < 0.08 ? k / 0.08 : 1);
+      const grd = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+      grd.addColorStop(0, `rgba(225,205,190,${a})`);
+      grd.addColorStop(1, 'rgba(225,205,190,0)');
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+
+    // 贴地飞沙
+    ctx.fillStyle = '#e8b98a';
+    for (const s of grains) {
+      ctx.globalAlpha = s.a;
+      ctx.fillRect(s.x, s.y, s.r * 2.4, s.r);
+      s.x += s.v;
+      if (s.x > W + 4) s.x = -4;
+    }
+    ctx.globalAlpha = 1;
+
+    // 归巢飞鸟(偶发)
+    if (t > birdNext && birds.length < 3) {
+      birds.push({ x: -40 * dpr, y: rand(H * 0.18, H * 0.38), v: rand(0.7, 1.3) * dpr, ph: rand(0, 6.28) });
+      birdNext = t + rand(9000, 22000);
+    }
+    ctx.strokeStyle = 'rgba(30,10,20,0.75)';
+    ctx.lineWidth = 1.6 * dpr;
+    for (let i = birds.length - 1; i >= 0; --i) {
+      const b = birds[i];
+      b.x += b.v;
+      const flap = Math.sin(b.ph + t * 0.012) * 4.5 * dpr;
+      ctx.beginPath();
+      ctx.moveTo(b.x - 7 * dpr, b.y);
+      ctx.quadraticCurveTo(b.x - 3 * dpr, b.y - 3 * dpr - flap, b.x, b.y);
+      ctx.quadraticCurveTo(b.x + 3 * dpr, b.y - 3 * dpr - flap, b.x + 7 * dpr, b.y);
+      ctx.stroke();
+      if (b.x > W + 50) birds.splice(i, 1);
+    }
+
+    // 暮色压暗
+    const vign = ctx.createRadialGradient(W / 2, H * 0.5, Math.min(W, H) * 0.35, W / 2, H * 0.5, Math.max(W, H) * 0.8);
+    vign.addColorStop(0, 'rgba(0,0,0,0)');
+    vign.addColorStop(1, 'rgba(10,2,10,0.42)');
+    ctx.fillStyle = vign;
+    ctx.fillRect(0, 0, W, H);
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

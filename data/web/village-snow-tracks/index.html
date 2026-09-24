@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>乡村大雪·雪上足迹</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #cfd8e0; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+(() => {
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  let W = 0, H = 0, dpr = 1;
+  let village = null;
+  let flakes = [], prints = [], animals = [], chimneyPuffs = [], nextAnimal = 2000;
+
+  const rand = (a, b) => a + Math.random() * (b - a);
+
+  function house(g, x, base, s, wall, roofSnow) {
+    const w = 90 * s, h = 58 * s;
+    // 墙体
+    g.fillStyle = wall;
+    g.fillRect(x - w / 2, base - h, w, h);
+    // 屋顶(雪覆)
+    g.beginPath();
+    g.moveTo(x - w / 2 - 9 * s, base - h);
+    g.lineTo(x, base - h - 38 * s);
+    g.lineTo(x + w / 2 + 9 * s, base - h);
+    g.closePath();
+    g.fillStyle = roofSnow;
+    g.fill();
+    // 屋檐垂雪
+    g.beginPath();
+    g.moveTo(x - w / 2 - 9 * s, base - h);
+    g.quadraticCurveTo(x - w / 4, base - h + 9 * s, x, base - h + 3 * s);
+    g.quadraticCurveTo(x + w / 4, base - h + 10 * s, x + w / 2 + 9 * s, base - h);
+    g.lineTo(x + w / 2 + 9 * s, base - h - 4 * s);
+    g.lineTo(x - w / 2 - 9 * s, base - h - 4 * s);
+    g.closePath();
+    g.fill();
+    // 窗(暖光)
+    g.fillStyle = '#e8b45a';
+    g.fillRect(x - 14 * s, base - h * 0.68, 20 * s, 16 * s);
+    g.fillStyle = 'rgba(70,50,40,0.9)';
+    g.fillRect(x + 8 * s, base - h * 0.62, 16 * s, h * 0.62);   // 门
+    return { chimX: x + w * 0.28, chimY: base - h - 30 * s, s };
+  }
+
+  function tree(g, x, base, s, color) {
+    g.strokeStyle = color;
+    g.lineCap = 'round';
+    const branch = (x0, y0, ang, len, wgt) => {
+      if (len < 4 * s || wgt > 5) return;
+      const x1 = x0 + Math.cos(ang) * len, y1 = y0 + Math.sin(ang) * len;
+      g.lineWidth = Math.max(0.8, (6 - wgt) * 0.9 * s);
+      g.beginPath();
+      g.moveTo(x0, y0);
+      g.lineTo(x1, y1);
+      g.stroke();
+      branch(x1, y1, ang - rand(0.4, 0.9), len * rand(0.6, 0.75), wgt + 1);
+      branch(x1, y1, ang + rand(0.4, 0.9), len * rand(0.6, 0.75), wgt + 1);
+    };
+    branch(x, base, -Math.PI / 2, 42 * s, 0);
+  }
+
+  // 村庄/树/雪丘远景(离屏缓存)
+  function renderVillage() {
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    const far = H * 0.66;
+
+    // 远雪坡
+    g.fillStyle = '#dbe4ec';
+    g.beginPath();
+    g.moveTo(0, far + 18 * dpr);
+    g.quadraticCurveTo(W * 0.3, far - 26 * dpr, W * 0.62, far + 6 * dpr);
+    g.quadraticCurveTo(W * 0.85, far + 24 * dpr, W, far - 4 * dpr);
+    g.lineTo(W, H); g.lineTo(0, H);
+    g.closePath(); g.fill();
+
+    // 树与屋
+    const dark = '#5a6068';
+    tree(g, W * 0.10, far + 10 * dpr, dpr * 0.9, dark);
+    tree(g, W * 0.88, far + 14 * dpr, dpr * 1.1, dark);
+    const hs = [];
+    hs.push(house(g, W * 0.30, far + 14 * dpr, dpr, '#6b574a'));
+    hs.push(house(g, W * 0.50, far + 20 * dpr, dpr * 0.82, '#5d4c41'));
+    hs.push(house(g, W * 0.68, far + 12 * dpr, dpr * 0.95, '#66523f'));
+
+    // 近处雪原(两层缓丘)
+    g.fillStyle = '#eef3f7';
+    g.beginPath();
+    g.moveTo(0, H * 0.80);
+    g.quadraticCurveTo(W * 0.25, H * 0.755, W * 0.55, H * 0.805);
+    g.quadraticCurveTo(W * 0.8, H * 0.845, W, H * 0.795);
+    g.lineTo(W, H); g.lineTo(0, H);
+    g.closePath(); g.fill();
+
+    g.fillStyle = '#f8fafc';
+    g.beginPath();
+    g.moveTo(0, H * 0.93);
+    g.quadraticCurveTo(W * 0.35, H * 0.875, W * 0.7, H * 0.925);
+    g.quadraticCurveTo(W * 0.9, H * 0.95, W, H * 0.9);
+    g.lineTo(W, H); g.lineTo(0, H);
+    g.closePath(); g.fill();
+
+    return { canvas: c, chimneys: hs.map(h => ({ x: h.chimX, y: h.chimY, s: h.s })) };
+  }
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = cv.width = Math.floor(innerWidth * dpr);
+    H = cv.height = Math.floor(innerHeight * dpr);
+    cv.style.width = innerWidth + 'px';
+    cv.style.height = innerHeight + 'px';
+    const v = renderVillage();
+    village = v.canvas;
+    chimneyPuffs = v.chimneys.map(ch => ({ ...ch, puffs: [] }));
+    flakes = [];
+    for (let i = 0; i < 300; ++i) {
+      flakes.push({ x: rand(0, W), y: rand(0, H), r: rand(0.8, 3.0) * dpr, v: rand(0.35, 1.1) * dpr, ph: rand(0, 6.28), a: rand(0.4, 0.95) });
+    }
+    prints = [];
+    animals = [];
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // 动物: 猫/狐侧影，行走步态 + 身后脚印
+  function spawnAnimal(t) {
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    const fox = Math.random() < 0.4;
+    const s = (fox ? rand(0.9, 1.15) : rand(0.7, 0.9)) * dpr * (H / 900 + 0.5);
+    animals.push({
+      fox, dir, s,
+      x: dir > 0 ? -70 * s : W + 70 * s,
+      y: rand(H * 0.86, H * 0.97),
+      v: (fox ? rand(0.55, 0.75) : rand(0.35, 0.5)) * dpr,
+      gait: rand(0, 6.28),
+      bobPh: rand(0, 6.28),
+      tailPh: rand(0, 6.28),
+      lastStep: 0
+    });
+  }
+
+  function drawAnimal(a, t) {
+    const { x, y, s, dir, fox } = a;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(dir, 1);
+    const body = fox ? '#a8552a' : '#3a3a44';
+    const dark = fox ? '#8c4520' : '#2c2c35';
+    const bob = Math.sin(a.bobPh + t * 0.006) * 1.6 * s;
+
+    // 影子
+    ctx.fillStyle = 'rgba(120,135,155,0.28)';
+    ctx.beginPath();
+    ctx.ellipse(0, 2 * s, 30 * s, 4.5 * s, 0, 0, 6.29);
+    ctx.fill();
+
+    // 尾(猫竖翘/狐大蓬松)
+    const tw = Math.sin(a.tailPh + t * 0.0035) * 7 * s;
+    ctx.strokeStyle = body;
+    ctx.lineCap = 'round';
+    ctx.lineWidth = (fox ? 10 : 5.5) * s;
+    ctx.beginPath();
+    ctx.moveTo(-24 * s, -14 * s + bob);
+    if (fox) ctx.quadraticCurveTo(-42 * s, -12 * s + bob, -46 * s, -2 * s + tw + bob);
+    else ctx.quadraticCurveTo(-40 * s, -18 * s + bob, -36 * s + tw * 0.6, -34 * s + tw + bob);
+    ctx.stroke();
+    if (fox) {  // 尾尖白
+      ctx.strokeStyle = '#f2ede6';
+      ctx.lineWidth = 8 * s;
+      ctx.beginPath();
+      ctx.moveTo(-45 * s, -6 * s + tw + bob);
+      ctx.lineTo(-46 * s, -1 * s + tw + bob);
+      ctx.stroke();
+    }
+
+    // 腿(两对，交替摆动)
+    ctx.strokeStyle = dark;
+    ctx.lineWidth = 4 * s;
+    const legs = [[-14, 0], [-8, Math.PI], [10, Math.PI], [16, 0]];
+    for (const [lx, ph] of legs) {
+      const sw = Math.sin(a.gait + ph) * 6 * s;
+      ctx.beginPath();
+      ctx.moveTo(lx * s, -12 * s + bob);
+      ctx.lineTo(lx * s + sw * 0.6, 0);
+      ctx.stroke();
+    }
+
+    // 身 + 头 + 耳
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    ctx.ellipse(-2 * s, -18 * s + bob, 24 * s, 10 * s, -0.06, 0, 6.29);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(22 * s, -25 * s + bob, 9.5 * s, 8 * s, 0, 0, 6.29);
+    ctx.fill();
+    ctx.beginPath();  // 耳
+    ctx.moveTo(17 * s, -31 * s + bob); ctx.lineTo(19 * s, -40 * s + bob); ctx.lineTo(24 * s, -32 * s + bob);
+    ctx.moveTo(24 * s, -32 * s + bob); ctx.lineTo(28 * s, -39 * s + bob); ctx.lineTo(30 * s, -29 * s + bob);
+    ctx.closePath();
+    ctx.fill();
+    if (fox) {       // 吻部
+      ctx.beginPath();
+      ctx.moveTo(28 * s, -27 * s + bob); ctx.lineTo(38 * s, -23 * s + bob); ctx.lineTo(28 * s, -20 * s + bob);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function addPrint(a) {
+    const off = (Math.random() - 0.5) * 5 * dpr;
+    prints.push({ x: a.x + (a.dir > 0 ? -10 : 10) * a.s * 3 + off, y: a.y + off, rot: rand(0, 6.28), life: 1, small: !a.fox });
+  }
+
+  function frame(t) {
+    // 阴冬天空
+    const sky = ctx.createLinearGradient(0, 0, 0, H * 0.7);
+    sky.addColorStop(0, '#a9b6c4');
+    sky.addColorStop(1, '#dbe2e9');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, H);
+
+    // 远村(剪影淡入雾雪)
+    ctx.drawImage(village, 0, 0);
+    ctx.fillStyle = 'rgba(215,225,235,0.25)';
+    ctx.fillRect(0, 0, W, H * 0.72);
+
+    // 烟囱炊烟
+    for (const ch of chimneyPuffs) {
+      if (ch.puffs.length < 14 && Math.random() < 0.05) {
+        ch.puffs.push({ x: ch.x, y: ch.y, r: 2.5 * ch.s, a: 0.30, v: 0.22 * ch.s });
+      }
+      for (let i = ch.puffs.length - 1; i >= 0; --i) {
+        const p = ch.puffs[i];
+        p.y -= p.v; p.x += Math.sin(p.y * 0.05) * 0.15 * ch.s + 0.12 * ch.s;
+        p.r += 0.10 * ch.s; p.a -= 0.0035;
+        if (p.a <= 0) { ch.puffs.splice(i, 1); continue; }
+        ctx.fillStyle = `rgba(160,168,178,${p.a})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, 6.29);
+        ctx.fill();
+      }
+    }
+
+    // 雪上脚印(新踏出，逐渐被新雪覆盖)
+    for (let i = prints.length - 1; i >= 0; --i) {
+      const p = prints[i];
+      p.life -= 0.0016;
+      if (p.life <= 0) { prints.splice(i, 1); continue; }
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      ctx.fillStyle = `rgba(150,164,182,${0.40 * p.life})`;
+      const n = p.small ? 4 : 3;   // 猫科4趾(含肉垫放大)，简化均为点组
+      for (let k = 0; k < n; ++k) {
+        const ang = -0.8 + k * 0.55;
+        const rr = (p.small ? 1.7 : 2.2) * dpr;
+        ctx.beginPath();
+        ctx.ellipse(Math.cos(ang) * 4 * dpr, Math.sin(ang) * 2.2 * dpr - (k === n - 1 ? 0 : 0),
+          rr * (k === n - 1 ? 1.4 : 0.8), rr * (k === n - 1 ? 1.1 : 1.25), ang * 0.4, 0, 6.29);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // 动物
+    if (t > nextAnimal && animals.length < 2) {
+      spawnAnimal(t);
+      nextAnimal = t + rand(9000, 20000);
+    }
+    for (let i = animals.length - 1; i >= 0; --i) {
+      const a = animals[i];
+      a.x += a.v * a.dir;
+      a.gait += 0.16;
+      // 每落一步(步相过半)留一对脚印
+      const stepIdx = Math.floor(a.gait / Math.PI);
+      if (stepIdx > a.lastStep) { a.lastStep = stepIdx; addPrint(a); }
+      drawAnimal(a, t);
+      if (a.x < -120 || a.x > W + 120) animals.splice(i, 1);
+    }
+
+    // 大雪
+    ctx.fillStyle = '#ffffff';
+    for (const f of flakes) {
+      ctx.globalAlpha = f.a;
+      f.y += f.v + f.r * 0.18;
+      f.x += Math.sin(f.ph + f.y * 0.006) * 0.35 * dpr + 0.22 * dpr;  // 风偏
+      if (f.y > H + 4) { f.y = -4; f.x = rand(0, W); }
+      if (f.x > W + 4) f.x = -4;
+      ctx.beginPath();
+      ctx.arc(f.x, f.y, f.r, 0, 6.29);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // 雪雾蒙层
+    ctx.fillStyle = 'rgba(235,241,247,0.06)';
+    ctx.fillRect(0, 0, W, H);
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
