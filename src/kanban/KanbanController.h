@@ -111,7 +111,10 @@ public:
     QString meshHideText() const;
     bool setModelPath(const QString &modelJsonPath);
     QString modelPath() const { return m_modelPath; }
-    int refreshModels(); // 重新扫描模型目录，返回可用模型数
+    // 重新扫描模型目录，返回可用模型数。force=false 时若已扫过则直接复用（启动路径
+    // 有两个先后脚的调用点，合并成一次遍历）；用户主动「刷新」传 force=true 才真重扫。
+    int refreshModels(bool force = false);
+
 
     // 显示器电源状态(由主窗口的 WM_POWERBROADCAST 投递，与视频壁纸同一个事件源)。
     void setMonitorOn(bool on);

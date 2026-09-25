@@ -58,20 +58,6 @@ QString webLibraryRoot()
         .filePath(QStringLiteral("data/web"));
 }
 
-QString findWebEntryDocument(const QDir &dir)
-{
-    const QFileInfoList files =
-        dir.entryInfoList(QDir::Files | QDir::NoDotAndDotDot, QDir::Name);
-    for (const QString &preferred :
-         {QStringLiteral("index.html"), QStringLiteral("index.htm")}) {
-        for (const QFileInfo &file : files) {
-            if (file.fileName().compare(preferred, Qt::CaseInsensitive) == 0)
-                return file.absoluteFilePath();
-        }
-    }
-    return QString();
-}
-
 QString cleanWebSourceKey(const QString &source)
 {
     QString key = source.trimmed();
@@ -102,7 +88,7 @@ void addWebLibraryDirectory(MediaLibraryCard *card, QTreeWidgetItem *parent,
         return card->addRow(parent, name, type, path, checkable);
     };
 
-    const QString entry = findWebEntryDocument(dir);
+    const QString entry = WebWallpaper::webEntryDocument(dir.absolutePath());
     if (!entry.isEmpty()) {
         QTreeWidgetItem *project =
             addRow(root ? QStringLiteral("默认 Web 项目") : dir.dirName(),
@@ -985,6 +971,12 @@ void MainWindow::scanVideoDir()
     QDir().mkpath(QCoreApplication::applicationDirPath() + QStringLiteral("/data/video"));
     const QStringList found = videoFilesOnDisk();
     applyVideoPlaylist(found);
+    // 用户显式扫描：把指纹同步到当下，并记下「已比对过」，这样紧接着的切页不会再扫一遍。
+    m_videoDirStamp = QFileInfo(QCoreApplication::applicationDirPath()
+                                + QStringLiteral("/data/video"))
+                          .lastModified()
+                          .toMSecsSinceEpoch();
+    m_videoLibSynced = true;
     setLog(QStringLiteral("刷新完成：data/video 共 %1 个视频").arg(found.size()), false);
 }
 
@@ -1001,7 +993,29 @@ void MainWindow::refreshVideoLibraryIfChanged()
 {
     if (!m_videoLib)
         return;
+
+    // ⚠️ 先过一道**便宜的目录指纹**，再决定要不要递归扫描。videoFilesOnDisk() 是
+    // QDirIterator 全树遍历（用户库上千个文件时是实打实的 I/O），而本函数挂在切页的
+    // 高频路径上 —— 每次进壁纸页都全扫一遍纯属浪费。
+    //
+    // 指纹取 data/video 这层目录的 mtime：它只在**直接子项**增删时变，所以单靠它不够，
+    // 得配「清单比对」兜底。两道合起来的语义是：指纹没变 **且** 上次比对时清单与播放
+    // 列表一致 ⇒ 直接跳过扫描；否则老老实实扫一遍再比。首次进页 m_videoLibSynced 为
+    // false，一定走扫描，不会漏掉冷启动时就存在的视频。
+    const QString videoDir = QCoreApplication::applicationDirPath()
+                             + QStringLiteral("/data/video");
+    const qint64 stamp = QFileInfo(videoDir).lastModified().toMSecsSinceEpoch();
+
+    if (m_videoLibSynced && stamp == m_videoDirStamp) {
+        updateVideoLibraryInfo();
+        updateVideoButtons();
+        updatePlayingHighlight();
+        return;
+    }
+
     const QStringList found = videoFilesOnDisk();
+    m_videoDirStamp = stamp;
+    m_videoLibSynced = true;
     if (found == VideoWallpaper::instance().playlist()) {
         updateVideoLibraryInfo();
         updateVideoButtons();

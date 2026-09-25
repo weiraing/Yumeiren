@@ -88,7 +88,14 @@ bool Engine::extractDlls(QString *error)
             if (error) *error = QStringLiteral("无法写入 %1").arg(e.target);
             return false;
         }
-        dst.write(src.readAll());
+        // ⚠️ 校验写入字节数：磁盘满/中途权限失败时 write() 会短写而不报错，那个 DLL
+        // 会被当成写好了，后续 regsvr32 加载一个截断的 PE —— 报错点离现场很远。
+        const QByteArray bytes = src.readAll();
+        if (dst.write(bytes) != bytes.size()) {
+            if (error)
+                *error = QStringLiteral("写入内置资源不完整: %1").arg(e.target);
+            return false;
+        }
         dst.close();
     }
     return true;
@@ -309,9 +316,28 @@ bool Engine::writeEffectConfig(const EffectConfig &cfg, QString *error)
 
 bool Engine::restartExplorer(QString *error)
 {
-    Q_UNUSED(error);
-    QProcess::execute(QStringLiteral("taskkill"),
-                      {QStringLiteral("/f"), QStringLiteral("/im"), QStringLiteral("explorer.exe")});
+    const int killRc = QProcess::execute(
+        QStringLiteral("taskkill"),
+        {QStringLiteral("/f"), QStringLiteral("/im"), QStringLiteral("explorer.exe")});
+    // taskkill 返回码：0 成功、128 没找到进程（explorer 本来就没跑，也算达到了目的）。
+    // 其它值（常见 5 = 拒绝访问，explorer 以更高权限运行）意味着它**没被杀掉**。
+    const bool killAccepted = (killRc == 0 || killRc == 128);
+    if (!killAccepted) {
+        // 这时候再 startDetached 会拉起**第二个** explorer（老的那个还活着），
+        // 于是桌面出现两套任务栏/托盘。宁可不动，把失败如实报上去。
+        applog::log(applog::Level::Warning,
+                    QStringLiteral("结束 explorer.exe 失败: taskkill rc=%1，已跳过重启以免起了两份桌面")
+                        .arg(killRc),
+                    QStringLiteral("Engine"));
+        if (error)
+            *error = QStringLiteral("无法结束资源管理器进程（错误码 %1），"
+                                    "背景可能不会立即生效；可稍后手动重启资源管理器。")
+                         .arg(killRc);
+        return false;
+    }
+
+    // 等它真的退干净再拉新的：不等可能拉起两个。5 秒没退就当失败，同样**不再**startDetached。
+    bool died = false;
     for (int i = 0; i < 50; ++i) {
         bool alive = false;
         HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -325,11 +351,31 @@ bool Engine::restartExplorer(QString *error)
             }
             CloseHandle(snap);
         }
-        if (!alive)
+        // 快照都拿不到时视为已退出：宁可继续往下走，也不要在探测失灵时把功能卡死。
+        if (!alive) {
+            died = true;
             break;
+        }
         QThread::msleep(100);
     }
-    QProcess::startDetached(QStringLiteral("explorer.exe"), QStringList());
+    if (!died) {
+        applog::log(applog::Level::Warning,
+                    QStringLiteral("explorer.exe 在 5 秒内没有退出，已跳过重启以免起了两份桌面"),
+                    QStringLiteral("Engine"));
+        if (error)
+            *error = QStringLiteral("资源管理器没有在预期时间内退出，"
+                                    "背景可能不会立即生效；可稍后手动重启资源管理器。");
+        return false;
+    }
+
+    // 只有真确认上一步成功，这里才拉起新实例。
+    if (!QProcess::startDetached(QStringLiteral("explorer.exe"), QStringList())) {
+        applog::log(applog::Level::Warning, QStringLiteral("重新拉起 explorer.exe 失败"),
+                    QStringLiteral("Engine"));
+        if (error)
+            *error = QStringLiteral("资源管理器已退出但无法重新启动，请在任务管理器中手动新建 explorer.exe。");
+        return false;
+    }
     QThread::msleep(600);
     return true;
 }

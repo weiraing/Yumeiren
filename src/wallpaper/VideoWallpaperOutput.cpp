@@ -270,7 +270,10 @@ void VideoWallpaper::layoutOutputs()
     };
 
     // 多屏档位(全屏拉伸/多屏镜像)已删(2026-09-24)：固定只铺主屏，行为与删除前的默认档一致。
-    makeOutput(QGuiApplication::primaryScreen()->geometry(), true);
+    // 上面已因 screens.isEmpty() 提前返回过，这里再判一次空：两者相隔近两百行，
+    // 靠「记得上面查过」维系太脆，而且无显示器时解引用就是直接崩。
+    if (const QScreen *primary = QGuiApplication::primaryScreen())
+        makeOutput(primary->geometry(), true);
 }
 VideoWallpaper::VideoOutput *VideoWallpaper::liveOutputFor(const QMediaPlayer *player)
 {
@@ -473,7 +476,10 @@ void VideoWallpaper::runProbeStage(const QString &stage)
         m_probeWidget->setWindowFlags(Qt::FramelessWindowHint | Qt::Tool
                                       | Qt::WindowTransparentForInput);
         m_probePlayer->setVideoOutput(m_probeWidget);
-        const QRect g = QGuiApplication::primaryScreen()->geometry();
+        // 无显示器时 primaryScreen() 为 nullptr —— 探针缺个尺寸而已，给个默认值继续，
+        // 不必为此中断（这是诊断路径，能跑出解码数据比像素精确更重要）。
+        const QScreen *primary = QGuiApplication::primaryScreen();
+        const QRect g = primary ? primary->geometry() : QRect(0, 0, 1920, 1080);
         m_probeWidget->setGeometry(g);
         m_probeWidget->show();
         winhelper::mountBehindIcons(m_probeWidget, g);

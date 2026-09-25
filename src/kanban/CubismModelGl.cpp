@@ -42,8 +42,35 @@ bool CubismModelImpl::ensureGl(const QSize &pixelSize, quint64 contextGeneration
     // CreateRenderer 会访问着色器单例，必须先处理上下文换代。
     cubismruntime::syncShaderCache(contextGeneration);
 
+    // 遮罩上限：SDK 用 1 张 render texture 时最多排 36 个遮罩组(9 宫格 × RGBA)，
+    // 2 张起每张按 32 个递增(见 CubismClippingManager 的 ClippingMaskMaxCount*)。
+    // ⚠️ 超限时 SDK **不会中止** —— SetupLayoutBounds 只塞一组凑数的布局就返回，
+    // 源码注释自己写明「继续执行的话 SetupShaderProgram 会越界访问」，而那句
+    // CSM_ASSERT(0) 在 Release 下是空的(#define CSM_ASSERT(expr))。
+    // 后果是渲染一帧后堆被写坏，直到下一次内存分配才崩 —— 实测崩在**下一帧的
+    // update()** 里，表现为「模型能装载、能画首帧，然后毫无征兆地段错误」。
+    // 所以按遮罩组数**上界**(有遮罩的 drawable 数；SDK 还会对相同遮罩集去重，
+    // 实际只会更少)预先申请足够张数。
+    csmInt32 maskBufferCount = 1;
+    csmInt32 maskedDrawableCount = 0;
+    {
+        const csmInt32 drawableCount = _model->GetDrawableCount();
+        const csmInt32 *maskCounts = _model->GetDrawableMaskCounts();
+        for (csmInt32 i = 0; i < drawableCount; ++i) {
+            if (maskCounts && maskCounts[i] > 0) {
+                ++maskedDrawableCount;
+            }
+        }
+        if (maskedDrawableCount > 36) {
+            maskBufferCount = (maskedDrawableCount + 31) / 32;
+            logInfo(QStringLiteral("遮罩组数 %1 超过单张上限 36，render texture 申请 %2 张")
+                        .arg(maskedDrawableCount)
+                        .arg(maskBufferCount));
+        }
+    }
+
     CreateRenderer(static_cast<csmUint32>(pixelSize.width()),
-                   static_cast<csmUint32>(pixelSize.height()), 1);
+                   static_cast<csmUint32>(pixelSize.height()), maskBufferCount);
     CubismRenderer_OpenGLES2 *renderer = GetRenderer<CubismRenderer_OpenGLES2>();
     if (!renderer) {
         if (outError) {

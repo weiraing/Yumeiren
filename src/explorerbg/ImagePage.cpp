@@ -6,6 +6,8 @@
 #include "config/ConfigKeys.h"
 #include "core/CachePaths.h"
 #include "explorerbg/Engine.h"
+#include "ui/CardGridDelegate.h"
+#include "ui/PixelWheelGrid.h"
 #include "ui/TooltipStyle.h"
 
 #include <QApplication>
@@ -23,6 +25,9 @@
 #include <QRadioButton>
 #include <QScreen>
 #include <QScrollArea>
+#include <QSemaphore>
+// runImageExportAsync 用独立 std::thread 跑导出（见那里的说明，不用全局线程池）。
+#include <thread>
 #include <QSlider>
 #include <QStyledItemDelegate>
 #include <QThreadPool>
@@ -78,49 +83,17 @@ QImage decodeDownscaled(const QString &path, const QSize &target)
     return image;
 }
 
-class GalleryDelegate : public QStyledItemDelegate
+// 图片浏览网格的卡片：底部文字区随字体行高自适应（见 CardGridDelegate 的默认实现）。
+class GalleryDelegate : public CardGridDelegate
 {
 public:
     explicit GalleryDelegate(QObject *parent = nullptr)
-        : QStyledItemDelegate(parent) {}
-
-    void paint(QPainter *painter, const QStyleOptionViewItem &option,
-               const QModelIndex &index) const override
-    {
-        QStyleOptionViewItem opt(option);
-        initStyleOption(&opt, index);
-        const QIcon icon = opt.icon;
-        const QString name = opt.text;
-        opt.icon = QIcon();
-        opt.text.clear();
-        opt.features &= ~(QStyleOptionViewItem::HasDecoration | QStyleOptionViewItem::HasDisplay);
-        const QWidget *widget = opt.widget;
-        QStyle *style = widget ? widget->style() : QApplication::style();
-        painter->save();
-        painter->setFont(opt.font);
-        style->drawControl(QStyle::CE_ItemViewItem, &opt, painter, widget);
-
-        const QRect card = option.rect.adjusted(4, 4, -4, -4);
-        const int footerHeight = qMax(28, opt.fontMetrics.height() + 8);
-        const int dividerY = card.bottom() - footerHeight;
-        const QRect imageRect(card.left() + 4, card.top() + 4,
-                              card.width() - 8, dividerY - card.top() - 8);
-        icon.paint(painter, imageRect, Qt::AlignCenter, QIcon::Normal, QIcon::Off);
-        painter->setPen(QColor(128, 128, 128, 65));
-        painter->drawLine(card.left(), dividerY, card.right(), dividerY);
-
-        const QRect textRect(card.left() + 4, dividerY + 1,
-                             card.width() - 8, footerHeight - 1);
-        const QString text = opt.fontMetrics.elidedText(name, Qt::ElideRight, textRect.width());
-        style->drawItemText(painter, textRect, Qt::AlignCenter, opt.palette,
-                            opt.state & QStyle::State_Enabled, text, QPalette::Text);
-        painter->restore();
-    }
+        : CardGridDelegate(parent) {}
 
 protected:
     void initStyleOption(QStyleOptionViewItem *option, const QModelIndex &index) const override
     {
-        QStyledItemDelegate::initStyleOption(option, index);
+        CardGridDelegate::initStyleOption(option, index);
         option->font.setPointSizeF(qMax(7.0, option->font.pointSizeF() - 1.0));
         option->fontMetrics = QFontMetrics(option->font);
     }
@@ -238,7 +211,8 @@ QWidget *MainWindow::buildImagePage()
     auto *galTitle = new QLabel(QStringLiteral("图片浏览"), leftCard);
     galTitle->setObjectName(QStringLiteral("GroupTitle"));
     leftLay->addWidget(galTitle);
-    m_galleryList = new QListWidget(leftCard);
+    // 不是裸 QListWidget：滚轮按像素滚，不是 Qt 默认的「一次滚两三格」，见 ui/PixelWheelGrid.h。
+    m_galleryList = new PixelWheelGrid(leftCard);
     auto *gallery = m_galleryList;
     gallery->setObjectName(QStringLiteral("GalleryList"));
     gallery->setProperty("imageCards", true);
@@ -502,13 +476,24 @@ void MainWindow::rebuildGallery()
     if (!m_galleryList)
         return;
 
+    // 缩略图缓存按「路径+时间」哈希命名，换图/换文件夹就是新文件，旧文件再也读不到
+    // —— 没有上限只会一路堆积。在重建列表这个天然节点上修剪一次，代价是一次目录
+    // stat，且只真超限才动手。上限 64MB：按本机 300×220 PNG 约 60KB 算，够放一千张。
+    constexpr qint64 kGalleryThumbCacheMaxBytes = 64LL * 1024 * 1024;
+    CachePaths::pruneDirectory(CachePaths::galleryThumbs(), kGalleryThumbCacheMaxBytes);
+
     m_galleryList->blockSignals(true);
     m_galleryList->clear();
+    // res → 列表行号。回调里靠它 O(1) 定位，别再线性扫 m_presets —— 那是
+    // 「N 张图 × N 次回调」的 O(N²)，千张图库时每次回调都要走上千次字符串比较。
+    // 与看板娘网格的 m_kanbanThumbRows 同一个套路（同一个坑踩过两次）。
+    m_galleryThumbRows.clear();
     for (int i = 0; i < m_presets.size(); ++i) {
         const QString &res = m_presets[i].res;
         auto *item = new QListWidgetItem(m_presets[i].name, m_galleryList);
         item->setData(Qt::UserRole, res);
         item->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
+        m_galleryThumbRows.insert(res, i);
 
         const QString thumb = galleryThumbPath(res);
         if (QFileInfo::exists(thumb)) {
@@ -524,16 +509,25 @@ void MainWindow::rebuildGallery()
                 // 完整显示(不裁剪)并保留透明通道：PNG 透明区域透出卡片底色
                 img = img.scaled(300, 220, Qt::KeepAspectRatio, Qt::SmoothTransformation);
                 img.save(thumb, "PNG");
+                // ⚠️「检查存活」与「投递回调」必须在**同一个临界区**里，不能检查完就
+                // 解锁再投递 —— 那中间有个窗口：析构线程此刻拿锁翻掉 m_thumbTasksLive、
+                // 越过等待直接返回，而本线程已判定存活、随后把队列调用投给一个正在
+                // 析构的 this(悬垂)。~MainWindow 刻意不等任务跑完(见那里的说明)，所以
+                // invokeMethod 必须留在锁内：要么在析构拿锁之前完成投递(队列调用由
+                // Qt 在对象销毁时撤销，安全)，要么在推翻标志之后被拦下。
                 QMutexLocker guard(&m_thumbTasksMutex);
                 if (!m_thumbTasksLive)
                     return; // 主窗口已销毁：缩略图已落盘，下次进入图库自然命中缓存
                 QMetaObject::invokeMethod(this, [this, res, thumb] {
                     if (!m_galleryList)
                         return;
-                    for (int r = 0; r < m_presets.size() && r < m_galleryList->count(); ++r) {
-                        if (m_presets[r].res == res)
-                            m_galleryList->item(r)->setIcon(QIcon(thumb));
-                    }
+                    // 查表取行号；期间若图库已被重建（rebuildGallery 清了表），查不到就
+                    // 什么都不做 —— 那张图已经不在列表里，贴过去只会贴错格子。
+                    const auto it = m_galleryThumbRows.constFind(res);
+                    if (it == m_galleryThumbRows.constEnd())
+                        return;
+                    if (QListWidgetItem *item = m_galleryList->item(it.value()))
+                        item->setIcon(QIcon(thumb));
                 }, Qt::QueuedConnection);
             });
         }
@@ -756,15 +750,11 @@ void MainWindow::applyImage()
         imageDir = Engine::imagePoolDir();
         setLog(QStringLiteral("随机图片池已生成 %1 张，正在写入配置…").arg(count), false);
     } else {
-        QImage src(path);
-        if (src.isNull()) {
-            setLog(QStringLiteral("图片读取失败"), true);
-            m_applyImageBtn->setEnabled(true);
-            return;
-        }
-        const QImage processed = applyImageParams(src);
-        if (!processed.save(Engine::processedImagePath(), "PNG")) {
-            setLog(QStringLiteral("处理后的图片保存失败"), true);
+        // 单图：源路径已知，成品图路径固定 —— 剩下的解码/调参/编码都在工作线程里做。
+        int produced = 0;
+        if (!runImageExportAsync({path}, QString(), Engine::processedImagePath(), false,
+                                 &produced, &err)) {
+            setLog(err, true);
             m_applyImageBtn->setEnabled(true);
             return;
         }
@@ -803,8 +793,16 @@ void MainWindow::applyImage()
 
     setLog(QStringLiteral("正在重启资源管理器…"), false);
     QCoreApplication::processEvents();
-    Engine::restartExplorer(nullptr);
+    QString restartErr;
+    const bool restarted = Engine::restartExplorer(&restartErr);
     refreshStatus();
+    if (!restarted) {
+        // 图片其实已经写入并注册成功，只是桌面没换成新的 —— 要把「做好了但没生效」
+        // 讲清楚，否则用户只会看到「已应用」却什么都没变（以前就是无条件报成功）。
+        setLog(QStringLiteral("图片已应用，但 %1").arg(restartErr), true);
+        m_applyImageBtn->setEnabled(true);
+        return;
+    }
     setLog(randomMode
                ? QStringLiteral("随机图片背景已应用！每打开或切换一个文件夹窗口都会换一张。")
                : QStringLiteral("图片背景已应用！打开任意文件夹即可查看效果。"),
@@ -812,19 +810,142 @@ void MainWindow::applyImage()
     m_applyImageBtn->setEnabled(true);
 }
 
-QImage MainWindow::applyImageParams(const QImage &src) const
+// 把「解码 → 调参 → 旋转 → 缩放 → 落盘」这段纯计算挪到工作线程。
+//
+// 为什么：这段是全流程里唯一真正耗时的部分 —— 4K 图解码 + 3 遍 box blur 要几百毫秒到
+// 数秒，以前直接压在主线程上，界面完全冻住（只能靠 processEvents 掏消息，而那还会让
+// 用户在耗时中途再点一次「应用」造成重入）。参数在调用前全部取成值快照，工作线程**不碰
+// 任何 QWidget**，算完把结果与错误文本回投主线程。
+//
+// 返回 false 时 error 一定非空。dir/imgPath 为空表示随机池模式。
+struct ImageExportJob {
+    QStringList sources;      // 随机池模式：全部待处理图片；单图模式：只有一张
+    QString outDir;           // 随机池：成品目录；单图：成品图所在目录
+    QString singleOutPath;    // 单图模式的目标文件；随机池为空
+    bool randomMode = false;
+
+    // 参数快照：全部在 GUI 线程取值后传进来
+    double brightness = 1.0;
+    double contrast = 1.0;
+    int blurRadius = 0;
+    int rotateDegrees = 0;
+    double scalePct = 1.0;
+    int uiPosMode = 6;
+
+    // 出参
+    bool ok = false;
+    int produced = 0;
+    QString error;
+};
+
+// 纯函数：不读成员、不碰 UI —— 两个线程都安全。
+QImage applyParamsPure(const QImage &src, const ImageExportJob &job)
 {
-    QImage processed = ImageProcess::adjust(src, m_brightness->value() / 100.0,
-                                            m_contrast->value() / 100.0, m_blur->value());
-    processed = ImageProcess::rotateAroundY(processed, m_rotate->value());
+    QImage processed = ImageProcess::adjust(src, job.brightness, job.contrast, job.blurRadius);
+    processed = ImageProcess::rotateAroundY(processed, job.rotateDegrees);
     // DLL 没有缩放参数，只能缩放实际写入的图片(仅原尺寸模式；填充/拉伸始终铺满窗口)。
-    const double pct = m_scale->value() / 100.0;
-    const int uiPos = qBound(0, m_posMode, 6);
+    const double pct = job.scalePct;
+    const int uiPos = job.uiPosMode;
     if (qAbs(pct - 1.0) > 1e-3 && uiPos != 0 && uiPos != 2) {
         const QSize target(qRound(processed.width() * pct), qRound(processed.height() * pct));
         processed = processed.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
     return processed;
+}
+
+void runImageExport(ImageExportJob *job)
+{
+    if (!job)
+        return;
+    if (job->randomMode) {
+        QDir pool(job->outDir);
+        if (!pool.exists() && !QDir().mkpath(job->outDir)) {
+            job->error = QStringLiteral("无法创建随机图片池目录：%1").arg(job->outDir);
+            return;
+        }
+        // 旧池先清空：图库可能换过目录，残留的图会继续被随机抽到。
+        for (const QFileInfo &old : pool.entryInfoList(
+                 {QStringLiteral("*.png"), QStringLiteral("*.jpg")}, QDir::Files))
+            QFile::remove(old.absoluteFilePath());
+
+        int made = 0;
+        for (const QString &src : job->sources) {
+            QImage img(src);
+            if (img.isNull())
+                continue; // 坏图/格式不支持：跳过，不让整批失败
+            const QImage processed = applyParamsPure(img, *job);
+            const QString out = job->outDir + QStringLiteral("/bg_%1.png")
+                                                 .arg(made + 1, 3, 10, QLatin1Char('0'));
+            if (!processed.save(out, "PNG")) {
+                job->error = QStringLiteral("随机图片池写入失败：%1").arg(out);
+                return;
+            }
+            ++made;
+        }
+        if (made == 0) {
+            job->error = QStringLiteral("图片浏览列表里的图片都读取失败，无法生成随机池。");
+            return;
+        }
+        job->produced = made;
+        job->ok = true;
+        return;
+    }
+
+    const QString srcPath = job->sources.value(0);
+    QImage src(srcPath);
+    if (src.isNull()) {
+        job->error = QStringLiteral("图片读取失败");
+        return;
+    }
+    const QImage processed = applyParamsPure(src, *job);
+    if (!processed.save(job->singleOutPath, "PNG")) {
+        job->error = QStringLiteral("处理后的图片保存失败");
+        return;
+    }
+    job->produced = 1;
+    job->ok = true;
+}
+
+bool MainWindow::runImageExportAsync(const QStringList &sources, const QString &outDir,
+                                     const QString &singleOutPath, bool randomMode,
+                                     int *produced, QString *error)
+{
+    auto *job = new ImageExportJob;
+    job->sources = sources;
+    job->outDir = outDir;
+    job->singleOutPath = singleOutPath;
+    job->randomMode = randomMode;
+    // 参数快照必须在 GUI 线程取（下面这些控件只能主线程访问）。
+    job->brightness = m_brightness->value() / 100.0;
+    job->contrast = m_contrast->value() / 100.0;
+    job->blurRadius = m_blur->value();
+    job->rotateDegrees = m_rotate->value();
+    job->scalePct = m_scale->value() / 100.0;
+    job->uiPosMode = qBound(0, m_posMode, 6);
+
+    // 同步等这一次导出：界面此刻已禁用「应用」按钮、并写了「正在处理…」的提示，
+    // 语义与改前完全一致。只是想把这**段计算**挪出主线程，而调用方仍保持线性流程
+    // （后面还有写配置、注册 DLL、重启资源管理器等一连串步骤，改成真回调会把整条
+    // 链拆散，风险远大于收益）。
+    //
+    // ⚠️ 用**独立的 QThread** 而不是全局线程池：这里是「主线程阻塞等结果」，若丢进全局
+    // 池，一旦池被其它任务占满(池容量可能只有 1)，这次任务排在后面永远轮不到，主线程
+    // 就会死等。自建线程不受池容量影响，等待时间只由这段计算决定。
+    QSemaphore done;
+    std::thread worker([job, &done] {
+        runImageExport(job);
+        done.release();
+    });
+    done.acquire();
+    worker.join();
+
+    const bool ok = job->ok;
+    if (produced)
+        *produced = job->produced;
+    if (!ok && error)
+        *error = job->error;
+    delete job;
+    return ok;
 }
 
 bool MainWindow::buildRandomImagePool(int *count, QString *error)
@@ -838,43 +959,18 @@ bool MainWindow::buildRandomImagePool(int *count, QString *error)
         return false;
     }
 
-    const QString dir = Engine::imagePoolDir();
-    QDir pool(dir);
-    if (!pool.exists() && !QDir().mkpath(dir)) {
-        if (error)
-            *error = QStringLiteral("无法创建随机图片池目录：%1").arg(dir);
-        return false;
-    }
-    // 旧池先清空：图库可能换过目录，残留的图会继续被随机抽到。
-    for (const QFileInfo &old : pool.entryInfoList({QStringLiteral("*.png"),
-                                                    QStringLiteral("*.jpg")}, QDir::Files))
-        QFile::remove(old.absoluteFilePath());
+    // 源清单在 GUI 线程取好，随后整批处理都丢给工作线程（见 runImageExportAsync）。
+    // 以前这里是「逐张同步解码 + 编码，中间夹 processEvents」——整批跑完前界面虽然能
+    // 响应消息，但用户可以在中途再点一次「应用」造成重入，且耗时全压在主线程上。
+    QStringList sources;
+    sources.reserve(m_presets.size());
+    for (const PresetImage &preset : m_presets)
+        sources << preset.res;
 
-    int made = 0;
-    for (const PresetImage &preset : m_presets) {
-        QImage src(preset.res);
-        if (src.isNull())
-            continue; // 坏图/格式不支持：跳过，不让整批失败
-        const QImage processed = applyImageParams(src);
-        const QString out = dir + QStringLiteral("/bg_%1.png")
-                                        .arg(made + 1, 3, 10, QLatin1Char('0'));
-        if (!processed.save(out, "PNG")) {
-            if (error)
-                *error = QStringLiteral("随机图片池写入失败：%1").arg(out);
-            return false;
-        }
-        ++made;
-        setLog(QStringLiteral("正在生成随机图片池 (%1/%2)…")
-                   .arg(made).arg(m_presets.size()), false);
-        QCoreApplication::processEvents();
-    }
-
-    if (made == 0) {
-        if (error)
-            *error = QStringLiteral("图片浏览列表里的图片都读取失败，无法生成随机池。");
+    int produced = 0;
+    if (!runImageExportAsync(sources, Engine::imagePoolDir(), QString(), true, &produced, error))
         return false;
-    }
     if (count)
-        *count = made;
+        *count = produced;
     return true;
 }

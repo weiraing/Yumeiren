@@ -282,6 +282,9 @@ set(YUMEIREN_SOURCES
     # 解码包装：临时抬高 Qt 的全局分配上限，好让 16384x8192 这类图集读得进来。
     # 放在共用清单里 —— 两个后端(真 Live2D / 占位渲染器)都要用它。
     src/kanban/ImageDecode.cpp
+    # 素材 JSON 修补：全角空格 / 尾随逗号 / 非 UTF-8。校验器与装载器共用一份，
+    # 口径不一致会变成「列表里点得动、点开装不上」。
+    src/kanban/ModelJsonRepair.cpp
 )
 
 set(YUMEIREN_LIBS Qt6::Widgets Qt6::Multimedia Qt6::MultimediaWidgets dwmapi psapi shell32)

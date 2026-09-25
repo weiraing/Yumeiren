@@ -340,24 +340,31 @@ void KanbanController::setMeshHideEnabled(bool enabled)
 QString KanbanController::meshHideText() const
 {
     return m_renderer ? m_renderer->meshHideText() : QString();
-}bool KanbanController::setModelPath(const QString &modelJsonPath)
+}
+
+bool KanbanController::setModelPath(const QString &modelJsonPath)
 {
     const ModelInfo *info = m_models.byJsonPath(modelJsonPath);
     if (!info || !info->valid) {
         m_lastError = QStringLiteral("模型不可用");
         return false;
     }
+    // 用解析出来的那份路径，而不是传进来的：byJsonPath 会把「被同组完整描述取代的精简
+    // 描述」重定向到完整描述（素材包里常见工具生成的 stub：FileReferences 只有
+    // Moc/Textures）。直接按传入路径装载会装到那份 stub 上 —— 模型能显示、但动作与
+    // 表情全为 0，用户看到的就是「这个模型解析不出动作」。
+    const QString resolved = info->modelJsonPath;
     if (!m_renderer) {
-        m_modelPath = modelJsonPath;
+        m_modelPath = resolved;
         AppConfig::instance().setValue(QString::fromLatin1(ConfigKeys::Kanban::ModelPath), m_modelPath);
         return true;
     }
     QString error;
-    if (!m_renderer->loadModel(modelJsonPath, &error)) {
+    if (!m_renderer->loadModel(resolved, &error)) {
         m_lastError = error;
         return false;
     }
-    m_modelPath = modelJsonPath;
+    m_modelPath = resolved;
     // 挂起释放标记跟着装载结果复位：熄屏时会话仍活跃，用户若在这期间换模型会把
     // 刚释放的东西又装回显存；不复位的话心跳会因标记还挂着而再也不释放。
     m_releasedForSuspend = false;

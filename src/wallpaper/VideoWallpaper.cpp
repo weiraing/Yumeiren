@@ -34,12 +34,17 @@
 
 namespace {
 
+// 单例的「有没有活着的实例」标志。⚠️ **只在 GUI 线程读写**：构造函数、析构函数、
+// shutdown() 全部由主线程驱动（shutdown 的唯一调用点 main.cpp:146 也在主线程）。
+// 不要为了「线程安全」给它加原子操作 —— 那样反而会掩盖「后台线程碰了单例」这个真错误。
+// 上方 VW_ASSERT_GUI() 已经把这类越界断言住了。
 VideoWallpaper *g_wallpaper = nullptr;
 
 } // namespace
 
 VideoWallpaper &VideoWallpaper::instance()
 {
+    // 函数内静态局部：C++11 起初始化是线程安全的（magic statics），这里不必额外加锁。
     static VideoWallpaper v;
     return v;
 }

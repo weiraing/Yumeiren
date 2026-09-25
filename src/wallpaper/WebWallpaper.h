@@ -62,6 +62,14 @@ public:
     // 运行时可用性(设置页置灰用)："检查 + 版本号"。
     static bool runtimeAvailable(QString *version);
 
+    // 在一个网页壁纸目录里找出入口文档（index.html / index.htm，大小写不敏感）。
+    // 找不到返回空串。
+    //
+    // ⚠️ 全项目**只有这一份实现**：媒体库扫描（WallpaperPage）与运行时导航（WebWallpaper）
+    // 都必须用它 —— 原先两处各写了一份逐行相同的私有副本，规则一旦漂开就会出现
+    // 「列表里显示得出来、点开却导航失败」。传目录路径（两种调用点手上都是字符串）。
+    static QString webEntryDocument(const QString &directory);
+
     // 启动恢复判据：上次退出时网页壁纸在跑(配置键 web/enabled)。
     bool wasRunningLastTime() const;
 

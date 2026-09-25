@@ -85,9 +85,15 @@ int KanbanController::measuredFps() const
     return int(m_clock->measuredFps() + 0.5);
 }
 
-int KanbanController::refreshModels()
+int KanbanController::refreshModels(bool force)
 {
-    const int n = m_models.rescan();
+    const int n = m_models.rescan(force);
+    // 扫完才知道哪份描述被同组的完整描述取代了，所以规范化只能放在这里。不规范化的话
+    // 配置里存的那条旧路径（实测用户配置指向的正是被取代的 stub）跟网格里任何一项都不
+    // 相等 —— 界面按「路径相等」恢复选中项会一路落空，选中行静默跳到第一个模型，而
+    // 实际装载的是另一个。删除模型时「删的是不是当前这个」也会算错，继而选错后继。
+    if (const ModelInfo *info = m_models.byJsonPath(m_modelPath))
+        m_modelPath = info->modelJsonPath;
     applog::log(n > 0 ? applog::Level::Info : applog::Level::Warning,
                    QStringLiteral("[Kanban] 可用模型 %1 个(目录 %2)")
                        .arg(n).arg(KanbanModelManager::defaultModelsRoot()),

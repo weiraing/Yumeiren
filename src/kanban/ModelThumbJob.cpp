@@ -29,6 +29,7 @@ int runModelThumbJob(const QStringList &args, QString *error)
 #include "kanban/OffscreenGlHost.h"
 
 #include <QCoreApplication>
+#include <QFile>
 #include <QImage>
 #include <QOffscreenSurface>
 #include <QOpenGLContext>

@@ -173,8 +173,16 @@ bool isSelfOrShellProcess(HWND hwnd)
     DWORD pathLen = MAX_PATH;
     HANDLE proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
     if (proc) {
-        QueryFullProcessImageNameW(proc, 0, imagePath, &pathLen);
+        // ⚠️ 必须看返回值：取不到路径时 imagePath 会留空，下面就会把**真正的
+        // explorer 窗口**判成「非 shell 进程」，于是全屏遮挡检测把它当成遮挡，
+        // 壁纸被无谓暂停。取不到就保守认为「不是 shell」，但那属于未知，不是已证否。
+        const BOOL ok = QueryFullProcessImageNameW(proc, 0, imagePath, &pathLen);
         CloseHandle(proc);
+        if (!ok)
+            return false;
+    } else {
+        // 打不开进程（权限/已退出）同样拿不到路径，别拿空串去比。
+        return false;
     }
     const wchar_t *base = imagePath;
     for (const wchar_t *p = imagePath; *p; ++p)

@@ -14,6 +14,7 @@
 #include "platform/windows/desktopmount.h"
 #include "platform/windows/wakeuplistener.h"
 #include "tray/SystemTrayController.h"
+#include "ui/PixelWheelGrid.h"
 #include "ui/UiStyle.h"
 #include "wallpaper/VideoWallpaper.h"
 #include "wallpaper/WebWallpaper.h"
@@ -35,6 +36,7 @@
 #include <QMouseEvent>
 #include <QPainterPath>
 #include <QPointer>
+#include <QProcess>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QRegion>
@@ -111,7 +113,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     {
         constexpr int kDefaultW = 950;
         constexpr int kDefaultH = 820;
-        const QRect avail = QGuiApplication::primaryScreen()->availableGeometry();
+        // 无显示器 / RDP 断连时 primaryScreen() 会是 nullptr。拿不到就把「可用区」当成
+        // 默认尺寸本身，后面的夹取逻辑照常走 —— 总好过在这里解引用空指针。
+        const QScreen *primary = QGuiApplication::primaryScreen();
+        const QRect avail = primary ? primary->availableGeometry()
+                                    : QRect(0, 0, kDefaultW, kDefaultH);
         auto &cfg = AppConfig::instance();
         const int cw = cfg.value(ConfigKeys::Window::Width, 0).toInt();
         int ch = cfg.value(ConfigKeys::Window::Height, 0).toInt();
@@ -304,7 +310,13 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
 }
 
 // 退出闸门：关闭缩略图后台任务的回调通路。锁内翻标志即可返回，不等待任务跑完(退出时
-// 卡住比多一次无效投递更糟)；已经通过检查的任务在投递时对象必然仍然存活。
+// 卡住比多一次无效投递更糟)。
+//
+// ⚠️ 前提是**投递方也在同一把锁内投递**(见 ImagePage.cpp 里那段 invokeMethod)：本函数
+// 与「检查 m_thumbTasksLive + invokeMethod」互斥，于是只可能有两种结果 —— 投递先到
+// (队列调用由 Qt 在对象销毁时撤销，安全)，或本函数先到(投递方看到 false 直接 return)。
+// 若把投递挪到锁外，就会出现「检查通过、尚未投递」的窗口，本函数越过它返回后 this
+// 可能已在析构 ⇒ 向半销毁对象投递。改任意一侧都要同时改另一侧。
 MainWindow::~MainWindow()
 {
     QMutexLocker guard(&m_thumbTasksMutex);
@@ -314,6 +326,15 @@ MainWindow::~MainWindow()
     if (m_wakeup) {
         m_wakeup->stop();
         m_wakeup = nullptr;
+    }
+    // 预览图生成子进程要**主动收掉**：它与本进程无父子生命周期绑定（独立 exe），
+    // 主程序关掉后它还会接着渲染并往 .cache/model-thumbs 写文件。留着 = 用户以为
+    // 软件退了、后台却在烧 CPU/磁盘；下次启动还可能撞上它正在写的半成品。
+    if (m_kanbanThumbJob) {
+        m_kanbanThumbJob->kill();
+        m_kanbanThumbJob->waitForFinished(3000);
+        m_kanbanThumbJob->deleteLater();
+        m_kanbanThumbJob = nullptr;
     }
     applog::logObjectEvent("destroy", this);
 }

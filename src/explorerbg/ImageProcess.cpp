@@ -99,11 +99,143 @@ void boxBlur(QImage &img, int radius)
 
 } // namespace
 
+// 模拟资源管理器预览的调色板：深浅两套，由 darkMode 一次算好，下面各段共用。
+struct MockPalette {
+    QColor toolbarBg, barLine, textCol, subText, pillBg, folder, sideTint;
+};
+
+static MockPalette mockPalette(bool darkMode)
+{
+    MockPalette c;
+    c.toolbarBg = darkMode ? QColor(38, 38, 40) : QColor(251, 251, 252);
+    c.barLine   = darkMode ? QColor(52, 52, 56) : QColor(229, 230, 234);
+    c.textCol   = darkMode ? QColor(214, 215, 220) : QColor(88, 90, 98);
+    c.subText   = QColor(140, 142, 150);   // 深浅一致
+    c.pillBg    = darkMode ? QColor(56, 56, 60) : QColor(255, 255, 255);
+    c.folder    = darkMode ? QColor(222, 178, 82) : QColor(249, 199, 96);
+    c.sideTint  = darkMode ? QColor(30, 30, 32, 190) : QColor(248, 248, 250, 190);
+    return c;
+}
+
+// 顶部工具条 + 地址栏 + 命令栏。返回内容区上边界(工具条占用高度)。
+static int drawMockChrome(QPainter &p, int W, const MockPalette &c, qreal s)
+{
+    const int toolH = qRound(36 * s);
+    const int navY  = qRound(9 * s);
+    const int navS  = qRound(18 * s);
+    p.setBrush(c.pillBg);
+    p.setPen(Qt::NoPen);
+    p.drawRoundedRect(qRound(12 * s), navY, navS, navS, qRound(6 * s), qRound(6 * s));
+    p.drawRoundedRect(qRound(34 * s), navY, navS, navS, qRound(6 * s), qRound(6 * s));
+    p.setPen(c.subText);
+    p.setFont(QFont(QStringLiteral("Segoe UI Symbol"), qMax(5, qRound(8 * s))));
+    p.drawText(QRect(qRound(12 * s), navY, navS, navS), Qt::AlignCenter, QChar(0x2190));
+    p.drawText(QRect(qRound(34 * s), navY, navS, navS), Qt::AlignCenter, QChar(0x2192));
+
+    const int pillX = qRound(60 * s);
+    const int pillH = qRound(20 * s);
+    p.setBrush(c.pillBg);
+    p.drawRoundedRect(pillX, qRound(8 * s), W - pillX - qRound(30 * s), pillH,
+                      qRound(10 * s), qRound(10 * s));
+    p.setPen(c.textCol);
+    p.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), qMax(5, qRound(8 * s))));
+    p.drawText(QRect(pillX + qRound(14 * s), qRound(8 * s), W - pillX - qRound(30 * s), pillH),
+               Qt::AlignVCenter, QStringLiteral("文档"));
+
+    p.setPen(Qt::NoPen);
+    p.setBrush(c.pillBg);
+    p.drawRoundedRect(W - qRound(26 * s), qRound(9 * s), qRound(16 * s), qRound(18 * s),
+                      qRound(5 * s), qRound(5 * s));
+    p.setPen(c.barLine);
+    p.drawLine(0, toolH, W, toolH);
+
+    const int cmdH = qRound(26 * s);
+    p.setPen(c.textCol);
+    p.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), qMax(5, qRound(7.5 * s))));
+    p.drawText(QRect(qRound(14 * s), toolH, qRound(80 * s), cmdH),
+               Qt::AlignVCenter, QStringLiteral("＋ 新建"));
+    p.drawText(QRect(W - qRound(80 * s), toolH, qRound(66 * s), cmdH),
+               Qt::AlignRight | Qt::AlignVCenter, QStringLiteral("详细信息"));
+    p.setPen(c.barLine);
+    p.drawLine(0, toolH + cmdH, W, toolH + cmdH);
+    return toolH + cmdH;
+}
+
+// 侧栏（主文件夹/图库/…）。返回侧栏宽度，供网格起点用。
+// 字号有 5pt 下限，小画布下文字不按 s 等比缩小，故侧栏宽度与行高改用真实字体度量，
+// 否则「主文件夹」会被分割线切掉 —— 这里必须留着 QFontMetrics，不能纯按 s 算。
+static int drawMockSidebar(QPainter &p, int W, int contentTop, int contentBottom,
+                           const MockPalette &c, qreal s)
+{
+    const QStringList items = {QStringLiteral("主文件夹"), QStringLiteral("图库"),
+                               QStringLiteral("桌面"), QStringLiteral("下载"), QStringLiteral("文档"),
+                               QStringLiteral("此电脑"), QStringLiteral("网络")};
+    const int sideIconX = qRound(14 * s);
+    const int sideIconW = qRound(15 * s);
+    const int sideIconH = qRound(12 * s);
+    const int sideTxtX  = sideIconX + sideIconW + qRound(8 * s);
+    p.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), qMax(5, qRound(7.5 * s))));
+    const QFontMetrics sideFm(p.font());
+    int sideLabelW = 0;
+    for (const QString &it : items)
+        sideLabelW = qMax(sideLabelW, sideFm.horizontalAdvance(it));
+    const int sideW = qMin(sideTxtX + sideLabelW + qRound(10 * s), qRound(W * 0.32));
+    const int sideRowH  = qMax(qRound(16 * s), sideFm.height());
+    const int sideItemH = sideRowH + qRound(4 * s);
+    const int sidePadY  = qRound(12 * s);
+    p.fillRect(0, contentTop, sideW, contentBottom - contentTop, c.sideTint);
+    p.setPen(c.barLine);
+    p.drawLine(sideW, contentTop, sideW, contentBottom);
+    for (int i = 0; i < items.size(); ++i) {
+        const int y = contentTop + sidePadY + i * sideItemH;
+        if (y + sideRowH > contentBottom)
+            break;
+        p.setPen(Qt::NoPen);
+        p.setBrush(c.folder);
+        p.drawRoundedRect(sideIconX, y + (sideRowH - sideIconH) / 2, sideIconW, sideIconH,
+                          qRound(2 * s), qRound(2 * s));
+        p.setPen(c.subText);
+        p.drawText(QRectF(sideTxtX, y, sideW - sideTxtX - qRound(6 * s), sideRowH),
+                   Qt::AlignVCenter | Qt::ElideRight, items[i]);
+    }
+    return sideW;
+}
+
+// 底部状态栏（「N 个项目」+ 右下角两行小按钮）。rows*cols 是网格实际画出的格子数。
+static void drawMockStatusBar(QPainter &p, int W, int sideW, int contentBottom, int statusH,
+                              int cells, const MockPalette &c, qreal s)
+{
+    p.setPen(QPen(c.barLine, 1));
+    p.setBrush(Qt::NoBrush);
+    p.drawLine(0, contentBottom, W, contentBottom);
+    p.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), qMax(5, qRound(7 * s))));
+    p.setPen(c.subText);
+    p.drawText(QRect(sideW + qRound(10 * s), contentBottom, qRound(150 * s), statusH),
+               Qt::AlignVCenter, QStringLiteral("%1 个项目").arg(cells));
+    const int btnW = qRound(18 * s);
+    const int btnH = qMax(6, statusH - qRound(8 * s));
+    const int btnX = W - qRound(30 * s);
+    const int btnY = contentBottom + (statusH - btnH) / 2;
+    p.setPen(QPen(c.barLine, 1));
+    p.setBrush(c.pillBg);
+    p.drawRoundedRect(btnX, btnY, btnW, btnH, qRound(2 * s), qRound(2 * s));
+    p.setPen(QPen(c.subText, 1));
+    for (int i = 1; i <= 2; ++i) {
+        const int ly = btnY + btnH * i / 3;
+        p.drawLine(btnX + qRound(4 * s), ly, btnX + btnW - qRound(4 * s), ly);
+    }
+}
+
 QImage ImageProcess::adjust(const QImage &src, double brightness, double contrast, int blurRadius)
 {
     if (src.isNull())
         return QImage();
-    QImage img = src.convertToFormat(QImage::Format_ARGB32);
+    // ⚠️ 先判格式再决定要不要转：src 通常已经是 ARGB32（解码路径就给的这个格式），而
+    // QImage::convertToFormat 在格式相同时也**照样整幅深拷贝一份**。4K 图就是白多
+    // 33MB 峰值 —— 这里省掉它，只在不匹配时才付拷贝钱。
+    QImage img = src.format() == QImage::Format_ARGB32
+                     ? src
+                     : src.convertToFormat(QImage::Format_ARGB32);
     applyLevels(img, brightness, contrast);
     if (blurRadius > 0)
         boxBlur(img, blurRadius);
@@ -146,63 +278,18 @@ QImage ImageProcess::mockExplorerPreview(const QImage &processed, const QSize &n
     p.setRenderHint(QPainter::TextAntialiasing);
     p.setRenderHint(QPainter::SmoothPixmapTransform);
 
-    const QColor toolbarBg = darkMode ? QColor(38, 38, 40) : QColor(251, 251, 252);
-    const QColor barLine   = darkMode ? QColor(52, 52, 56) : QColor(229, 230, 234);
-    const QColor textCol   = darkMode ? QColor(214, 215, 220) : QColor(88, 90, 98);
-    const QColor subText   = darkMode ? QColor(140, 142, 150) : QColor(140, 142, 150);
-    const QColor pillBg    = darkMode ? QColor(56, 56, 60) : QColor(255, 255, 255);
-    const QColor folder    = darkMode ? QColor(222, 178, 82) : QColor(249, 199, 96);
-    const QColor sideTint  = darkMode ? QColor(30, 30, 32, 190) : QColor(248, 248, 250, 190);
-
-    canvas.fill(toolbarBg);
+    const MockPalette c = mockPalette(darkMode);
+    canvas.fill(c.toolbarBg);
 
     // 参照宽 800px：所有 UI 装饰按比例缩放，任何画布尺寸下模拟内容都完整可见。
     const qreal s = qMax(0.4, qMin(2.0, W / 800.0));
 
-    const int toolH = qRound(36 * s);
-    const int navY  = qRound(9 * s);
-    const int navS  = qRound(18 * s);
-    p.setBrush(pillBg);
-    p.setPen(Qt::NoPen);
-    p.drawRoundedRect(qRound(12 * s), navY, navS, navS, qRound(6 * s), qRound(6 * s));
-    p.drawRoundedRect(qRound(34 * s), navY, navS, navS, qRound(6 * s), qRound(6 * s));
-    p.setPen(subText);
-    p.setFont(QFont(QStringLiteral("Segoe UI Symbol"), qMax(5, qRound(8 * s))));
-    p.drawText(QRect(qRound(12 * s), navY, navS, navS), Qt::AlignCenter, QChar(0x2190));
-    p.drawText(QRect(qRound(34 * s), navY, navS, navS), Qt::AlignCenter, QChar(0x2192));
-
-    const int pillX = qRound(60 * s);
-    const int pillH = qRound(20 * s);
-    p.setBrush(pillBg);
-    p.drawRoundedRect(pillX, qRound(8 * s), W - pillX - qRound(30 * s), pillH,
-                      qRound(10 * s), qRound(10 * s));
-    p.setPen(textCol);
-    p.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), qMax(5, qRound(8 * s))));
-    p.drawText(QRect(pillX + qRound(14 * s), qRound(8 * s), W - pillX - qRound(30 * s), pillH),
-               Qt::AlignVCenter, QStringLiteral("文档"));
-
-    p.setPen(Qt::NoPen);
-    p.setBrush(pillBg);
-    p.drawRoundedRect(W - qRound(26 * s), qRound(9 * s), qRound(16 * s), qRound(18 * s),
-                      qRound(5 * s), qRound(5 * s));
-    p.setPen(barLine);
-    p.drawLine(0, toolH, W, toolH);
-
-    const int cmdH = qRound(26 * s);
-    p.setPen(textCol);
-    p.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), qMax(5, qRound(7.5 * s))));
-    p.drawText(QRect(qRound(14 * s), toolH, qRound(80 * s), cmdH),
-               Qt::AlignVCenter, QStringLiteral("＋ 新建"));
-    p.drawText(QRect(W - qRound(80 * s), toolH, qRound(66 * s), cmdH),
-               Qt::AlignRight | Qt::AlignVCenter, QStringLiteral("详细信息"));
-    p.setPen(barLine);
-    p.drawLine(0, toolH + cmdH, W, toolH + cmdH);
+    const int contentTop = drawMockChrome(p, W, c, s);
 
     // Content background image, laid out exactly like the hook DLL would lay
     // it out in a real window: scale factor k maps the mock content width onto
     // the reference window width (physical pixels), so the image's relative
     // size in the preview equals its relative size in the real explorer.
-    const int contentTop = toolH + cmdH;
     const int statusH = qRound(22 * s);        // 底部状态栏，让模拟窗口有个收尾
     const int contentBottom = H - statusH;     // 内容区下边界，状态栏画在它下方
     const int contentH = contentBottom - contentTop;
@@ -252,39 +339,7 @@ QImage ImageProcess::mockExplorerPreview(const QImage &processed, const QSize &n
     }
 
     // Sidebar (with the combined effect it is a translucent acrylic tint)
-    const QStringList items = {QStringLiteral("主文件夹"), QStringLiteral("图库"),
-                               QStringLiteral("桌面"), QStringLiteral("下载"), QStringLiteral("文档"),
-                               QStringLiteral("此电脑"), QStringLiteral("网络")};
-    const int sideIconX = qRound(14 * s);
-    const int sideIconW = qRound(15 * s);
-    const int sideIconH = qRound(12 * s);
-    const int sideTxtX  = sideIconX + sideIconW + qRound(8 * s);
-    p.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), qMax(5, qRound(7.5 * s))));
-    // 字号有 5pt 下限，小画布下文字不按 s 等比缩小，故侧栏宽度与行高改用真实
-    // 字体度量，否则「主文件夹」会被分割线切掉。
-    const QFontMetrics sideFm(p.font());
-    int sideLabelW = 0;
-    for (const QString &it : items)
-        sideLabelW = qMax(sideLabelW, sideFm.horizontalAdvance(it));
-    const int sideW = qMin(sideTxtX + sideLabelW + qRound(10 * s), qRound(W * 0.32));
-    const int sideRowH  = qMax(qRound(16 * s), sideFm.height());
-    const int sideItemH = sideRowH + qRound(4 * s);
-    const int sidePadY  = qRound(12 * s);
-    p.fillRect(0, contentTop, sideW, contentBottom - contentTop, sideTint);
-    p.setPen(barLine);
-    p.drawLine(sideW, contentTop, sideW, contentBottom);
-    for (int i = 0; i < items.size(); ++i) {
-        const int y = contentTop + sidePadY + i * sideItemH;
-        if (y + sideRowH > contentBottom)
-            break;
-        p.setPen(Qt::NoPen);
-        p.setBrush(folder);
-        p.drawRoundedRect(sideIconX, y + (sideRowH - sideIconH) / 2, sideIconW, sideIconH,
-                          qRound(2 * s), qRound(2 * s));
-        p.setPen(subText);
-        p.drawText(QRectF(sideTxtX, y, sideW - sideTxtX - qRound(6 * s), sideRowH),
-                   Qt::AlignVCenter | Qt::ElideRight, items[i]);
-    }
+    const int sideW = drawMockSidebar(p, W, contentTop, contentBottom, c, s);
 
     // Folder items grid: 先定网格，再定图标，最后按图标高度反推文件名字号。
     // 顺序不能反 —— 一旦用文件名宽度去撑网格，就会出现「文字比文件夹还大」。
@@ -313,40 +368,22 @@ QImage ImageProcess::mockExplorerPreview(const QImage &processed, const QSize &n
         const int y = rowTop + r * rowPitch;
         if (y >= contentBottom)
             break;
-        for (int c = 0; c < cols; ++c) {
-            const qreal x = sideW + gridPadX + c * colW + (colW - folderW) / 2.0;
+        for (int cc = 0; cc < cols; ++cc) {
+            const qreal x = sideW + gridPadX + cc * colW + (colW - folderW) / 2.0;
             p.setPen(Qt::NoPen);
-            p.setBrush(folder.darker(112));
+            p.setBrush(c.folder.darker(112));
             p.drawRect(QRectF(x, y, tabW, tabH));
-            p.setBrush(folder);
+            p.setBrush(c.folder);
             p.drawRoundedRect(QRectF(x, y + tabH, folderW, folderH),
                               qMax(1, qRound(3 * s)), qMax(1, qRound(3 * s)));
-            p.setPen(subText);
-            p.drawText(QRectF(sideW + gridPadX + c * colW, y + tabH + folderH + qRound(3 * s),
+            p.setPen(c.subText);
+            p.drawText(QRectF(sideW + gridPadX + cc * colW, y + tabH + folderH + qRound(3 * s),
                               colW, nameH),
                        Qt::AlignHCenter | Qt::AlignTop | Qt::ElideRight, folderName);
         }
     }
 
-    p.setPen(QPen(barLine, 1));
-    p.setBrush(Qt::NoBrush);
-    p.drawLine(0, contentBottom, W, contentBottom);
-    p.setFont(QFont(QStringLiteral("Microsoft YaHei UI"), qMax(5, qRound(7 * s))));
-    p.setPen(subText);
-    p.drawText(QRect(sideW + qRound(10 * s), contentBottom, qRound(150 * s), statusH),
-               Qt::AlignVCenter, QStringLiteral("%1 个项目").arg(rows * cols));
-    const int btnW = qRound(18 * s);
-    const int btnH = qMax(6, statusH - qRound(8 * s));
-    const int btnX = W - qRound(30 * s);
-    const int btnY = contentBottom + (statusH - btnH) / 2;
-    p.setPen(QPen(barLine, 1));
-    p.setBrush(pillBg);
-    p.drawRoundedRect(btnX, btnY, btnW, btnH, qRound(2 * s), qRound(2 * s));
-    p.setPen(QPen(subText, 1));
-    for (int i = 1; i <= 2; ++i) {
-        const int ly = btnY + btnH * i / 3;
-        p.drawLine(btnX + qRound(4 * s), ly, btnX + btnW - qRound(4 * s), ly);
-    }
+    drawMockStatusBar(p, W, sideW, contentBottom, statusH, rows * cols, c, s);
     p.end();
     return canvas;
 }

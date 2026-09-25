@@ -423,7 +423,18 @@ QString reasonText(int reasons)
 
 #endif // Q_OS_WIN
 
-QString findIndexDocument(const QString &directory)
+// 快照静态页在缓存里的落盘位置(writeSnapshotPage 写、attachController 查)。
+QString snapshotPageFile()
+{
+    return QDir(CachePaths::webSnapshot()).filePath(QStringLiteral("page.html"));
+}
+
+} // namespace
+
+// 入口文档查找：实现唯一一份，声明见头文件（媒体库与运行时共用它）。
+// 必须放在匿名命名空间**之外** —— 它是 WebWallpaper 的静态成员，两个调用方各在不同
+// 编译单元（WebWallpaper.cpp 与 WallpaperPage.cpp）里链接它。
+QString WebWallpaper::webEntryDocument(const QString &directory)
 {
     const QDir dir(directory);
     const QFileInfoList files =
@@ -437,14 +448,6 @@ QString findIndexDocument(const QString &directory)
     }
     return QString();
 }
-
-// 快照静态页在缓存里的落盘位置(writeSnapshotPage 写、attachController 查)。
-QString snapshotPageFile()
-{
-    return QDir(CachePaths::webSnapshot()).filePath(QStringLiteral("page.html"));
-}
-
-} // namespace
 
 WebWallpaper &WebWallpaper::instance()
 {
@@ -565,7 +568,7 @@ QString WebWallpaper::resolveSource(const QString &source, QString *error) const
         return QString();
     }
     if (info.isDir()) {
-        const QString entry = findIndexDocument(info.absoluteFilePath());
+        const QString entry = WebWallpaper::webEntryDocument(info.absoluteFilePath());
         if (entry.isEmpty()) {
             if (error)
                 *error = QStringLiteral("所选 Web 项目目录缺少 index.html 或 index.htm：%1")
@@ -714,7 +717,10 @@ bool WebWallpaper::start(QString *error, const QString &source)
     emit runningChanged(true);
 
     m_host = ensureHostWindow();
-    m_host->setGeometry(QGuiApplication::primaryScreen()->geometry());
+    // 无显示器 / RDP 断连时 primaryScreen() 为 nullptr：跳过这次定位即可，
+    // applyBounds() 随后会按主屏重新算，别在这里解引用空指针。
+    if (const QScreen *primary = QGuiApplication::primaryScreen())
+        m_host->setGeometry(primary->geometry());
     // 先拿到桌面挂载点再挂载：g_workerW 为空时 SetParent(hwnd,null) 会把窗口挂成
     // 普通顶层窗口，之后心跳里的「未挂载→重挂」就变成每秒一次的 z 序搅动(桌面闪动)。
     if (!winhelper::ensureWorker()) {
@@ -879,8 +885,24 @@ void WebWallpaper::attachController()
         return;
     }
     m_webview->get_Settings(&m_settings);
-    m_webview->QueryInterface(IID_ICoreWebView2_3, &m_webview3); // TrySuspend/Resume
-    m_webview->QueryInterface(IID_ICoreWebView2_8, &m_webview8); // IsMuted
+    // 这两个 QueryInterface 是可选的增强接口，失败**不该**挡住网页壁纸 —— 但必须
+    // 显式置空并留痕。不查 HRESULT 的话有两点说不清：① 失败时 m_webview3 可能留着
+    // 上一轮控制器的悬垂指针（用之前虽然都判了空，但判的是「旧值非空」而不是「本次成功」）；
+    // ② 挂起/静音悄悄失效时，现象是「内存一直不降」，日志里却什么都不说。
+    m_webview3 = nullptr;
+    m_webview8 = nullptr;
+    if (FAILED(m_webview->QueryInterface(IID_ICoreWebView2_3, &m_webview3))) { // TrySuspend/Resume
+        m_webview3 = nullptr;
+        applog::log(applog::Level::Warning,
+                    QStringLiteral("WebView2 不支持 ICoreWebView2_3：挂起省内存将不可用"),
+                    QStringLiteral("WebWallpaper"));
+    }
+    if (FAILED(m_webview->QueryInterface(IID_ICoreWebView2_8, &m_webview8))) { // IsMuted
+        m_webview8 = nullptr;
+        applog::log(applog::Level::Warning,
+                    QStringLiteral("WebView2 不支持 ICoreWebView2_8：静音控制将不可用"),
+                    QStringLiteral("WebWallpaper"));
+    }
 
     applySettings();
     applyBounds();

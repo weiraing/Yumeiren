@@ -40,6 +40,21 @@ public:
     // 创建根目录与实际用到的子目录。幂等。失败时给出明确原因，绝不回退 AppData。
     static bool ensureDirectories(QString *errorMessage = nullptr);
 
+    // 把一个缓存子目录按「容量上限」修剪到不超过 maxBytes：超了就按**最后修改时间**
+    // 从旧到新删，直到降到上限以下。返回删除的文件数（失败/无需修剪返回 0）。
+    //
+    // ⚠️ 只对「文件数会无限增长」的缓存目录用。判据是：缓存键**含内容/时间成分**
+    // （如图片浏览的「路径+时间」键）—— 素材一换就是新键，旧文件再没人读，只增不减。
+    // **反例：看板娘模型缩略图**的键是「模型目录相对路径」，不含内容指纹，模型改了是
+    // 原地覆盖 ⇒ 文件数天然等于模型数，是正当工作集。对它做 LRU 会每轮删掉一半有效图、
+    // 再全部重画。用之前先确认键是内容相关的。
+    //
+    // 判据用 mtime 而非 atime：NTFS 默认关闭 atime 更新，读它只会得到一组恒定的值。
+    //
+    // 只删 dir 的**直接子文件**，不递归、不碰子目录：缓存目录的布局由各自的 Cache 类
+    // 决定，这里不做超出约定的清理。dir 不在 .cache 之内时一律拒绝（返回 0）。
+    static int pruneDirectory(const QString &dir, qint64 maxBytes);
+
     // 按"写探针 → 关闭 → 删除探针"验证可写。不改目录权限，不提权。
     static bool isWritable(QString *errorMessage = nullptr);
 

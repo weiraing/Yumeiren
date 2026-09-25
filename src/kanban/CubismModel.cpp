@@ -1,5 +1,6 @@
 #include "kanban/CubismModel_p.h"
 #include "kanban/ImageDecode.h"
+#include "kanban/ModelJsonRepair.h"
 
 #include <QByteArray>
 #include <QDir>
@@ -10,6 +11,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 
 #include <cctype>
 #include <limits>
@@ -142,6 +144,113 @@ void applyPoseFadeSeconds(QByteArray &buffer)
     root.insert(QStringLiteral("FadeInTime"), kPoseFadeSeconds);
     buffer = QJsonDocument(root).toJson(QJsonDocument::Compact);
     terminateJsonNumbers(buffer);
+}
+
+// 物理文件引用的参数在 moc3 里可能根本不存在 —— 全库 660 个带物理的模型里有 9 个：
+//   3__l2d_31.u     -> PARAM_SWING_HEADWEAR1/2/3, PARAM_SWING_RIBBON, PARAM_SWING_SKIRT
+//   l2d00.u         -> PARAM_CHESIWA_X, PARAM_HUDIEJIE_P_1, PARAM_LACE_X, PARAM_XIUSHI …
+//   l2d2__l2d_77.u  -> PARAM_HAT_X, PARAM_PiFeng_X, PARAM_Qun_X …
+//   sharedassets30  -> ParamTitiLLR, ParamBodyFB, ParamHead …
+// 素材作者改了参数名却忘了同步物理文件，是纯粹的素材缺陷。
+//
+// ⚠️ 但 SDK 对这种情况**不做任何检查**：CubismPhysics::Evaluate 里
+//     currentOutputs[i].DestinationParameterIndex = model->GetParameterIndex(...)
+// 拿到 -1 之后直接用它下标：
+//     &parameterValues[-1] / parameterMinimumValues[-1] / parameterMaximumValues[-1]
+//     _parameterCaches[-1] = ...
+// 于是越界**写** Core 的参数数组。破坏的是 Core 自己那一大块内存里的相邻数据，
+// 堆元数据毫发无损，所以 _heapchk 一路全绿、任何堆检测都抓不到；真正的症状是
+// **随后** csmUpdateModel 递归遍历变形器树时读到被写坏的索引、跳到无效地址而
+// 段错误(gdb: 崩在 csmUpdateModel 内部，backtrace 报 "corrupt stack")。
+// 实测该模型「能装载、能画首帧，第二帧 _model->Update() 才崩」——极难反推到物理文件。
+//
+// 这里在装载前把引用不到参数的 Input/Output 条目剔掉，让 SDK 永远拿不到 -1。
+// 代价只有「那几个参数不再被物理驱动」——它们本来就不存在，本来也没被驱动过。
+//
+// Meta 的 TotalInputCount / TotalOutputCount 必须同步改小：SDK 用它们预分配
+// Inputs / Outputs 数组(CubismPhysics.cpp 的 UpdateSize)。比实际大只是多几个空槽、
+// 无害，但两边保持一致以后不容易踩坑。
+//
+// parameterIds 由调用方从 Core 取(见装载处)，这里只做集合比对，不依赖 Core 类型。
+bool dropPhysicsMissingParams(QByteArray &buffer, const QSet<QByteArray> &parameterIds)
+{
+    if (buffer.isEmpty() || parameterIds.isEmpty()) {
+        return false;
+    }
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(buffer, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        return false; // 解析不了就原样交回去，宁可让 SDK 自己去判断。
+    }
+    QJsonObject root = doc.object();
+    const QJsonArray settings = root.value(QLatin1String("PhysicsSettings")).toArray();
+    if (settings.isEmpty()) {
+        return false;
+    }
+
+    int droppedInputs = 0;
+    int droppedOutputs = 0;
+    int inputCount = 0;
+    int outputCount = 0;
+    QJsonArray fixedSettings;
+    for (const QJsonValue &settingValue : settings) {
+        QJsonObject setting = settingValue.toObject();
+
+        QJsonArray inputs;
+        for (const QJsonValue &value : setting.value(QLatin1String("Input")).toArray()) {
+            const QJsonObject input = value.toObject();
+            const QByteArray id = input.value(QLatin1String("Source"))
+                                      .toObject()
+                                      .value(QLatin1String("Id"))
+                                      .toString()
+                                      .toUtf8();
+            if (!parameterIds.contains(id)) {
+                ++droppedInputs;
+                continue;
+            }
+            inputs.append(input);
+        }
+        setting.insert(QLatin1String("Input"), inputs);
+
+        QJsonArray outputs;
+        for (const QJsonValue &value : setting.value(QLatin1String("Output")).toArray()) {
+            const QJsonObject output = value.toObject();
+            const QByteArray id = output.value(QLatin1String("Destination"))
+                                      .toObject()
+                                      .value(QLatin1String("Id"))
+                                      .toString()
+                                      .toUtf8();
+            if (!parameterIds.contains(id)) {
+                ++droppedOutputs;
+                continue;
+            }
+            outputs.append(output);
+        }
+        setting.insert(QLatin1String("Output"), outputs);
+
+        inputCount += int(inputs.size());
+        outputCount += int(outputs.size());
+        fixedSettings.append(setting);
+    }
+
+    if (droppedInputs == 0 && droppedOutputs == 0) {
+        return false; // 没有可剔的，保持原始字节流不动。
+    }
+
+    root.insert(QLatin1String("PhysicsSettings"), fixedSettings);
+    QJsonObject meta = root.value(QLatin1String("Meta")).toObject();
+    if (!meta.isEmpty()) {
+        meta.insert(QLatin1String("TotalInputCount"), inputCount);
+        meta.insert(QLatin1String("TotalOutputCount"), outputCount);
+        root.insert(QLatin1String("Meta"), meta);
+    }
+    buffer = QJsonDocument(root).toJson(QJsonDocument::Compact);
+    terminateJsonNumbers(buffer);
+    cubismruntime::logWarn(
+        QStringLiteral("物理文件引用了不存在的参数，已剔除：输入 %1 条 / 输出 %2 条")
+            .arg(droppedInputs)
+            .arg(droppedOutputs));
+    return true;
 }
 
 // Cubism 的动作 JSON 里 Meta 计数一旦对不上，解析器会按声明值预分配缓冲区、
@@ -353,10 +462,17 @@ bool CubismModelImpl::setup(const QString &modelJsonPath, QString *outError)
         const csmString name = m_setting->GetExpressionName(i);
         QByteArray buffer;
         if (!readFile(relativeToHome(m_setting->GetExpressionFileName(i)), &buffer, nullptr)) {
-            continue; // 可选表情缺失不阻止模型装载。
+            // 可选表情缺失不阻止模型装载，但要说清楚**哪一个**没了 —— 以前全静默，
+            // 用户看到「模型说有三个表情、实际只有两个」时无从下手。
+            cubismruntime::logWarn(QStringLiteral("表情文件缺失，已跳过：%1 → %2")
+                                       .arg(QString::fromUtf8(name.GetRawString()),
+                                            QString::fromUtf8(m_setting->GetExpressionFileName(i))));
+            continue;
         }
         ACubismMotion *motion = LoadExpression(bytesOf(buffer), sizeOf(buffer), name.GetRawString());
         if (!motion) {
+            cubismruntime::logWarn(QStringLiteral("表情解析失败，已跳过：%1")
+                                       .arg(QString::fromUtf8(name.GetRawString())));
             continue;
         }
         if (m_expressions.IsExist(name)) {
@@ -373,9 +489,24 @@ bool CubismModelImpl::setup(const QString &modelJsonPath, QString *outError)
     if (const csmChar *physicsFile = m_setting->GetPhysicsFileName(); physicsFile && *physicsFile) {
         QByteArray buffer;
         if (readFile(relativeToHome(physicsFile), &buffer, nullptr)) {
+            // 物理引用不到的参数必须在装载前剔掉，否则 SDK 会拿 -1 当索引用、
+            // 越界写 Core 的参数数组。详见 dropPhysicsMissingParams 的说明。
+            QSet<QByteArray> parameterIds;
+            const csmInt32 parameterCount =
+                Live2D::Cubism::Core::csmGetParameterCount(_model->GetModel());
+            const char **ids = Live2D::Cubism::Core::csmGetParameterIds(_model->GetModel());
+            for (csmInt32 i = 0; i < parameterCount; ++i) {
+                parameterIds.insert(QByteArray(ids[i]));
+            }
+            dropPhysicsMissingParams(buffer, parameterIds);
             LoadPhysics(bytesOf(buffer), sizeOf(buffer));
             if (_physics) {
                 _updateScheduler.AddUpdatableList(CSM_NEW CubismPhysicsUpdater(*_physics));
+            } else {
+                // 物理是可选件：装不上不该挡住模型，但要留痕 —— 否则「头发不晃」这种
+                // 现象只能靠猜（素材坏了？还是本来就没物理文件？）。
+                cubismruntime::logWarn(QStringLiteral("物理文件装载失败（模型仍可用）：%1")
+                                           .arg(QFileInfo(modelJsonPath).fileName()));
             }
         }
     }
@@ -398,6 +529,11 @@ bool CubismModelImpl::setup(const QString &modelJsonPath, QString *outError)
             LoadPose(bytesOf(buffer), sizeOf(buffer));
             if (_pose) {
                 _updateScheduler.AddUpdatableList(CSM_NEW CubismPoseUpdater(*_pose));
+            } else {
+                // Pose 装不上的后果比物理显眼得多：切动作时部件显隐没有淡化，会硬切、
+                // 甚至短暂叠着两套手脚。必须留痕，否则用户只会说「切换时闪一下」。
+                cubismruntime::logWarn(QStringLiteral("姿势文件装载失败（切动作可能出现硬切/部件重叠）：%1")
+                                           .arg(QFileInfo(modelJsonPath).fileName()));
             }
         }
     }
@@ -426,6 +562,9 @@ bool CubismModelImpl::setup(const QString &modelJsonPath, QString *outError)
         QByteArray buffer;
         if (readFile(relativeToHome(userDataFile), &buffer, nullptr)) {
             LoadUserData(bytesOf(buffer), sizeOf(buffer));
+        } else {
+            cubismruntime::logWarn(QStringLiteral("用户数据文件读取失败（模型仍可用）：%1")
+                                       .arg(QFileInfo(modelJsonPath).fileName()));
         }
     }
 
@@ -586,14 +725,27 @@ void CubismModelImpl::loadMeshHideList()
 
 bool CubismModelImpl::loadSettingJson(const QString &jsonPath, QString *outError)
 {
-    QByteArray buffer;
-    QString readError;
-    if (!readFile(jsonPath, &buffer, &readError)) {
+    // 「读文件 + 修补 + 补贴图列表」三步已经收进 prepareSettingBytes —— **必须与
+    // KanbanModelManager 的校验共用同一份**，否则会出现「列表里有、点开装不上」。
+    // 素材里的 model3.json 常见三种「人眼看不出来」的毛病：全角空格、尾随逗号、非 UTF-8
+    // 编码；贴图列表为空时还要按目录补一张（SDK 会把「贴图数为 0」判成无法装载）。
+    PreparedSetting prepared = prepareSettingBytes(jsonPath);
+    if (!prepared.ok) {
         if (outError) {
-            *outError = readError;
+            *outError = prepared.readError;
         }
         return false;
     }
+    if (prepared.repair.touched) {
+        cubismruntime::logInfo(QStringLiteral("模型 json 已修补：%1 -> %2")
+                                   .arg(QFileInfo(jsonPath).fileName(),
+                                        prepared.repair.notes.join(QStringLiteral("; "))));
+    }
+    if (prepared.tex.inferred) {
+        cubismruntime::logInfo(QStringLiteral("模型 json 贴图列表已补全：%1 -> %2")
+                                   .arg(QFileInfo(jsonPath).fileName(), prepared.tex.note));
+    }
+    QByteArray &buffer = prepared.bytes;
     m_setting = CSM_NEW CubismModelSettingJson(bytesOf(buffer), sizeOf(buffer));
     if (!m_setting->IsValid()) {
         if (outError) {

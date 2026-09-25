@@ -1,5 +1,7 @@
 #include "app/AppInfo.h"
 
+#include "core/Diagnostics.h"
+
 // 构建期生成的版本号宏；由 yumeiren_apply_version() 把该目录加进 include path。
 #include "YumeirenVersion.h"
 
@@ -101,11 +103,20 @@ void setAutostart(bool on)
         return;
     if (on) {
         const std::wstring quoted = L"\"" + exe.toStdWString() + L"\"";
-        RegSetValueExW(key, kAutostartValue, 0, REG_SZ,
-                       reinterpret_cast<const BYTE *>(quoted.c_str()),
-                       DWORD((quoted.size() + 1) * sizeof(wchar_t)));
+        const LSTATUS rc = RegSetValueExW(key, kAutostartValue, 0, REG_SZ,
+                                          reinterpret_cast<const BYTE *>(quoted.c_str()),
+                                          DWORD((quoted.size() + 1) * sizeof(wchar_t)));
+        if (rc != ERROR_SUCCESS)
+            applog::log(applog::Level::Warning,
+                        QStringLiteral("写入开机自启失败: rc=%1").arg(int(rc)),
+                        QStringLiteral("AppInfo"));
     } else {
-        RegDeleteValueW(key, kAutostartValue);
+        // 值本来就不存在不是错误，要区分开：否则每次关掉自启都留一条假告警。
+        const LSTATUS rc = RegDeleteValueW(key, kAutostartValue);
+        if (rc != ERROR_SUCCESS && rc != ERROR_FILE_NOT_FOUND)
+            applog::log(applog::Level::Warning,
+                        QStringLiteral("移除开机自启失败: rc=%1").arg(int(rc)),
+                        QStringLiteral("AppInfo"));
     }
     RegCloseKey(key);
 }

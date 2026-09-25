@@ -82,7 +82,11 @@ void ApplicationShutdown::requestQuit(CloseReason reason)
 
     runSteps();
 
-    AppConfig::instance().save();
+    // flush 而非 save：先停掉可能正待触发的 500ms 防抖定时器再落盘。走 save() 的话，
+    // 退出前 500ms 内改过的值仍在 QSettings 内存里（sync 会一并写出，但定时器随即
+    // 在事件循环最后一个回合又存一次，且 m_flushDone 不会被置位）。flush 让「已落盘」
+    // 这件事显式化，析构那层兜底也就不会在静态析构期再碰 QSettings。
+    AppConfig::instance().flush();
     applog::log(applog::Level::Info, QStringLiteral("退出收口完成，结束事件循环"),
                    QStringLiteral("Shutdown"));
     QApplication::quit();

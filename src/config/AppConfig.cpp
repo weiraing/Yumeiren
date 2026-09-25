@@ -161,8 +161,24 @@ AppConfig::AppConfig(QObject *parent)
 
 AppConfig::~AppConfig()
 {
-    if (m_loaded)
+    // ⚠️ 这只是**兜底**，正常退出路径（ApplicationShutdown）已经 flush() 过了。
+    // 单例析构排在 QApplication 与全局日志之后，这里再 save() 有两个风险：QSettings
+    // 依赖的 Qt 全局状态可能已收、失败时 applog 写的是已析构的全局日志对象。所以
+    // 只在**没有正经退出过**（m_flushDone 仍为 false）时才试一次，且绝不再记日志。
+    if (m_loaded && !m_flushDone)
         save();
+}
+
+bool AppConfig::flush()
+{
+    if (!m_settings)
+        return false;
+    // 停掉待触发的防抖：否则 flush 之后那次定时器还会再 save 一遍（无害但多余），
+    // 更要紧的是「停表」本身就是「这批改动我已经负责落盘了」的语义。
+    if (m_saveTimer && m_saveTimer->isActive())
+        m_saveTimer->stop();
+    m_flushDone = true;
+    return save();
 }
 
 QString AppConfig::configFilePath() const

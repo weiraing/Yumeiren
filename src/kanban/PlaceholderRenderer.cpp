@@ -357,6 +357,185 @@ void PlaceholderRenderer::shutdown()
 }
 
 // 已加载模型纹理则居中绘制纹理+呼吸缩放+摆动，否则绘制默认虞美人花朵。
+// 下面这些 paintXxx() 是「默认花朵」那条路的各个部件，按绘制顺序拆开；
+// 都只吃 BodyGeometry 里的只读锚点，彼此没有副作用依赖。
+namespace {
+struct BodyGeometry {
+    qreal cx = 0.0;        // 中轴
+    qreal baseY = 0.0;     // 脚底
+    qreal bodyH = 0.0;     // 躯干高
+    qreal headR = 0.0;     // 头半径基准
+    qreal headCy = 0.0;    // 头心
+    qreal breath = 0.0;    // -1..1 呼吸
+    qreal sway = 0.0;      // -1..1 摇摆
+    qreal wave = 0.0;      // 0..1 招手
+};
+} // namespace
+
+// 画茎与两片叶(躯干)。leaf 只依赖 headR/breath/wave，与头/脸无关。
+static void paintStemAndLeaves(QPainter *painter, const BodyGeometry &g)
+{
+    QPainterPath stem;
+    const qreal shoulderY = g.headCy + g.headR * 0.75;
+    const qreal sw = g.headR * 0.34;
+    const qreal lw = g.headR * 0.72;
+    stem.moveTo(g.cx - sw, shoulderY);
+    stem.cubicTo(g.cx - sw * 1.25, shoulderY + g.bodyH * 0.35, g.cx - lw, g.baseY - g.bodyH * 0.25,
+                 g.cx - lw * 0.55, g.baseY);
+    stem.lineTo(g.cx + lw * 0.55, g.baseY);
+    stem.cubicTo(g.cx + lw, g.baseY - g.bodyH * 0.25, g.cx + sw * 1.25, shoulderY + g.bodyH * 0.35,
+                 g.cx + sw, shoulderY);
+    stem.closeSubpath();
+    QLinearGradient lg(0, shoulderY, 0, g.baseY);
+    lg.setColorAt(0.0, QColor(0x2f, 0x6b, 0x46));
+    lg.setColorAt(1.0, QColor(0x1b, 0x3a, 0x27));
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(lg);
+    painter->drawPath(stem);
+
+    for (int side = -1; side <= 1; side += 2) {
+        painter->save();
+        painter->translate(g.cx, g.baseY - g.bodyH * 0.32);
+        painter->rotate(side * (16.0 + g.breath * 2.5 + g.wave * 6.0));
+        QPainterPath leaf;
+        const qreal ll = g.headR * 1.15 * side;
+        leaf.moveTo(0, 0);
+        leaf.quadTo(ll * 0.6, -g.headR * 0.42, ll, -g.headR * 0.06);
+        leaf.quadTo(ll * 0.55, g.headR * 0.30, 0, 0);
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QColor(0x35, 0x77, 0x4d, 235));
+        painter->drawPath(leaf);
+        painter->restore();
+    }
+}
+
+// 花瓣「头发」：四片椭圆围绕头部，随视线整体微移，做出头发跟随感。
+static void paintPetals(QPainter *painter, const BodyGeometry &g, const QPointF &gaze)
+{
+    static const qreal angles[] = {200.0, 250.0, 290.0, 340.0};
+    static const quint8 tones[] = {0xd8, 0xc4, 0xe6, 0xb2};
+    for (int i = 0; i < 4; ++i) {
+        painter->save();
+        const qreal a = angles[i] + g.sway * 2.0 + g.breath * 1.2;
+        painter->translate(g.cx + gaze.x() * g.headR * 0.10,
+                           g.headCy - gaze.y() * g.headR * 0.08);
+        painter->rotate(a);
+        QPainterPath petal;
+        const qreal pr = g.headR * (1.28 + 0.04 * g.breath);
+        petal.addEllipse(QPointF(0, -pr * 0.62), pr * 0.46, pr * 0.66);
+        QColor col(tones[i], 0x3a, 0x54);
+        col.setAlpha(232);
+        painter->setPen(QPen(QColor(0x6d, 0x1d, 0x30, 120), 1.0));
+        painter->setBrush(col);
+        painter->drawPath(petal);
+        painter->restore();
+    }
+}
+
+// 脸盘 + 刘海。
+static void paintHeadAndFringe(QPainter *painter, const BodyGeometry &g)
+{
+    painter->setPen(QPen(QColor(0x5c, 0x22, 0x33, 140), 1.2));
+    painter->setBrush(QColor(0xf6, 0xdf, 0xd2));
+    painter->drawEllipse(QPointF(g.cx, g.headCy), g.headR, g.headR * 1.02);
+
+    QPainterPath fringe;
+    fringe.moveTo(g.cx - g.headR * 0.98, g.headCy - g.headR * 0.10);
+    fringe.quadTo(g.cx - g.headR * 0.45, g.headCy - g.headR * 1.35, g.cx + g.headR * 0.10,
+                  g.headCy - g.headR * 0.90);
+    fringe.quadTo(g.cx + g.headR * 0.55, g.headCy - g.headR * 0.62, g.cx + g.headR * 0.98,
+                  g.headCy - g.headR * 0.02);
+    fringe.quadTo(g.cx + g.headR * 0.30, g.headCy - g.headR * 0.52, g.cx - g.headR * 0.20,
+                  g.headCy - g.headR * 0.34);
+    fringe.quadTo(g.cx - g.headR * 0.66, g.headCy - g.headR * 0.20, g.cx - g.headR * 0.98,
+                  g.headCy - g.headR * 0.10);
+    fringe.closeSubpath();
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(QColor(0x35, 0x22, 0x2b));
+    painter->drawPath(fringe);
+}
+
+// 睁眼高度按 1-blink 缩放，画成短弧即闭眼；表情再乘倍率或换成上弯弧(笑眼)。
+static void paintEyes(QPainter *painter, const BodyGeometry &g, const QPointF &gaze,
+                      float blinkLeft, const ExpressionDef &ex)
+{
+    const qreal eyeY = g.headCy + g.headR * 0.12;
+    const qreal eyeDx = g.headR * 0.38;
+    const qreal open = 1.0 - double(blinkLeft);
+    const qreal eyeH = qMax(0.6, g.headR * 0.22 * open * double(ex.eyeOpen));
+    const qreal eyeW = g.headR * 0.16;
+    // 眨眼过半时一律退化成弧线，避免「笑眼 + 眨眼」互相打架。
+    const bool asArc = ex.arcEyes && open > 0.55;
+    painter->setPen(Qt::NoPen);
+    for (int side = -1; side <= 1; side += 2) {
+        const QPointF c(g.cx + side * eyeDx + gaze.x() * g.headR * 0.05,
+                        eyeY - gaze.y() * g.headR * 0.04);
+        if (asArc) {
+            QPainterPath arc;
+            arc.moveTo(c.x() - eyeW * 1.35, c.y() + eyeH * 0.9);
+            arc.quadTo(c.x(), c.y() - eyeH * 1.5, c.x() + eyeW * 1.35, c.y() + eyeH * 0.9);
+            painter->setBrush(Qt::NoBrush);
+            painter->setPen(QPen(QColor(0x2b, 0x1c, 0x24), qMax(1.0, g.headR * 0.055),
+                                 Qt::SolidLine, Qt::RoundCap));
+            painter->drawPath(arc);
+            painter->setPen(Qt::NoPen);
+            continue;
+        }
+        painter->setBrush(QColor(0x2b, 0x1c, 0x24));
+        painter->drawEllipse(c, eyeW, eyeH);
+        if (open > 0.35) { // 高光只在睁眼时画
+            painter->setBrush(QColor(255, 255, 255, 220));
+            painter->drawEllipse(c + QPointF(-eyeW * 0.3, -eyeH * 0.35), eyeW * 0.30,
+                                 eyeH * 0.28);
+        }
+    }
+}
+
+// 嘴 + 头顶小花。
+static void paintMouthAndFlower(QPainter *painter, const BodyGeometry &g, const ExpressionDef &ex,
+                                qreal mouthOpen)
+{
+    const qreal mouthY = g.headCy + g.headR * 0.55;
+    QPainterPath mouth;
+    const qreal mw = g.headR * 0.22;
+    const qreal curve = double(ex.mouthCurve);
+    const qreal drop = (g.headR * 0.10 + g.headR * 0.12 * (mouthOpen + double(ex.mouthOpen)))
+                       * curve;
+    mouth.moveTo(g.cx - mw, mouthY);
+    mouth.quadTo(g.cx, mouthY + drop, g.cx + mw, mouthY);
+    mouth.quadTo(g.cx, mouthY + drop * 0.35, g.cx - mw, mouthY);
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(QColor(0xa8, 0x33, 0x4a));
+    painter->drawPath(mouth);
+
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(QColor(0xf2, 0xc7, 0x4b));
+    const QPointF center(g.cx, g.headCy - g.headR * 0.92);
+    painter->drawEllipse(center, g.headR * 0.13, g.headR * 0.13);
+    painter->setBrush(QColor(0x3a, 0x24, 0x1c));
+    painter->drawEllipse(center, g.headR * 0.075, g.headR * 0.075);
+}
+
+// 模型贴图已就绪时的快速路径：整图按高度缩放后画在中轴上。返回 true 表示已画完。
+static bool paintModelTexture(QPainter *painter, const QImage &texture, qreal cx, qreal baseY,
+                              qreal h, qreal breath, qreal squash)
+{
+    if (texture.isNull())
+        return false;
+    painter->save();
+    const qreal texScale = (h * 0.75) / texture.height();
+    const qreal drawW = texture.width() * texScale;
+    const qreal drawH = texture.height() * texScale;
+    const qreal breathScale = 1.0 + breath * 0.015;
+    const qreal finalW = drawW * squash * breathScale;
+    const qreal finalH = drawH * breathScale;
+    const QRectF dst(cx - finalW * 0.5, baseY - finalH, finalW, finalH);
+    painter->drawImage(dst, texture);
+    painter->restore();
+    return true;
+}
+
+
 void PlaceholderRenderer::paint(QPainter *painter, const QSize &logicalSize)
 {
     if (!m_ready || !painter)
@@ -398,166 +577,29 @@ void PlaceholderRenderer::paint(QPainter *painter, const QSize &logicalSize)
     // 「一边蹦跳一边笑」。
     const ExpressionDef &ex = kExpressions[qBound(0, m_expressionIndex, kExpressionCount - 1)];
 
-    if (!m_modelTexture.isNull()) {
-        painter->save();
-        const qreal texScale = (h * 0.75) / m_modelTexture.height();
-        const qreal drawW = m_modelTexture.width() * texScale;
-        const qreal drawH = m_modelTexture.height() * texScale;
-        const qreal breathScale = 1.0 + breath * 0.015;
-        const qreal finalW = drawW * squash * breathScale;
-        const qreal finalH = drawH * breathScale;
-        const qreal dx = cx - finalW * 0.5;
-        const qreal dy = baseY - finalH;
-        const QRectF dst(dx, dy, finalW, finalH);
-        painter->drawImage(dst, m_modelTexture);
-        painter->restore();
+    if (paintModelTexture(painter, m_modelTexture, cx, baseY, h, breath, squash)) {
         painter->restore();
         return;
     }
 
+    BodyGeometry g;
+    g.cx = cx;
+    g.baseY = baseY;
+    g.bodyH = h * 0.62 * (1.0 + breath * 0.012) * squash;
+    g.headR = qMin(w, h) * 0.19;
+    g.headCy = baseY - g.bodyH - g.headR * 0.35;
+    g.breath = breath;
+    g.sway = sway;
+    g.wave = wave;
 
-    const qreal bodyH = h * 0.62 * (1.0 + breath * 0.012) * squash;
-    const qreal headR = qMin(w, h) * 0.19;
-    const qreal headCy = baseY - bodyH - headR * 0.35;
-
-    {
-        QPainterPath stem;
-        const qreal shoulderY = headCy + headR * 0.75;
-        const qreal sw = headR * 0.34;
-        const qreal lw = headR * 0.72;
-        stem.moveTo(cx - sw, shoulderY);
-        stem.cubicTo(cx - sw * 1.25, shoulderY + bodyH * 0.35, cx - lw, baseY - bodyH * 0.25,
-                     cx - lw * 0.55, baseY);
-        stem.lineTo(cx + lw * 0.55, baseY);
-        stem.cubicTo(cx + lw, baseY - bodyH * 0.25, cx + sw * 1.25, shoulderY + bodyH * 0.35,
-                     cx + sw, shoulderY);
-        stem.closeSubpath();
-        QLinearGradient g(0, shoulderY, 0, baseY);
-        g.setColorAt(0.0, QColor(0x2f, 0x6b, 0x46));
-        g.setColorAt(1.0, QColor(0x1b, 0x3a, 0x27));
-        painter->setPen(Qt::NoPen);
-        painter->setBrush(g);
-        painter->drawPath(stem);
-    }
-
-    for (int side = -1; side <= 1; side += 2) {
-        painter->save();
-        painter->translate(cx, baseY - bodyH * 0.32);
-        painter->rotate(side * (16.0 + breath * 2.5 + wave * 6.0));
-        QPainterPath leaf;
-        const qreal ll = headR * 1.15 * side;
-        leaf.moveTo(0, 0);
-        leaf.quadTo(ll * 0.6, -headR * 0.42, ll, -headR * 0.06);
-        leaf.quadTo(ll * 0.55, headR * 0.30, 0, 0);
-        painter->setPen(Qt::NoPen);
-        painter->setBrush(QColor(0x35, 0x77, 0x4d, 235));
-        painter->drawPath(leaf);
-        painter->restore();
-    }
-
-    // 花瓣「头发」：四片椭圆围绕头部，随视线整体微移，做出头发跟随感。
-    {
-        static const qreal angles[] = {200.0, 250.0, 290.0, 340.0};
-        static const quint8 tones[] = {0xd8, 0xc4, 0xe6, 0xb2};
-        for (int i = 0; i < 4; ++i) {
-            painter->save();
-            const qreal a = angles[i] + sway * 2.0 + breath * 1.2;
-            painter->translate(cx + m_gaze.x() * headR * 0.10,
-                               headCy - m_gaze.y() * headR * 0.08);
-            painter->rotate(a);
-            QPainterPath petal;
-            const qreal pr = headR * (1.28 + 0.04 * breath);
-            petal.addEllipse(QPointF(0, -pr * 0.62), pr * 0.46, pr * 0.66);
-            QColor col(tones[i], 0x3a, 0x54);
-            col.setAlpha(232);
-            painter->setPen(QPen(QColor(0x6d, 0x1d, 0x30, 120), 1.0));
-            painter->setBrush(col);
-            painter->drawPath(petal);
-            painter->restore();
-        }
-    }
-
-    painter->setPen(QPen(QColor(0x5c, 0x22, 0x33, 140), 1.2));
-    painter->setBrush(QColor(0xf6, 0xdf, 0xd2));
-    painter->drawEllipse(QPointF(cx, headCy), headR, headR * 1.02);
-
-    {
-        QPainterPath fringe;
-        fringe.moveTo(cx - headR * 0.98, headCy - headR * 0.10);
-        fringe.quadTo(cx - headR * 0.45, headCy - headR * 1.35, cx + headR * 0.10,
-                      headCy - headR * 0.90);
-        fringe.quadTo(cx + headR * 0.55, headCy - headR * 0.62, cx + headR * 0.98,
-                      headCy - headR * 0.02);
-        fringe.quadTo(cx + headR * 0.30, headCy - headR * 0.52, cx - headR * 0.20,
-                      headCy - headR * 0.34);
-        fringe.quadTo(cx - headR * 0.66, headCy - headR * 0.20, cx - headR * 0.98,
-                      headCy - headR * 0.10);
-        fringe.closeSubpath();
-        painter->setPen(Qt::NoPen);
-        painter->setBrush(QColor(0x35, 0x22, 0x2b));
-        painter->drawPath(fringe);
-    }
-
-    // 睁眼高度按 1-blink 缩放，画成短弧即闭眼；表情再乘倍率或换成上弯弧(笑眼)。
-    {
-        const qreal eyeY = headCy + headR * 0.12;
-        const qreal eyeDx = headR * 0.38;
-        const qreal open = 1.0 - double(m_blinkLeft);
-        const qreal eyeH = qMax(0.6, headR * 0.22 * open * double(ex.eyeOpen));
-        const qreal eyeW = headR * 0.16;
-        // 眨眼过半时一律退化成弧线，避免「笑眼 + 眨眼」互相打架。
-        // 眨眼过半时退化成弧线，避免「笑眼 + 眨眼」互相打架。
-        const bool asArc = ex.arcEyes && open > 0.55;
-        painter->setPen(Qt::NoPen);
-        for (int side = -1; side <= 1; side += 2) {
-            const QPointF c(cx + side * eyeDx + m_gaze.x() * headR * 0.05,
-                            eyeY - m_gaze.y() * headR * 0.04);
-            if (asArc) {
-                QPainterPath arc;
-                arc.moveTo(c.x() - eyeW * 1.35, c.y() + eyeH * 0.9);
-                arc.quadTo(c.x(), c.y() - eyeH * 1.5, c.x() + eyeW * 1.35, c.y() + eyeH * 0.9);
-                painter->setBrush(Qt::NoBrush);
-                painter->setPen(QPen(QColor(0x2b, 0x1c, 0x24), qMax(1.0, headR * 0.055),
-                                     Qt::SolidLine, Qt::RoundCap));
-                painter->drawPath(arc);
-                painter->setPen(Qt::NoPen);
-                continue;
-            }
-            painter->setBrush(QColor(0x2b, 0x1c, 0x24));
-            painter->drawEllipse(c, eyeW, eyeH);
-            if (open > 0.35) { // 高光只在睁眼时画
-                painter->setBrush(QColor(255, 255, 255, 220));
-                painter->drawEllipse(c + QPointF(-eyeW * 0.3, -eyeH * 0.35), eyeW * 0.30,
-                                     eyeH * 0.28);
-            }
-        }
-    }
-
-    {
-        const qreal mouthY = headCy + headR * 0.55;
-        QPainterPath mouth;
-        const qreal mw = headR * 0.22;
-        const qreal curve = double(ex.mouthCurve);
-        const qreal drop = (headR * 0.10 + headR * 0.12 * (mouthOpen + double(ex.mouthOpen)))
-                           * curve;
-        mouth.moveTo(cx - mw, mouthY);
-        mouth.quadTo(cx, mouthY + drop, cx + mw, mouthY);
-        mouth.quadTo(cx, mouthY + drop * 0.35, cx - mw, mouthY);
-        painter->setPen(Qt::NoPen);
-        painter->setBrush(QColor(0xa8, 0x33, 0x4a));
-        painter->drawPath(mouth);
-    }
-
-    {
-        painter->setPen(Qt::NoPen);
-        painter->setBrush(QColor(0xf2, 0xc7, 0x4b));
-        const QPointF center(cx, headCy - headR * 0.92);
-        painter->drawEllipse(center, headR * 0.13, headR * 0.13);
-        painter->setBrush(QColor(0x3a, 0x24, 0x1c));
-        painter->drawEllipse(center, headR * 0.075, headR * 0.075);
-    }
+    paintStemAndLeaves(painter, g);
+    paintPetals(painter, g, m_gaze);
+    paintHeadAndFringe(painter, g);
+    paintEyes(painter, g, m_gaze, m_blinkLeft, ex);
+    paintMouthAndFlower(painter, g, ex, mouthOpen);
 
     painter->restore();
 }
 
+// 拟人化各部件共用的锚点与形变参数。全是从 paint() 里算好、只读的中间量。
 } // namespace kanban

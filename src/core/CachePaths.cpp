@@ -5,6 +5,9 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QStringList>
+#include <QVector>
+
+#include <algorithm>
 
 namespace {
 
@@ -173,4 +176,50 @@ bool CachePaths::isWritable(QString *errorMessage)
     // 探针用完即删；删不掉只留下几字节临时文件，不代表不可写。
     file.remove();
     return true;
+}
+
+int CachePaths::pruneDirectory(const QString &dir, qint64 maxBytes)
+{
+    if (dir.isEmpty() || maxBytes <= 0)
+        return 0;
+    // 越界护栏：只允许清理 .cache 里面的目录。传错路径时宁可什么都不做 ——
+    // 这是本项目**唯一**一个会直接删文件的接口，不能靠调用方自觉。
+    //
+    // 用 QFile::remove 直接删、不进回收站：清的是**可再生的缓存**，进回收站既违背
+    // 「腾地方」的目的，又会让回收站被几百个缩略图塞满。前提是调用方只在 .cache
+    // 下的缓存目录上用它 —— 上面那道 contains() 就是为此。
+    if (!contains(dir))
+        return 0;
+
+    QDir d(dir);
+    if (!d.exists())
+        return 0;
+
+    const QFileInfoList entries = d.entryInfoList(QDir::Files | QDir::NoDotAndDotDot, QDir::NoSort);
+    qint64 total = 0;
+    QVector<QFileInfo> infos;
+    infos.reserve(entries.size());
+    for (const QFileInfo &fi : entries) {
+        total += fi.size();
+        infos.append(fi);
+    }
+    if (total <= maxBytes)
+        return 0;
+
+    // 最旧的先删。同级文件极多时排序是 O(n log n)，但只在真的超限时才付这个成本。
+    std::sort(infos.begin(), infos.end(), [](const QFileInfo &a, const QFileInfo &b) {
+        return a.lastModified() < b.lastModified();
+    });
+
+    int removed = 0;
+    for (const QFileInfo &fi : infos) {
+        if (total <= maxBytes)
+            break;
+        const qint64 size = fi.size();
+        if (QFile::remove(fi.absoluteFilePath())) {
+            total -= size;
+            ++removed;
+        }
+    }
+    return removed;
 }

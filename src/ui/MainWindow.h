@@ -46,6 +46,9 @@ class QProcess;
 class QKeySequenceEdit;
 class QTreeWidget;
 class MediaLibraryCard;
+// 两个图标网格(看板娘模型墙 / 图片浏览)都不是裸 QListWidget：滚轮按像素滚，不是 Qt 默认的
+// 「一次滚两三格」。成员写成具体类型是有意的 —— 让「产品用的是这个网格」由编译期保证。
+class PixelWheelGrid;
 
 namespace winhelper {
 class GlobalHotkey;
@@ -172,11 +175,15 @@ private:
     void updateGalleryGrid();
     void uninstallImage();   // 仅卸载图片背景
     void uninstallEffect();  // 仅卸载效果样式
-    // 按「调整参数」处理一张原图(亮度/对比度/模糊/转动/尺寸)，单图与随机共用同一条链路。
-    QImage applyImageParams(const QImage &src) const;
     // 「随机」模式：把图片浏览列表里的每张图按当前参数处理一遍，铺进图片池目录
     // (Engine::imagePoolDir())。成功返回 true，count 给出池内图片数。
     bool buildRandomImagePool(int *count, QString *error);
+    // 导出图片的**同步**入口，但解码/调参/编码在工作线程上跑（见 ImagePage.cpp 里
+    // ImageExportJob 的说明）。参数在调用瞬间从控件取值快照，工作线程不碰 UI。
+    // 单图模式传 sources={原图} + singleOutPath；随机池传全部 sources + outDir。
+    bool runImageExportAsync(const QStringList &sources, const QString &outDir,
+                             const QString &singleOutPath, bool randomMode, int *produced,
+                             QString *error);
 
     QWidget *buildKanbanPage();
     QWidget *buildKanbanMainPage();  // 页签 0：看板娘主体
@@ -185,8 +192,19 @@ private:
     QWidget *buildKanbanParamCard(QWidget *parent);
     // 控制器 + 托盘 + 退出步骤的装配(在 UI 建好之后调用，顺序有讲究)。
     void setupKanbanAndTray();
-    void refreshKanbanModels();          // 重扫模型目录并重建模型网格
+    // 重建模型网格。rescan=false 表示「复用刚扫过的结果」—— 启动路径用它省掉一次
+    // 全目录遍历（start() 内部已经扫过），只有用户主动刷新时才需要重新读盘。
+    void refreshKanbanModels(bool rescan = true);
+    // 看板娘页懒加载：首次进入该页时才扫模型 + 建格子 + 解码缩略图。
+    // 启动时不做这三件事（实测省下约 37MB 常驻内存与一次全目录扫描），
+    // 代价只是首次点进看板娘页要多等一瞬。幂等，重复调用只生效一次。
+    void ensureKanbanPagePopulated();
+    // 只解码当前视口可见的那几行缩略图（滚动时补解）。网格是懒建的，未填充时是 no-op。
+    void kickKanbanVisibleThumbDecode();
     void updateKanbanControls();         // 按钮可用性/状态文本(单一出口，别处不直改)
+    // updateKanbanControls() 的尾段：YUMEIREN_DIAG=1 时把按钮/视线/清单的可点坐标落盘。
+    // 纯只读，拆出来只是为了让那个函数读得下去。
+    void logKanbanControlsProbe(const QString &meshHideSummary);
     // 只重写底部状态栏(第一行现算 + 第二行取缓存)，挂在帧率信号上每秒一次。
     void updateKanbanStatus();
     void setKanbanLog(const QString &text, bool isError);
@@ -203,6 +221,7 @@ private:
     void pollKanbanModelThumbs();        // 任务期间轮询：已落盘的先贴上去
     void onKanbanThumbFinished(int exitCode);
     void showKanbanModelMenu(const QPoint &viewportPos); // 模型卡片右键菜单
+    void openKanbanModelFolder(QListWidgetItem *item);   // 在资源管理器里打开模型文件夹
     void deleteKanbanModel(QListWidgetItem *item);       // 删除模型文件夹 + 缓存预览图
 
     // data
@@ -211,13 +230,40 @@ private:
     QVector<QPushButton *> m_presetButtons;
     int m_selectedPreset = -1; // -1 = custom image
     QString m_customImage;
-    QListWidget *m_galleryList = nullptr;
+    PixelWheelGrid *m_galleryList = nullptr;
     QString m_presetDir;       // user-chosen extra preset folder
     QString galleryThumbPath(const QString &image) const;
     QString m_sourceText;      // “当前选择”完整文本(展示时按两行省略)
 
     QMutex m_thumbTasksMutex;
     bool m_thumbTasksLive = true;
+
+    // 图库里「图片路径 → 它在列表中的行号」。重建列表时一次性填好，解码回调靠它
+    // O(1) 定位 —— 否则回调要线性扫 m_presets，N 张图 × N 次回调 = O(N²)。
+    // 只在 GUI 线程读写（rebuildGallery 与回调都在主线程）。
+    QHash<QString, int> m_galleryThumbRows;
+
+    // 看板娘模型网格的缩略图世代号。每重建一次网格 +1，后台解码线程回投时对不上就丢弃。
+    // 与 m_thumbTasksLive 分工不同：后者管「主窗口还在不在」（进程级），本项管「这批格子
+    // 还是不是当前那一批」（列表级）—— 396 张图解码要几百毫秒，期间用户完全可能切模型、
+    // 删模型或重扫，旧回调若不丢弃就会把图标贴到刚重建出来的错行上。
+    // 单元格数固定为 1：所有写都在 GUI 线程(重建列表时自增)，读在回调里也在 GUI 线程。
+    quint64 m_kanbanGridGeneration = 0;
+
+    // 看板娘网格里「缩略图键 → 它在网格中的行号」。一次重贴算一份，下一次重贴整体换掉。
+    // 用途有二：① 同一个 key 只解一次；② 解码回调直接按行号贴，不必遍历整个网格。
+    // 只在 GUI 线程读写，不需要加锁。
+    QHash<QString, QList<int>> m_kanbanThumbRows;
+
+    // 看板娘页是否已「填充过」（扫过模型 + 建过格子）。false 时网格是空壳、没解过一张图，
+    // 这是启动时的常态 —— 见 ensureKanbanPagePopulated()。
+    bool m_kanbanPagePopulated = false;
+
+    // 缩略图按需解码：只解当前视口可见的那几行，滚动时再补。
+    // 一次性解码 396 张要常驻约 37MB（每张 121×201 ARGB32 ≈ 95KB），而用户通常只看得到
+    // 十几格 —— 全解就是把 95% 的内存花在看不见的图上。
+    // 「视口变了要补解」这件事由 0ms 单次定时器合并（见 buildKanbanModelCard），
+    // 不需要另立标志位：定时器本身就是那个待办标记。
 
     struct EffectPreset {
         QString name;
@@ -279,6 +325,11 @@ private:
     // video wallpaper page widgets
     QTreeWidget *m_videoList = nullptr;      // 指向 MediaLibraryCard 内的列表
     MediaLibraryCard *m_videoLib = nullptr;
+    // 视频库的目录指纹（data/video 的 mtime）+ 「上次已比对过」标志。切页路径靠这两个
+    // 跳过递归扫描 —— 只有指纹变了或从未比对过才真去遍历目录。见
+    // refreshVideoLibraryIfChanged()。
+    qint64 m_videoDirStamp = 0;
+    bool m_videoLibSynced = false;
     QSlider *m_videoVolume = nullptr;
     // 播放模式(互斥单选，三选一)：单循环 / 列表循环 / 随机，默认单循环
     QRadioButton *m_modeSingle = nullptr;
@@ -355,10 +406,14 @@ private:
     QPushButton *m_kanbanNextBtn = nullptr;
     QPushButton *m_kanbanExprBtn = nullptr;
     QLabel *m_kanbanLog = nullptr;
-    QListWidget *m_kanbanModelGrid = nullptr;
+    PixelWheelGrid *m_kanbanModelGrid = nullptr;
 
     QLabel *m_kanbanModelInfo = nullptr;
     QString m_kanbanModelLine;
+    // 当前选中模型的显示名，供第一行（状态/后端/实测/当前动作）末尾的「模型」项使用。
+    // 由 updateKanbanControls() 在算出选中项时写入，updateKanbanStatus() 只读 ——
+    // 它的唯一数据源是模型明细那一行，避免两处各取一次选中项而分叉。
+    QString m_kanbanModelName;
     // 生成预览图的子进程。**非空即表示正在生成** —— 拿它当唯一的重入闸门。
     QProcess *m_kanbanThumbJob = nullptr;
 
