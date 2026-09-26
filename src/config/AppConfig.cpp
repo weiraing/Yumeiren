@@ -68,6 +68,7 @@ const char *kBoolRules[] = {
     ConfigKeys::Video::PauseBattery,
     ConfigKeys::Video::Reclaim,
     ConfigKeys::Video::AffinityLimit,
+    ConfigKeys::Video::ThrottleDecode,
     ConfigKeys::Video::Diag,
     ConfigKeys::Window::Maximized,
     ConfigKeys::Kanban::Enabled,
@@ -92,6 +93,10 @@ const char *kBoolDefaultTrue[] = {
     ConfigKeys::Video::PauseFullscreen,
     ConfigKeys::Video::Reclaim,
     ConfigKeys::Video::AffinityLimit,
+    // 解码节流默认开(2026-09-26 用户定案)：它是唯一能同时降 CPU/GPU/内存的杠杆
+    // (实测 4K60 限 30：硬解素材 GPU −20%、软解素材 CPU −59%)，代价是画面一起放慢。
+    // 读取端默认值同 true；实测明细见 ConfigKeys::Video::ThrottleDecode 的注释。
+    ConfigKeys::Video::ThrottleDecode,
     ConfigKeys::Kanban::AlwaysOnTop,
     ConfigKeys::Kanban::AllowInteraction,
     ConfigKeys::Kanban::MotionLoop,

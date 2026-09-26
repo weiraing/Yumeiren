@@ -53,6 +53,9 @@ public:
     void setPauseOnFullscreen(bool on);
     void setPauseOnBattery(bool on);
     void setReclaimMemory(bool on);
+    // 解码节流(默认开)：压低播放速率让解码器自己少出帧。关掉 = 只丢帧、保持播放速度
+    void setThrottleDecode(bool on);
+    bool throttleDecode() const { return m_throttleDecode; }
     void setVolume(int percent);      // 计量为百分比；0=取消声音播放(音频轨一并停掉)
     void setMonitorOn(bool on);
     void setTargetFps(int fps);
@@ -113,6 +116,8 @@ private:
     void forwardFrame(const QVideoFrame &frame, const QMediaPlayer *player);
     // 让下一次转发立即放行(改帧率上限/切限帧方式/换素材后调用)
     void resetFramePacing();
+    // 按「帧率上限 ÷ 源帧率」重设播放速率。源帧率取自元数据，取不到就退回 1.0
+    void applyPlaybackRate(QMediaPlayer *player);
     qint64 suspendReleaseThresholdMs(int reasons) const;
     bool isPrimaryOutput(const VideoOutput &out) const;
     bool ensureOutputs(QString *error);
@@ -146,6 +151,8 @@ private:
     bool m_pauseOnFullscreen = false;
     bool m_pauseOnBattery = false;
     bool m_reclaimMemory = true;
+    // true(默认)=解码节流：播放速率压到「帧率上限÷源帧率」，解码器少出帧，画面一起放慢
+    bool m_throttleDecode = true;
     int m_volume = 0;
 
     // FrameScheduler 状态机

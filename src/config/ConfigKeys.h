@@ -63,6 +63,14 @@ inline constexpr auto PauseBattery = "video/pauseBattery";
 inline constexpr auto TargetFps = "video/targetFps";
 inline constexpr auto Reclaim = "video/reclaim";
 inline constexpr auto AffinityLimit = "video/affinityLimit";
+// 解码节流(默认开)：按「帧率上限 ÷ 源帧率」压低播放速率，解码与呈现一起慢下来。
+// 与丢帧的区别是省在哪一段：丢帧只省呈现侧(提交+合成)，解码与色彩转换照跑；
+// 节流连解码侧一起省。实测 4K60 限 30(同一二进制背靠背对照)：
+//   硬解素材 → GPU 合计 −20%、3D −31%(解码引擎不降)；
+//   软解素材 → CPU 2.2 核 → 0.9 核(−59%)、内存 −7%、GPU 仅 −7%。
+// ⚠️ 硬解素材上解码引擎本身不跟着降(解码器提前解码)，省的是呈现侧 ——
+// 别照"解码侧也省"去解释硬解素材的数字。关掉即回到纯丢帧(保速)行为。
+inline constexpr auto ThrottleDecode = "video/throttleDecode";
 inline constexpr auto Diag = "video/diag";
 }
 

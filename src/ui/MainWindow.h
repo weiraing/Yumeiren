@@ -339,6 +339,7 @@ private:
     QCheckBox *m_batteryBox = nullptr;
     QCheckBox *m_reclaimBox = nullptr;
     QCheckBox *m_affinityBox = nullptr;   // 资源友好模式(限制逻辑核, 重启生效)
+    QCheckBox *m_throttleBox = nullptr;   // 解码节流(压低播放速率让解码器少出帧, 默认开)
     // 「开机自动启动」的唯一入口在**托盘右键菜单**（SystemTrayController），
     // 本页与看板娘页都不再有同名复选框。
     // 动态网页壁纸页(WebView2)

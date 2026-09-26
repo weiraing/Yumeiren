@@ -253,6 +253,8 @@ void VideoWallpaper::playIndex(int index, qint64 resumePos)
         }
         // 循环策略必须每次都断言：列表从 1 个变多个时走 sameSource 快路径，漏掉会遗留单曲循环
         applyLoopPolicy(out.player);
+        // 速率也要每次断言：setSource 会重置它，sameSource 快路径则要沿用
+        applyPlaybackRate(out.player);
         out.audio->setVolume(first ? qBound(0, m_volume, 100) / 100.0 : 0);
         out.audio->setMuted(!first);
         out.player->play();

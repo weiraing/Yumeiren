@@ -447,11 +447,12 @@ QWidget *MainWindow::buildVideoWallpaperPage()
     fpsRow->addStretch(1);   // 空白推到中间，四个按钮靠右(与「模式」行对齐)
     m_fpsGroup = new QButtonGroup(this);
     m_fpsGroup->setExclusive(true);
+    // ⚠️ 旧文案末句是反的（写「选『默认』即可取消」自动限帧）—— 实际语义恰好相反：
+    // 「默认」= 值 0 = 不设手动上限，此时**自动档才会生效**；手动选了具体档位才是覆盖它。
     const QString fpsTip = tooltipstyle::format(QStringLiteral(
             "限制壁纸呈现帧率：视频帧率高于上限时，多出来的帧不再提交呈现。\n"
-            "GPU 的 3D 引擎（色彩转换+缩放）占用按呈现帧数线性下降。\n"
-            "「默认」跟随视频帧率，保持原生帧率（最费资源）。\n"
-            "分辨率高于屏幕的素材会被自动限到 24 FPS，选「默认」即可取消。"));
+            "「默认」跟随视频帧率，不设上限。\n"
+            "分辨率高于屏幕的素材会被自动限到 24 FPS；手动选了具体档位则以手动档为准。"));
     auto addFpsOption = [&](int fps, const QString &label) {
         auto *btn = new QRadioButton(label, leftCard);
         btn->setToolTip(fpsTip);
@@ -472,6 +473,24 @@ QWidget *MainWindow::buildVideoWallpaperPage()
         AppConfig::instance().setValue(ConfigKeys::Video::TargetFps, fps);
     });
     leftLay->addLayout(fpsRow);
+
+    // 限帧有两套省法，省在哪一段完全不同，用词必须写清楚(丢帧省呈现侧 / 节流省解码侧)。
+    // 默认开节流：2026-09-26 用户定案，理由见 ConfigKeys::Video::ThrottleDecode 的注释。
+    m_throttleBox = new QCheckBox(QStringLiteral("解码节流(省资源)"), leftCard);
+    m_throttleBox->setChecked(true);
+    m_throttleBox->setToolTip(tooltipstyle::format(QStringLiteral(
+            "按「帧率上限 ÷ 视频帧率」压低播放速率：解码与呈现一起慢下来。\n"
+            "与单纯丢帧的区别：丢帧只省呈现侧(提交+合成)，节流连解码侧一起省。\n"
+            "实测 4K60 限 30 —— 硬解素材：GPU 合计 -20%(3D -31%)；\n"
+            "素材走 CPU 软解时：CPU 2.2 核 → 0.9 核(-59%)、内存 -7%。\n"
+            "代价：画面与声音一起放慢(60 fps 素材限到 30 fps 就是 0.5 倍速)。\n"
+            "取消勾选 = 只丢帧、保持播放速度。")));
+    connect(m_throttleBox, &QCheckBox::toggled, this, [this](bool on) {
+        VideoWallpaper::instance().setThrottleDecode(on);
+        AppConfig &st = AppConfig::instance();
+        st.setValue(ConfigKeys::Video::ThrottleDecode, on);
+    });
+    leftLay->addWidget(m_throttleBox);
 
     // 左列**不再固定宽度**，而是拿到一个可收缩的下限：窗口变宽时多出来的空间依然
     // 全给右侧播放列表(左列被 stretch 压到最小)，窗口变窄时左列能跟着收。

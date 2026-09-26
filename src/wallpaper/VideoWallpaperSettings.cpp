@@ -51,6 +51,43 @@ void VideoWallpaper::setTargetFps(int fps)
         return; // 值未变不重算：启动时 loadSettings 会重复回填
     m_targetFps = bounded;
     resetFramePacing(); // 立刻生效，不沿用旧节拍的下一个截止时刻
+    // 上限也是节流的分母，改上限要立刻反映到解码侧，不能等下一次元数据回调
+    for (const VideoOutput &out : std::as_const(m_outputs))
+        if (isLiveOutput(out))
+            applyPlaybackRate(out.player);
+}
+void VideoWallpaper::setThrottleDecode(bool on)
+{
+    if (m_throttleDecode == on)
+        return;
+    m_throttleDecode = on;
+    resetFramePacing(); // 速率变了，节拍器重新对齐
+    for (const VideoOutput &out : std::as_const(m_outputs))
+        if (isLiveOutput(out))
+            applyPlaybackRate(out.player);
+}
+void VideoWallpaper::applyPlaybackRate(QMediaPlayer *player)
+{
+    if (!player)
+        return;
+    double rate = 1.0;
+    const int fps = effectiveTargetFps();
+    // 只有节流档才压速率：关掉时必须恒为 1.0 —— 限帧已由 forwardFrame 丢帧完成，
+    // 再放慢会两头都限。源帧率取自元数据，取不到(部分容器不报)就退回 1.0：
+    // 宁可不省，也不要瞎压一个速率出来。
+    // 容差 0.5fps：源帧率只比上限高一点时按比例压，画面会微微变慢却省不到什么，
+    // 那点差距交给丢帧更划算。
+    if (m_throttleDecode && fps > 0) {
+        const double src = player->metaData()
+                               .value(QMediaMetaData::VideoFrameRate)
+                               .toDouble();
+        if (src > fps + 0.5)
+            rate = fps / src;
+    }
+    applog::log(applog::Level::Debug,
+        QStringLiteral("setPlaybackRate(%1) throttle=%2 fps=%3")
+            .arg(rate).arg(m_throttleDecode ? 1 : 0).arg(fps));
+    player->setPlaybackRate(rate);
 }
 void VideoWallpaper::setVolume(int percent)
 {

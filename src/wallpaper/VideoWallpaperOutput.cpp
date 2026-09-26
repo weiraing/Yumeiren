@@ -190,6 +190,7 @@ void VideoWallpaper::layoutOutputs()
                     .arg(m_playbackSessionId)
                     .arg(QFileInfo(out.player->source().toLocalFile()).fileName()));
             applyAudioPolicy(out, carriesAudio);
+            applyPlaybackRate(out.player); // 源帧率到这一刻才拿得到，节流速率在此落地
             const QSize res = out.player->metaData()
                                   .value(QMediaMetaData::Resolution).toSize();
             if (!res.isValid())
@@ -208,12 +209,22 @@ void VideoWallpaper::layoutOutputs()
             if (autoFps != m_autoFps) {
                 m_autoFps = autoFps;
                 resetFramePacing();
+                applyPlaybackRate(out.player); // 自动上限同样参与节流速率
+                // 手动档优先于自动档，手动设过(>0)时自动值压根不参与。这行日志过去是无条件
+                // 打的，事后只看它会以为"本次真的限到了 24" —— 现在把是否生效写进日志。
+                const QString note =
+                    autoFps <= 0 ? QString()
+                                 : (effectiveTargetFps() == autoFps
+                                        ? QString()
+                                        : QStringLiteral("(手动档 %1 优先，未生效)")
+                                              .arg(m_targetFps));
                 applog::log(applog::Level::Info,
-                    QStringLiteral("自动限帧: %1x%2 对屏幕 %3x%4 → 上限=%5")
+                    QStringLiteral("自动限帧: %1x%2 对屏幕 %3x%4 → 上限=%5%6")
                         .arg(res.width()).arg(res.height())
                         .arg(screen.width()).arg(screen.height())
                         .arg(autoFps > 0 ? QString::number(autoFps)
-                                         : QStringLiteral("跟随视频")));
+                                         : QStringLiteral("跟随视频"))
+                        .arg(note));
             }
             if (res == m_lastHintRes)
                 return;
@@ -222,11 +233,19 @@ void VideoWallpaper::layoutOutputs()
                 return;
             // 内存估算来自归因实验阶梯：固定 ~210MB + ~88MB/百万像素(±15%)
             const int est = qRound((210.0 + 88.0 * (double(res.width()) * res.height() / 1e6)) / 10) * 10;
-            emit playbackStateChanged(QStringLiteral(
-                "提示：视频分辨率 %1×%2 高于主屏物理分辨率，播放内存/显存占用较高"
-                "（实测约 %3MB）；已自动把帧率上限设为 %4（保速丢帧，画面速度不变），"
-                "可在左侧「帧率上限」改回跟随视频")
-                .arg(res.width()).arg(res.height()).arg(est).arg(kAutoFpsOversized));
+            // ⚠️ 只有自动档**真的在生效**时才敢说"已自动限到 24"。手动档优先，用户选过
+            // 具体档位时自动值是被覆盖的，此时说"已自动设为 24"是在骗用户(2026-09-26 修)。
+            if (effectiveTargetFps() == kAutoFpsOversized)
+                emit playbackStateChanged(QStringLiteral(
+                    "提示：视频分辨率 %1×%2 高于主屏物理分辨率，播放内存/显存占用较高"
+                    "（实测约 %3MB）；已自动把帧率上限设为 %4，可在左侧「帧率」改回跟随视频")
+                    .arg(res.width()).arg(res.height()).arg(est).arg(kAutoFpsOversized));
+            else
+                emit playbackStateChanged(QStringLiteral(
+                    "提示：视频分辨率 %1×%2 高于主屏物理分辨率，播放内存/显存占用较高"
+                    "（实测约 %3MB）；建议把「帧率」降到 %4 fps（当前手动档 %5 fps 优先）")
+                    .arg(res.width()).arg(res.height()).arg(est)
+                    .arg(kAutoFpsOversized).arg(effectiveTargetFps()));
         });
         // 解码/打开失败 → 有限重试 → 提示并跳过；失败铺满列表即整体停播。只有首个输出参与推进
         connect(out.player, &QMediaPlayer::errorOccurred, this,

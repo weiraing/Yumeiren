@@ -1140,6 +1140,9 @@ void MainWindow::loadSettings()
     }
     m_reclaimBox->setChecked(s.value(ConfigKeys::Video::Reclaim, true).toBool());
     m_affinityBox->setChecked(s.value(ConfigKeys::Video::AffinityLimit, true).toBool());
+    // 解码节流：出厂与读取端默认值都是 true(见 AppConfig 的 kBoolDefaultTrue)
+    m_throttleBox->setChecked(s.value(ConfigKeys::Video::ThrottleDecode, true).toBool());
+    VideoWallpaper::instance().setThrottleDecode(m_throttleBox->isChecked());
     VideoWallpaper::instance().setPauseOnFullscreen(m_fullscreenPauseBox->isChecked());
     VideoWallpaper::instance().setReclaimMemory(m_reclaimBox->isChecked());
     VideoWallpaper::instance().setVolume(m_videoVolume->value());
